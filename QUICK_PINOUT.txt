@@ -1,0 +1,180 @@
+# Quick Reference - Pin Assignment
+
+## ESP32-S3 DevKit Pinout
+
+```
+                         ESP32-S3 DevKit
+                    ┌─────────────────────┐
+                    │                     │
+          GND  ─────┤  1            40  ├───── GPIO 46  (Pad 16)
+          3.3V ─────┤  2            39  ├───── GPIO 45  (Pad 15)
+                    │  3            38  ├───── GPIO 40  (Pad 14)
+          GPIO 2 ───┤  4   PCM5102A 37  ├───── GPIO 39  (Pad 13)
+                    │  5   DIN      36  ├───── GPIO 38  (Pad 12)
+          GPIO 4 ───┤  6   (Pad 1)  35  ├───── GPIO 37  (Pad 11)
+          GPIO 5 ───┤  7   (Pad 2)  34  ├───── GPIO 36  (Pad 10)
+          GPIO 6 ───┤  8   (Pad 3)  33  ├───── GPIO 35  (Pad 9)
+          GPIO 7 ───┤  9   (Pad 4)  32  ├───── 
+          GPIO 8 ───┤ 10   (Pad 5)  31  ├───── GPIO 21  (Pad 8)
+          GPIO 9 ───┤ 11   (Pad 6)  30  ├───── GPIO 20  (Pad 7)
+          GPIO 10 ──┤ 12   ST7789   29  ├───── GPIO 19  (BTN BACK)
+          GPIO 11 ──┤ 13   CS       28  ├───── GPIO 18  (BTN SELECT)
+          GPIO 12 ──┤ 14   DC       27  ├───── GPIO 17  (BTN DOWN)
+          GPIO 13 ──┤ 15   RST      26  ├───── GPIO 16  (BTN UP)
+          GPIO 14 ──┤ 16   MOSI     25  ├───── 
+          GPIO 15 ──┤ 17   SCLK     24  ├───── GPIO 42  (I2S BCK)
+                    │ 18   BL       23  ├───── GPIO 41  (I2S LRCK)
+          GND  ─────┤ 19            22  ├───── 
+          5V   ─────┤ 20            21  ├───── 3.3V
+                    │                     │
+                    └─────────────────────┘
+                           USB-C
+```
+
+## Pin Functions Summary
+
+### Audio (I2S) - PCM5102A
+```
+GPIO 42 → BCK   (Bit Clock)
+GPIO 41 → LRCK  (Word Select)
+GPIO 2  → DIN   (Data)
+```
+
+### Display (SPI) - ST7789
+```
+GPIO 10 → CS    (Chip Select)
+GPIO 11 → DC    (Data/Command)
+GPIO 12 → RST   (Reset)
+GPIO 13 → MOSI  (Data Out)
+GPIO 14 → SCLK  (Clock)
+GPIO 15 → BL    (Backlight)
+```
+
+### Controls
+```
+GPIO 16 → BTN UP     (Kit anterior)
+GPIO 17 → BTN DOWN   (Kit següent)
+GPIO 18 → BTN SELECT (VU Meter)
+GPIO 19 → BTN BACK   (Settings)
+```
+
+### Pads (4x4 Grid)
+```
+Row 1:  GPIO 4,5,6,7     → Pads 1-4
+Row 2:  GPIO 8,9,20,21   → Pads 5-8
+Row 3:  GPIO 35,36,37,38 → Pads 9-12
+Row 4:  GPIO 39,40,45,46 → Pads 13-16
+```
+
+## Connection Diagram (Simplified)
+
+```
+┌─────────────┐
+│  PCM5102A   │
+│   (Audio)   │
+└─────────────┘
+   │ │ │
+   │ │ └─ GPIO 2
+   │ └─── GPIO 41
+   └───── GPIO 42
+   
+┌─────────────┐
+│   ST7789    │
+│  (Display)  │
+└─────────────┘
+   │││││││
+   ││││││└─ GPIO 15 (BL)
+   │││││└── GPIO 14 (SCLK)
+   ││││└─── GPIO 13 (MOSI)
+   │││└──── GPIO 12 (RST)
+   ││└───── GPIO 11 (DC)
+   │└────── GPIO 10 (CS)
+   └─────── 3.3V, GND
+
+┌─────────────┐
+│   Buttons   │
+└─────────────┘
+  ││││
+  │││└── GPIO 19 (BACK)
+  ││└─── GPIO 18 (SELECT)
+  │└──── GPIO 17 (DOWN)
+  └───── GPIO 16 (UP)
+
+┌─────────────┐
+│   16 Pads   │
+│   4x4 Grid  │
+└─────────────┘
+  4,5,6,7       → Row 1
+  8,9,20,21     → Row 2
+  35,36,37,38   → Row 3
+  39,40,45,46   → Row 4
+```
+
+## Power Distribution
+
+```
+USB 5V
+  │
+  ├─→ ESP32-S3 (Internal 3.3V regulator)
+  │     │
+  │     ├─→ 3.3V → PCM5102A VIN
+  │     ├─→ 3.3V → ST7789 VCC
+  │     └─→ GND  → Common Ground
+  │
+  └─→ GND (Common)
+```
+
+## Color Code Suggestion
+
+```
+🔴 Red    → Power (3.3V / 5V)
+⚫ Black  → GND
+🟡 Yellow → I2S (Audio)
+🟢 Green  → SPI (Display)
+🔵 Blue   → Buttons
+⚪ White  → Pads
+```
+
+## Test Points
+
+```
+TP1: 3.3V at PCM5102A → Should read 3.3V
+TP2: 3.3V at ST7789   → Should read 3.3V
+TP3: GPIO 16 (idle)   → Should read 3.3V (pull-up)
+TP4: GPIO 16 (press)  → Should read 0V (LOW)
+TP5: LOUT/ROUT        → Audio signal present
+```
+
+## Quick Troubleshooting
+
+| Symptom | Check | Fix |
+|---------|-------|-----|
+| No display | TP2, GPIO 10-15 | Verify SPI wiring |
+| No audio | TP1, GPIO 2,41,42 | Verify I2S wiring |
+| Buttons stuck | TP3-TP4 | Check pull-up resistors |
+| No WiFi | Antenna | Check antenna connection |
+| Won't boot | Power | Check 3.3V and GND |
+
+## Expansion Pins (Available)
+
+```
+Free GPIOs for future use:
+- GPIO 1, 3
+- GPIO 47, 48
+- Others depending on module
+
+Potential uses:
+- MIDI In/Out
+- Status LEDs
+- Rotary encoders
+- Additional pads
+```
+
+---
+
+**Note**: Esta configuración es para ESP32-S3 DevKit con placa de expansión.
+Verifica siempre el pinout específico de tu módulo.
+
+**Voltaje**: Todo funciona a 3.3V lógico. No conectes 5V a GPIOs.
+
+**Current**: Total ~400mA @ 5V. Cualquier USB puede alimentarlo.

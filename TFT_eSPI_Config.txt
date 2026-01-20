@@ -1,0 +1,68 @@
+// ===================================================================
+// TFT_eSPI User_Setup.h Configuration
+// Per ESP32-S3 Drum Machine amb ST7789 240x240
+// ===================================================================
+// 
+// INSTRUCCIONS:
+// 1. Troba la carpeta de llibreries Arduino:
+//    - Windows: Documents/Arduino/libraries/
+//    - macOS: ~/Documents/Arduino/libraries/
+//    - Linux: ~/Arduino/libraries/
+// 
+// 2. Obre: TFT_eSPI/User_Setup.h
+// 
+// 3. Comenta (#define) totes les opcions existents i
+//    copia aquestes línies al final del fitxer
+// ===================================================================
+
+// Driver selection
+#define ST7789_DRIVER
+#define TFT_RGB_ORDER TFT_RGB  // Colour order Red-Green-Blue
+
+// Display size
+#define TFT_WIDTH  240
+#define TFT_HEIGHT 240
+
+// Pin definitions
+#define TFT_CS    10
+#define TFT_DC    11
+#define TFT_RST   12
+#define TFT_MOSI  13
+#define TFT_SCLK  14
+
+// Backlight control (opcional)
+#define TFT_BL    15
+
+// Fonts
+#define LOAD_GLCD   // Font 1. Original Adafruit 8 pixel font
+#define LOAD_FONT2  // Font 2. Small 16 pixel high font
+#define LOAD_FONT4  // Font 4. Medium 26 pixel high font
+#define LOAD_FONT6  // Font 6. Large 48 pixel font
+#define LOAD_FONT7  // Font 7. 7 segment 48 pixel font
+#define LOAD_FONT8  // Font 8. Large 75 pixel font
+#define LOAD_GFXFF  // FreeFonts
+
+// SPI frequency
+#define SPI_FREQUENCY  40000000  // 40MHz
+#define SPI_READ_FREQUENCY  20000000
+
+// Other options
+#define SMOOTH_FONT
+
+// ===================================================================
+// ALTERNATIVAMENTE, si vols usar platformio:
+// ===================================================================
+// Crea un fitxer "TFT_eSPI_User_Setup.h" al directori del projecte
+// i afegeix al platformio.ini:
+//
+// build_flags = 
+//     -DUSER_SETUP_LOADED=1
+//     -DST7789_DRIVER=1
+//     -DTFT_WIDTH=240
+//     -DTFT_HEIGHT=240
+//     -DTFT_CS=10
+//     -DTFT_DC=11
+//     -DTFT_RST=12
+//     -DTFT_MOSI=13
+//     -DTFT_SCLK=14
+// ===================================================================

@@ -1,0 +1,224 @@
+# Diagrama de Connexions - ESP32-S3 Drum Machine
+
+```
+                    ╔══════════════════════════════════════╗
+                    ║      ESP32-S3 Dev Module             ║
+                    ║      (amb placa d'expansió)          ║
+                    ╚══════════════════════════════════════╝
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        │                     │                     │
+        │                     │                     │
+   [I2S Audio]          [SPI Display]         [GPIO Controls]
+        │                     │                     │
+        ▼                     ▼                     ▼
+  ┌──────────┐          ┌──────────┐          ┌──────────┐
+  │PCM5102A  │          │ ST7789   │          │  Botons  │
+  │   DAC    │          │ 240x240  │          │Navegació │
+  └──────────┘          └──────────┘          └──────────┘
+        │                     │                     │
+        │                     │                     │
+        ▼                     │                     ▼
+  [Amplificador]              │              ┌──────────┐
+        │                     │              │  16 Pads │
+        ▼                     │              │ Triggers │
+   [Altaveus]                 │              └──────────┘
+                              │
+                              ▼
+                        [Visualització]
+```
+
+## Connexions Detallades
+
+### 1. PCM5102A DAC (I2S Audio)
+```
+┌────────────────────────────────────────────┐
+│                                            │
+│  ESP32-S3          →        PCM5102A       │
+│  ─────────                  ────────       │
+│  GPIO 42 (BCK)   ─────────→ BCK            │
+│  GPIO 41 (WS)    ─────────→ LRCK (LCK)     │
+│  GPIO 2  (DATA)  ─────────→ DIN            │
+│  3.3V            ─────────→ VIN            │
+│  GND             ─────────→ GND            │
+│                                            │
+│  Configuració PCM5102A:                    │
+│  - SCK → GND (mode I2S)                    │
+│  - FMT → GND (format I2S)                  │
+│  - XMT → 3.3V (unmute)                     │
+│                                            │
+│  Sortida:                                  │
+│  LOUT/ROUT → Amplificador → Altaveus       │
+│                                            │
+└────────────────────────────────────────────┘
+```
+
+### 2. ST7789 Display 240x240 (SPI)
+```
+┌────────────────────────────────────────────┐
+│                                            │
+│  ESP32-S3          →        ST7789         │
+│  ─────────                  ──────         │
+│  GPIO 10 (CS)    ─────────→ CS             │
+│  GPIO 11 (DC)    ─────────→ DC             │
+│  GPIO 12 (RST)   ─────────→ RST            │
+│  GPIO 13 (MOSI)  ─────────→ SDA (MOSI)     │
+│  GPIO 14 (SCLK)  ─────────→ SCL (SCLK)     │
+│  GPIO 15 (BL)    ─────────→ BL (Backlight) │
+│  3.3V            ─────────→ VCC            │
+│  GND             ─────────→ GND            │
+│                                            │
+└────────────────────────────────────────────┘
+```
+
+### 3. Botons de Navegació
+```
+┌────────────────────────────────────────────┐
+│                                            │
+│  Botó              ESP32-S3                │
+│  ────              ────────                │
+│                                            │
+│    ┌──[BTN UP]──┐                          │
+│  ──┤            ├── GPIO 16                │
+│    └────────────┘                          │
+│         │                                  │
+│        GND                                 │
+│                                            │
+│    ┌──[BTN DOWN]─┐                         │
+│  ──┤             ├── GPIO 17               │
+│    └─────────────┘                         │
+│         │                                  │
+│        GND                                 │
+│                                            │
+│    ┌──[BTN SELECT]┐                        │
+│  ──┤              ├── GPIO 18              │
+│    └──────────────┘                        │
+│         │                                  │
+│        GND                                 │
+│                                            │
+│    ┌──[BTN BACK]─┐                         │
+│  ──┤            ├── GPIO 19                │
+│    └────────────┘                          │
+│         │                                  │
+│        GND                                 │
+│                                            │
+│  Nota: Pull-up intern activat             │
+│        Botó premut = LOW                   │
+│                                            │
+└────────────────────────────────────────────┘
+```
+
+### 4. Pads/Triggers (16 canals)
+```
+┌────────────────────────────────────────────┐
+│                                            │
+│  Grid de Pads 4x4                          │
+│                                            │
+│  ┌────┬────┬────┬────┐                     │
+│  │ 1  │ 2  │ 3  │ 4  │  GPIO 4,5,6,7       │
+│  ├────┼────┼────┼────┤                     │
+│  │ 5  │ 6  │ 7  │ 8  │  GPIO 8,9,20,21     │
+│  ├────┼────┼────┼────┤                     │
+│  │ 9  │ 10 │ 11 │ 12 │  GPIO 35,36,37,38   │
+│  ├────┼────┼────┼────┤                     │
+│  │ 13 │ 14 │ 15 │ 16 │  GPIO 39,40,45,46   │
+│  └────┴────┴────┴────┘                     │
+│                                            │
+│  Opcions de connexió:                      │
+│                                            │
+│  A) Botons simples (Digital):              │
+│     Botó → GPIO                            │
+│     Botó → GND                             │
+│                                            │
+│  B) Piezo amb trigger (Velocity):          │
+│     Piezo+ → Comparador → GPIO             │
+│     Piezo- → GND                           │
+│     Piezo+ → ADC (per velocity)            │
+│                                            │
+│  C) FSR (Force Sensing Resistor):          │
+│     FSR → 10kΩ → 3.3V                      │
+│     FSR ────────→ ADC GPIO                 │
+│           └───→  GND (via resistor)        │
+│                                            │
+└────────────────────────────────────────────┘
+```
+
+## Esquema de Flux de Dades
+
+```
+  User Input                Audio Processing             Output
+  ──────────                ────────────────             ──────
+
+  ┌──────┐                 ┌──────────────┐           ┌─────────┐
+  │ Pads │────────────────→│              │           │         │
+  └──────┘     Trigger     │   PSRAM      │           │  DAC    │
+                           │   Samples    │           │PCM5102A │
+  ┌──────┐                 │              │           │         │
+  │Botons│────────────────→│   Audio      │──────────→│  I2S    │
+  └──────┘    Controls     │   Engine     │   16-bit  │         │
+                           │              │   44.1kHz │         │
+  ┌──────┐                 │   16 Voice   │   Stereo  └─────────┘
+  │ MIDI │────────────────→│   Mixing     │                │
+  └──────┘    (opcional)   │              │                │
+                           └──────────────┘                ▼
+                                  │                   ┌─────────┐
+                                  │                   │Amplifier│
+                                  ▼                   └─────────┘
+                           ┌──────────────┐                │
+                           │  Display     │                ▼
+                           │  Manager     │           ┌─────────┐
+                           │              │           │Speakers │
+                           │  ST7789 SPI  │           └─────────┘
+                           └──────────────┘
+                                  │
+                                  ▼
+                           ┌──────────────┐
+                           │  UI Visual   │
+                           │  Feedback    │
+                           └──────────────┘
+```
+
+## Flux de Memòria
+
+```
+SPIFFS (Flash)           PSRAM                 RAM (SRAM)
+──────────────           ─────                 ──────────
+
+┌─────────────┐          ┌─────────────┐      ┌──────────┐
+│ /samples/   │          │  Sample     │      │ Audio    │
+│             │──Load───→│  Buffers    │      │ Engine   │
+│ kick.wav    │          │  (16 x      │      │ State    │
+│ snare.wav   │          │   512KB)    │      └──────────┘
+│ hihat.wav   │          │             │
+│ ...         │          │ Total: 8MB  │      ┌──────────┐
+└─────────────┘          └─────────────┘      │ Display  │
+                                │              │ Buffer   │
+                                │              └──────────┘
+                                ▼
+                         ┌─────────────┐      ┌──────────┐
+                         │ Active      │      │ Input    │
+                         │ Voices      │      │ State    │
+                         │ (pointers)  │      └──────────┘
+                         └─────────────┘
+                                │
+                                ▼
+                         ┌─────────────┐
+                         │ I2S DMA     │
+                         │ Buffers     │
+                         └─────────────┘
+```
+
+## Notes sobre el Hardware
+
+1. **Alimentació**: Tot el sistema pot funcionar amb 5V via USB
+   - ESP32-S3: 5V USB (regulador intern a 3.3V)
+   - PCM5102A: 3.3V (des de l'ESP32)
+   - ST7789: 3.3V (des de l'ESP32)
+
+2. **Resistències Pull-up**: Els botons usen pull-up intern de l'ESP32
+
+3. **Nivells de Tensió**: Tot és 3.3V, compatible entre si
+
+4. **Interferències**: Separa els cables d'àudio dels de power quan sigui possible
+
+5. **Backlight Display**: Controla la intensitat via PWM (GPIO 15)

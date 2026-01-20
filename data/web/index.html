@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RED808 Drum Machine</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1 class="logo">RED<span>808</span></h1>
+            <div class="status">
+                <span id="statusDot" class="status-dot"></span>
+                <span id="statusText">Conectando...</span>
+            </div>
+        </header>
+
+        <!-- Live Pads Section -->
+        <section class="pads-section">
+            <h2>LIVE PADS</h2>
+            <div class="pads-grid" id="padsGrid">
+                <!-- Los pads se generarán dinámicamente -->
+            </div>
+        </section>
+
+        <!-- Audio Visualizer Section -->
+        <section class="visualizer-section">
+            <div class="visualizer-grid">
+                <div class="visualizer-panel">
+                    <h3>SPECTRUM ANALYZER</h3>
+                    <canvas id="spectrumCanvas" width="600" height="200"></canvas>
+                </div>
+                <div class="visualizer-panel">
+                    <h3>WAVEFORM</h3>
+                    <canvas id="waveformCanvas" width="600" height="200"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- Sequencer Section -->
+        <section class="sequencer-section">
+            <div class="sequencer-header">
+                <h2>SEQUENCER</h2>
+                <div class="sequencer-controls">
+                    <button id="playBtn" class="btn btn-play">▶ PLAY</button>
+                    <button id="stopBtn" class="btn btn-stop">■ STOP</button>
+                    <button id="clearBtn" class="btn btn-clear">✕ CLEAR</button>
+                    <div class="pattern-display">
+                        <span class="pattern-label">PATTERN:</span>
+                        <span id="currentPatternName" class="pattern-name">HIP HOP</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="sequencer-grid" id="sequencerGrid">
+                <!-- 8 tracks x 16 steps -->
+            </div>
+            
+            <div class="step-indicator" id="stepIndicator">
+                <!-- Indicador de step actual -->
+            </div>
+        </section>
+
+        <!-- Controls Section -->
+        <section class="controls-section">
+            <div class="control-group">
+                <label for="tempoSlider">TEMPO: <span id="tempoValue">110</span> BPM</label>
+                <input type="range" id="tempoSlider" min="60" max="200" value="110" class="slider">
+            </div>
+            
+            <div class="control-group">
+                <label for="volumeSlider">VOLUME: <span id="volumeValue">80</span>%</label>
+                <input type="range" id="volumeSlider" min="0" max="100" value="80" class="slider">
+            </div>
+            
+            <div class="control-group">
+                <label>PATTERN:</label>
+                <div class="pattern-buttons">
+                    <button class="btn-pattern active" data-pattern="0">HIP HOP</button>
+                    <button class="btn-pattern" data-pattern="1">TECHNO</button>
+                    <button class="btn-pattern" data-pattern="2">DnB</button>
+                    <button class="btn-pattern" data-pattern="3">BREAK</button>
+                    <button class="btn-pattern" data-pattern="4">HOUSE</button>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <label>KIT:</label>
+                <div class="kit-buttons">
+                    <button class="btn-kit active" data-kit="0">CLASSIC</button>
+                    <button class="btn-kit" data-kit="1">HEAVY</button>
+                    <button class="btn-kit" data-kit="2">SOFT</button>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <button id="colorToggle" class="btn-color-toggle">🎨 COLOR MODE</button>
+            </div>
+        </section>
+
+        <!-- FX Section -->
+        <section class="fx-section">
+            <h2>SOUND FX</h2>
+            <div class="fx-grid">
+                <div class="fx-control">
+                    <label for="filterType">FILTER TYPE</label>
+                    <select id="filterType" class="fx-select">
+                        <option value="0">NONE</option>
+                        <option value="1">LOW PASS</option>
+                        <option value="2">HIGH PASS</option>
+                        <option value="3">BAND PASS</option>
+                        <option value="4">NOTCH</option>
+                    </select>
+                </div>
+                
+                <div class="fx-control">
+                    <label for="filterCutoff">CUTOFF: <span id="filterCutoffValue">8000</span> Hz</label>
+                    <input type="range" id="filterCutoff" min="100" max="16000" value="8000" class="slider">
+                </div>
+                
+                <div class="fx-control">
+                    <label for="filterResonance">RESONANCE: <span id="filterResonanceValue">1.0</span></label>
+                    <input type="range" id="filterResonance" min="0.5" max="20" step="0.1" value="1.0" class="slider">
+                </div>
+                
+                <div class="fx-control">
+                    <label for="bitCrush">BIT CRUSH: <span id="bitCrushValue">16</span> bits</label>
+                    <input type="range" id="bitCrush" min="4" max="16" value="16" class="slider">
+                </div>
+                
+                <div class="fx-control">
+                    <label for="distortion">DISTORTION: <span id="distortionValue">0</span></label>
+                    <input type="range" id="distortion" min="0" max="100" value="0" class="slider">
+                </div>
+                
+                <div class="fx-control">
+                    <label for="sampleRate">SAMPLE RATE: <span id="sampleRateValue">44100</span> Hz</label>
+                    <input type="range" id="sampleRate" min="8000" max="44100" step="1000" value="44100" class="slider">
+                </div>
+            </div>
+        </section>
+
+        <!-- Keyboard Shortcuts Legend -->
+        <section class="keyboard-legend">
+            <div class="legend-title">⌨️ KEYBOARD SHORTCUTS</div>
+            <div class="legend-grid">
+                <div class="legend-item">
+                    <span class="legend-key">1-8</span>
+                    <span class="legend-desc">Trigger Pads (Tremolo)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-key">SPACE</span>
+                    <span class="legend-desc">Play / Pause</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-key">Q / A</span>
+                    <span class="legend-desc">BPM +5 / -5</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-key">W / S</span>
+                    <span class="legend-desc">Volume +5 / -5</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>RED808 | ESP32-S3</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
