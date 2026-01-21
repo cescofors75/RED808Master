@@ -35,6 +35,22 @@ static const char* detectSampleFormat(const char* filename) {
   return "";
 }
 
+static bool readWavInfo(File& file, uint32_t& rate, uint16_t& channels, uint16_t& bits) {
+  if (!file) return false;
+  file.seek(0, SeekSet);
+  uint8_t header[44];
+  if (file.read(header, sizeof(header)) != sizeof(header)) {
+    return false;
+  }
+  if (memcmp(header, "RIFF", 4) != 0 || memcmp(header + 8, "WAVE", 4) != 0) {
+    return false;
+  }
+  channels = header[22] | (header[23] << 8);
+  rate = header[24] | (header[25] << 8) | (header[26] << 16) | (header[27] << 24);
+  bits = header[34] | (header[35] << 8);
+  return true;
+}
+
 static void populateStateDocument(StaticJsonDocument<4096>& doc) {
   doc["type"] = "state";
   doc["playing"] = sequencer.isPlaying();
@@ -342,6 +358,26 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
                     JsonObject sampleObj = samples.createNestedObject();
                     sampleObj["name"] = filename;
                     sampleObj["size"] = file.size();
+                    const char* format = detectSampleFormat(filename.c_str());
+                    sampleObj["format"] = format;
+                    uint32_t rate = 0;
+                    uint16_t channels = 0;
+                    uint16_t bits = 0;
+                    if (format && String(format) == "wav") {
+                      if (readWavInfo(file, rate, channels, bits)) {
+                        sampleObj["rate"] = rate;
+                        sampleObj["channels"] = channels;
+                        sampleObj["bits"] = bits;
+                      } else {
+                        sampleObj["rate"] = 0;
+                        sampleObj["channels"] = 0;
+                        sampleObj["bits"] = 0;
+                      }
+                    } else {
+                      sampleObj["rate"] = 44100;
+                      sampleObj["channels"] = 1;
+                      sampleObj["bits"] = 16;
+                    }
                     count++;
                     Serial.printf("  [%d] %s (%d KB)\n", count, filename.c_str(), file.size() / 1024);
                   }

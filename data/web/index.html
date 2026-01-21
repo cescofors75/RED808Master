@@ -215,6 +215,18 @@
                     <span class="legend-key">A / S</span>
                     <span class="legend-desc">Sequencer Volume +5 / -5</span>
                 </div>
+                <div class="legend-item">
+                    <span class="legend-key">SHIFT + PAD</span>
+                    <span class="legend-desc">Mute / Unmute Track</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-key">N / B</span>
+                    <span class="legend-desc">Pattern Next / Previous</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-key">C</span>
+                    <span class="legend-desc">Mono / Multicolor</span>
+                </div>
             </div>
         </section>
 
@@ -261,7 +273,12 @@
         <!-- Instruments Info Section -->
         <section id="section-instruments" class="device-info" data-section="instruments" data-title="Instrument Map">
             <div class="info-title">🥁 INSTRUMENT MAP (16 TRACKS)</div>
-            <div class="instrument-grid">
+            <div class="instrument-tabs">
+                <button class="instrument-tab active" data-tab="active">ACTIVOS</button>
+                <button class="instrument-tab" data-tab="all">TODOS</button>
+            </div>
+            <div class="instrument-panel active" data-panel="active">
+                <div class="instrument-grid">
                 <div class="instrument-card" data-family="BD">
                     <div class="inst-main">
                         <span class="inst-code">BD</span>
@@ -469,6 +486,27 @@
                         <span class="inst-current" id="instCurrent-LC">Current: —</span>
                         <span class="inst-quality" id="instQuality-LC">Format: —</span>
                     </div>
+                </div>
+                </div>
+            </div>
+            <div class="instrument-panel" data-panel="all">
+                <div class="sample-browser">
+                    <div class="browser-header">
+                        <div class="browser-title">📚 TODOS LOS SAMPLES</div>
+                        <div class="sample-filters" id="sampleFilters"></div>
+                    </div>
+                    <div class="sample-filter-row">
+                        <label class="sample-filter-label">ACTIVOS</label>
+                        <label class="sample-toggle">
+                            <input type="checkbox" id="sampleFilterActive">
+                            <span class="sample-toggle-slider"></span>
+                        </label>
+                        <select id="sampleFilterFamily" class="sample-select"></select>
+                        <select id="sampleFilterFormat" class="sample-select"></select>
+                        <select id="sampleFilterRate" class="sample-select"></select>
+                        <select id="sampleFilterChannels" class="sample-select"></select>
+                    </div>
+                    <div class="sample-browser-list" id="sampleBrowserList"></div>
                 </div>
             </div>
         </section>

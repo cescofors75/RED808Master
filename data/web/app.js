@@ -9,10 +9,19 @@ let isRecording = false;
 let recordedSteps = [];
 let recordStartTime = 0;
 
+// Sequencer caches
+let stepDots = [];
+let stepColumns = Array.from({ length: 16 }, () => []);
+let lastCurrentStep = null;
+
 // Visualizer data
 let spectrumData = new Array(64).fill(0);
 let waveformData = new Array(128).fill(0);
 let isVisualizerActive = true;
+let visualizerNeedsRedraw = true;
+let lastVisualizerFrameTime = 0;
+const VISUALIZER_MAX_FPS = 30;
+const VISUALIZER_IDLE_FPS = 8;
 
 // Sample counts per family
 let sampleCounts = {};
@@ -69,6 +78,13 @@ const instrumentPalette = [
 
 const padSampleMetadata = new Array(16).fill(null);
 const DEFAULT_SAMPLE_QUALITY = '44.1kHz • 16-bit mono';
+const sampleCatalog = {};
+let sampleSelectorContext = null;
+let pendingAutoPlayPad = null;
+let activeSampleFilter = 'ALL';
+let sampleBrowserRenderTimer = null;
+let sampleRequestTimers = [];
+let sampleRetryTimer = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -79,6 +95,8 @@ document.addEventListener('DOMContentLoaded', () => {
     initHeaderMeters();
     initVisualizers();
     setupKeyboardControls();
+    initSampleBrowser();
+    initInstrumentTabs();
     initSectionManager();
 });
 
@@ -92,6 +110,7 @@ function initWebSocket() {
         isConnected = true;
         updateStatus(true);
         syncLedMonoMode();
+        setTimeout(requestAllSamples, 200);
     };
     
     ws.onclose = () => {
@@ -124,10 +143,7 @@ function handleWebSocketMessage(data) {
             // Audio visualization data
             if (data.spectrum) {
                 spectrumData = data.spectrum;
-                // Debug: mostrar primer y último valor
-                if (spectrumData.length > 0) {
-                    console.log(`Spectrum received: length=${spectrumData.length}, first=${spectrumData[0]}, last=${spectrumData[spectrumData.length-1]}, max=${Math.max(...spectrumData)}`);
-                }
+                visualizerNeedsRedraw = true;
             }
             break;
         case 'state':
@@ -404,6 +420,19 @@ function handleSampleCountsMessage(payload) {
     updateSampleButtons();
     updateInstrumentCounts(totalFiles);
     console.log('Sample counts received:', sanitizedCounts);
+    scheduleSampleBrowserRender();
+
+    if (sampleRetryTimer) {
+        clearTimeout(sampleRetryTimer);
+    }
+    if (totalFiles > 0) {
+        sampleRetryTimer = setTimeout(() => {
+            const hasCatalog = padNames.some((family) => (sampleCatalog[family] || []).length > 0);
+            if (!hasCatalog) {
+                requestAllSamples();
+            }
+        }, 1500);
+    }
 }
 
 function updateInstrumentCounts(totalFiles) {
@@ -433,6 +462,7 @@ function refreshPadSampleInfo(padIndex) {
         infoEl.title = `${meta.filename} - ${meta.sizeKB} KB - ${meta.format}`;
     }
     updateInstrumentMetadata(padIndex);
+    scheduleSampleBrowserRender();
 }
 
 function applySampleMetadataFromState(sampleList) {
@@ -455,6 +485,7 @@ function applySampleMetadataFromState(sampleList) {
         }
         refreshPadSampleInfo(padIndex);
     });
+    scheduleSampleBrowserRender();
 }
 
 function inferFormatFromName(name) {
@@ -479,6 +510,17 @@ function updateInstrumentMetadata(padIndex) {
     }
     currentEl.textContent = `Current: ${meta.filename} (${meta.sizeKB} KB)`;
     qualityEl.textContent = `Format: ${meta.format} • ${meta.quality}`;
+}
+
+function getLoadedSampleLookup() {
+    const lookup = {};
+    padNames.forEach((family, index) => {
+        const meta = padSampleMetadata[index];
+        if (meta && meta.filename) {
+            lookup[family] = meta.filename;
+        }
+    });
+    return lookup;
 }
 
 function updateDeviceStats(data) {
@@ -616,6 +658,10 @@ function createSequencer() {
     const indicator = document.getElementById('stepIndicator');
     const trackNames = ['BD', 'SD', 'CH', 'OH', 'CP', 'CB', 'RS', 'CL', 'MA', 'CY', 'HT', 'LT', 'MC', 'MT', 'HC', 'LC'];
     const trackColors = ['#ff6b6b', '#f7b731', '#26de81', '#45aaf2', '#a55eea', '#fd9644', '#2bcbba', '#778ca3', '#fed330', '#0fb9b1', '#fc5c65', '#4b7bec', '#f368e0', '#20bf6b', '#a5b1c2', '#e84393'];
+
+    stepDots = [];
+    stepColumns = Array.from({ length: 16 }, () => []);
+    lastCurrentStep = null;
     
     // 16 tracks x 16 steps (con labels)
     for (let track = 0; track < 16; track++) {
@@ -626,7 +672,8 @@ function createSequencer() {
         
         const muteBtn = document.createElement('button');
         muteBtn.className = 'mute-btn';
-        muteBtn.textContent = '🔇';
+        muteBtn.setAttribute('aria-label', 'Mute');
+        muteBtn.title = 'Mute';
         muteBtn.dataset.track = track;
         muteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -657,6 +704,8 @@ function createSequencer() {
             stepEl.addEventListener('click', () => {
                 toggleStep(track, step, stepEl);
             });
+
+            stepColumns[step].push(stepEl);
             
             grid.appendChild(stepEl);
         }
@@ -668,6 +717,7 @@ function createSequencer() {
         dot.className = 'step-dot';
         dot.dataset.step = i;
         indicator.appendChild(dot);
+        stepDots.push(dot);
     }
 }
 
@@ -683,18 +733,36 @@ function toggleStep(track, step, element) {
 }
 
 function updateCurrentStep(step) {
+    if (!stepDots.length) {
+        stepDots = Array.from(document.querySelectorAll('.step-dot'));
+    }
+    if (!stepColumns.length || !stepColumns[0] || stepColumns[0].length === 0) {
+        stepColumns = Array.from({ length: 16 }, () => []);
+        document.querySelectorAll('.seq-step').forEach(el => {
+            const elStep = parseInt(el.dataset.step, 10);
+            if (!Number.isNaN(elStep) && elStep >= 0 && elStep < stepColumns.length) {
+                stepColumns[elStep].push(el);
+            }
+        });
+    }
+
     currentStep = step;
-    
-    // Update indicator
-    document.querySelectorAll('.step-dot').forEach((dot, i) => {
-        dot.classList.toggle('current', i === step);
-    });
-    
-    // Highlight current column
-    document.querySelectorAll('.seq-step').forEach(el => {
-        const elStep = parseInt(el.dataset.step);
-        el.classList.toggle('current', elStep === step);
-    });
+
+    if (step === lastCurrentStep) return;
+
+    if (lastCurrentStep !== null) {
+        const prevDot = stepDots[lastCurrentStep];
+        if (prevDot) prevDot.classList.remove('current');
+        const prevColumn = stepColumns[lastCurrentStep] || [];
+        prevColumn.forEach(el => el.classList.remove('current'));
+    }
+
+    const nextDot = stepDots[step];
+    if (nextDot) nextDot.classList.add('current');
+    const nextColumn = stepColumns[step] || [];
+    nextColumn.forEach(el => el.classList.add('current'));
+
+    lastCurrentStep = step;
 }
 
 // Controls
@@ -820,6 +888,7 @@ function setupControls() {
         } else {
             colorToggle.textContent = '🎨 COLOR MODE';
         }
+        visualizerNeedsRedraw = true;
         syncLedMonoMode();
     });
     
@@ -1013,34 +1082,48 @@ function updateSequencerState(data) {
     const tempoSlider = document.getElementById('tempoSlider');
     const tempoValue = document.getElementById('tempoValue');
     if (data.tempo !== undefined && tempoSlider && tempoValue) {
-        tempoSlider.value = data.tempo;
-        tempoValue.textContent = data.tempo;
-        updateBpmMeter(parseFloat(data.tempo));
+        const tempoString = String(data.tempo);
+        if (tempoSlider.value !== tempoString || tempoValue.textContent !== tempoString) {
+            tempoSlider.value = tempoString;
+            tempoValue.textContent = tempoString;
+            updateBpmMeter(parseFloat(data.tempo));
+        }
     }
     if (data.sequencerVolume !== undefined) {
         const sequencerVolumeSlider = document.getElementById('sequencerVolumeSlider');
         const sequencerVolumeValue = document.getElementById('sequencerVolumeValue');
         if (sequencerVolumeSlider && sequencerVolumeValue) {
-            sequencerVolumeSlider.value = data.sequencerVolume;
-            sequencerVolumeValue.textContent = data.sequencerVolume;
-            updateSequencerVolumeMeter(parseInt(data.sequencerVolume, 10));
+            const seqVolumeString = String(data.sequencerVolume);
+            if (sequencerVolumeSlider.value !== seqVolumeString || sequencerVolumeValue.textContent !== seqVolumeString) {
+                sequencerVolumeSlider.value = seqVolumeString;
+                sequencerVolumeValue.textContent = seqVolumeString;
+                updateSequencerVolumeMeter(parseInt(data.sequencerVolume, 10));
+            }
         }
     }
     if (data.liveVolume !== undefined) {
         const liveVolumeSlider = document.getElementById('liveVolumeSlider');
         const liveVolumeValue = document.getElementById('liveVolumeValue');
         if (liveVolumeSlider && liveVolumeValue) {
-            liveVolumeSlider.value = data.liveVolume;
-            liveVolumeValue.textContent = data.liveVolume;
-            updateLiveVolumeMeter(parseInt(data.liveVolume, 10));
+            const liveVolumeString = String(data.liveVolume);
+            if (liveVolumeSlider.value !== liveVolumeString || liveVolumeValue.textContent !== liveVolumeString) {
+                liveVolumeSlider.value = liveVolumeString;
+                liveVolumeValue.textContent = liveVolumeString;
+                updateLiveVolumeMeter(parseInt(data.liveVolume, 10));
+            }
         }
     }
+    const loopTracksToUpdate = new Set();
     if (Array.isArray(data.loopActive)) {
         data.loopActive.forEach((active, track) => {
             if (!padLoopState[track]) {
                 padLoopState[track] = { active: false, paused: false };
             }
-            padLoopState[track].active = !!active;
+            const nextValue = !!active;
+            if (padLoopState[track].active !== nextValue) {
+                padLoopState[track].active = nextValue;
+                loopTracksToUpdate.add(track);
+            }
         });
     }
     if (Array.isArray(data.loopPaused)) {
@@ -1048,18 +1131,25 @@ function updateSequencerState(data) {
             if (!padLoopState[track]) {
                 padLoopState[track] = { active: false, paused: false };
             }
-            padLoopState[track].paused = !!paused;
+            const nextValue = !!paused;
+            if (padLoopState[track].paused !== nextValue) {
+                padLoopState[track].paused = nextValue;
+                loopTracksToUpdate.add(track);
+            }
         });
     }
-    if (Array.isArray(data.loopActive) || Array.isArray(data.loopPaused)) {
-        for (let track = 0; track < padNames.length; track++) {
-            updatePadLoopVisual(track);
-        }
-    }
+    loopTracksToUpdate.forEach((track) => updatePadLoopVisual(track));
     if (Array.isArray(data.trackMuted)) {
         data.trackMuted.forEach((muted, track) => {
-            setTrackMuted(track, !!muted, false);
+            const nextMuted = !!muted;
+            if (trackMutedState[track] !== nextMuted) {
+                setTrackMuted(track, nextMuted, false);
+            }
         });
+    }
+
+    if (data.step !== undefined) {
+        updateCurrentStep(data.step);
     }
     
     // Update playing state
@@ -1112,6 +1202,7 @@ function initVisualizers() {
     spectrumCanvas.height = 200;
     
     console.log('Visualizers initialized successfully');
+    visualizerNeedsRedraw = true;
     
     function drawSpectrum() {
         const width = spectrumCanvas.width;
@@ -1196,14 +1287,25 @@ function initVisualizers() {
     }
     
     // Animation loop
-    function animate() {
-        if (isVisualizerActive) {
+    function animate(timestamp) {
+        const now = timestamp || performance.now();
+        const targetFps = visualizerNeedsRedraw ? VISUALIZER_MAX_FPS : VISUALIZER_IDLE_FPS;
+        const minFrameTime = 1000 / targetFps;
+
+        if (isVisualizerActive && (now - lastVisualizerFrameTime) >= minFrameTime) {
+            lastVisualizerFrameTime = now;
             drawSpectrum();
+            visualizerNeedsRedraw = false;
         }
         requestAnimationFrame(animate);
     }
     
     animate();
+    setInterval(() => {
+        if (isVisualizerActive) {
+            visualizerNeedsRedraw = true;
+        }
+    }, 1000);
     console.log('✓ Audio visualizers initialized');
 }
 
@@ -1217,17 +1319,44 @@ function setupKeyboardControls() {
         mapping[key.toUpperCase()] = idx;
         return mapping;
     }, {});
+
+    const codeToPad = {
+        Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4,
+        Digit6: 5, Digit7: 6, Digit8: 7, Digit9: 8, Digit0: 9,
+        KeyQ: 10, KeyW: 11, KeyE: 12, KeyR: 13, KeyT: 14, KeyY: 15
+    };
+
+    const getPadIndexFromEvent = (e) => {
+        const key = e.key.toUpperCase();
+        if (keyToPad.hasOwnProperty(key)) {
+            return keyToPad[key];
+        }
+        if (codeToPad.hasOwnProperty(e.code)) {
+            return codeToPad[e.code];
+        }
+        return null;
+    };
     
     document.addEventListener('keydown', (e) => {
         // Evitar repetición si ya está presionada
         if (e.repeat) return;
         
         const key = e.key.toUpperCase();
+
+        // Shift + tecla de pad: Mute/unmute track
+        if (e.shiftKey) {
+            const padIndex = getPadIndexFromEvent(e);
+            if (padIndex !== null) {
+                e.preventDefault();
+                setTrackMuted(padIndex, !trackMutedState[padIndex], true);
+                return;
+            }
+        }
         
         // Pads 1-9, 0, Q-Y con tremolo
-        if (keyToPad.hasOwnProperty(key)) {
+        const padIndex = getPadIndexFromEvent(e);
+        if (padIndex !== null) {
             e.preventDefault();
-            const padIndex = keyToPad[key];
             
             if (!keyboardPadsActive[padIndex]) {
                 keyboardPadsActive[padIndex] = true;
@@ -1254,6 +1383,27 @@ function setupKeyboardControls() {
         else if (key === ']') {
             e.preventDefault();
             adjustBPM(5);
+        }
+
+        // N: Pattern siguiente
+        else if (key === 'N') {
+            e.preventDefault();
+            changePattern(1);
+        }
+
+        // B: Pattern anterior
+        else if (key === 'B') {
+            e.preventDefault();
+            changePattern(-1);
+        }
+
+        // C: Cambiar modo de color (mono/multicolor)
+        else if (key === 'C') {
+            e.preventDefault();
+            const colorToggle = document.getElementById('colorToggle');
+            if (colorToggle) {
+                colorToggle.click();
+            }
         }
         
         // A: Bajar volumen del sequencer
@@ -1285,9 +1435,9 @@ function setupKeyboardControls() {
         const key = e.key.toUpperCase();
         
         // Soltar pads
-        if (keyToPad.hasOwnProperty(key)) {
+        const padIndex = getPadIndexFromEvent(e);
+        if (padIndex !== null) {
             e.preventDefault();
-            const padIndex = keyToPad[key];
             
             if (keyboardPadsActive[padIndex]) {
                 keyboardPadsActive[padIndex] = false;
@@ -1302,6 +1452,16 @@ function setupKeyboardControls() {
     console.log('✓ Keyboard controls initialized (16 pads)');
     console.log('  Keys: 1-9,0,Q-Y=Pads, SPACE=Play/Pause, [/]=BPM, -/+=Volume');
 }
+
+function changePattern(delta) {
+    const patternButtons = Array.from(document.querySelectorAll('.btn-pattern'));
+    if (patternButtons.length === 0) return;
+    const currentIndex = patternButtons.findIndex(btn => btn.classList.contains('active'));
+    const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+    const nextIndex = (safeIndex + delta + patternButtons.length) % patternButtons.length;
+    patternButtons[nextIndex].click();
+}
+
 
 function togglePlayPause() {
     if (isPlaying) {
@@ -1647,6 +1807,7 @@ function getDragAfterElement(container, y) {
 
 // Sample Selector Functions
 function showSampleSelector(padIndex, family) {
+    sampleSelectorContext = { padIndex, family };
     // Solicitar lista de samples
     sendWebSocket({
         cmd: 'getSamples',
@@ -1661,7 +1822,25 @@ function displaySampleList(data) {
     const samples = data.samples;
     
     if (!samples || samples.length === 0) {
-        alert(`No samples found for ${family}`);
+        if (sampleSelectorContext && sampleSelectorContext.family === family) {
+            alert(`No samples found for ${family}`);
+        }
+        return;
+    }
+
+    // Update catalog for browser
+    sampleCatalog[family] = samples.map(sample => ({
+        family,
+        name: sample.name,
+        size: sample.size,
+        format: sample.format ? sample.format.toUpperCase() : inferFormatFromName(sample.name),
+        rate: sample.rate || 0,
+        channels: sample.channels || 1,
+        bits: sample.bits || 16
+    }));
+    scheduleSampleBrowserRender();
+
+    if (!sampleSelectorContext || sampleSelectorContext.family !== family || sampleSelectorContext.padIndex !== padIndex) {
         return;
     }
     
@@ -1689,18 +1868,266 @@ function displaySampleList(data) {
         sampleItem.addEventListener('click', () => {
             loadSampleToPad(padIndex, family, sample.name);
             document.body.removeChild(modal);
+            sampleSelectorContext = null;
         });
         sampleList.appendChild(sampleItem);
     });
     
     modal.querySelector('.btn-close-modal').addEventListener('click', () => {
         document.body.removeChild(modal);
+        sampleSelectorContext = null;
     });
     
     document.body.appendChild(modal);
 }
 
-function loadSampleToPad(padIndex, family, filename) {
+function initSampleBrowser() {
+    const filters = document.getElementById('sampleFilters');
+    const list = document.getElementById('sampleBrowserList');
+    if (!filters || !list) return;
+
+    const allButton = document.createElement('button');
+    allButton.className = 'sample-filter active';
+    allButton.textContent = 'TODOS';
+    allButton.dataset.family = 'ALL';
+    filters.appendChild(allButton);
+
+    const refreshButton = document.createElement('button');
+    refreshButton.className = 'sample-refresh';
+    refreshButton.textContent = '↻';
+    refreshButton.title = 'Actualizar lista';
+    refreshButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        requestAllSamples();
+    });
+    filters.appendChild(refreshButton);
+
+    padNames.forEach((family) => {
+        const btn = document.createElement('button');
+        btn.className = 'sample-filter';
+        btn.textContent = family;
+        btn.dataset.family = family;
+        filters.appendChild(btn);
+    });
+
+    filters.addEventListener('click', (e) => {
+        const button = e.target.closest('.sample-filter');
+        if (!button) return;
+        setSampleFilter(button.dataset.family);
+    });
+
+    setupSampleFilterControls();
+}
+
+function initInstrumentTabs() {
+    const tabs = document.querySelectorAll('.instrument-tab');
+    const panels = document.querySelectorAll('.instrument-panel');
+    if (!tabs.length || !panels.length) return;
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const target = tab.dataset.tab;
+            tabs.forEach(t => t.classList.toggle('active', t === tab));
+            panels.forEach(panel => {
+                panel.classList.toggle('active', panel.dataset.panel === target);
+            });
+            if (target === 'all') {
+                const hasCatalog = padNames.some((family) => (sampleCatalog[family] || []).length > 0);
+                if (!hasCatalog) {
+                    requestAllSamples();
+                }
+                scheduleSampleBrowserRender();
+            }
+        });
+    });
+}
+
+function setupSampleFilterControls() {
+    const familySelect = document.getElementById('sampleFilterFamily');
+    const formatSelect = document.getElementById('sampleFilterFormat');
+    const rateSelect = document.getElementById('sampleFilterRate');
+    const channelSelect = document.getElementById('sampleFilterChannels');
+    const activeToggle = document.getElementById('sampleFilterActive');
+
+    if (!familySelect || !formatSelect || !rateSelect || !channelSelect || !activeToggle) return;
+
+    familySelect.innerHTML = '';
+    const allOption = document.createElement('option');
+    allOption.value = 'ALL';
+    allOption.textContent = 'FAMILIA';
+    familySelect.appendChild(allOption);
+    padNames.forEach((family) => {
+        const opt = document.createElement('option');
+        opt.value = family;
+        opt.textContent = family;
+        familySelect.appendChild(opt);
+    });
+
+    formatSelect.innerHTML = `
+        <option value="ALL">FORMATO</option>
+        <option value="WAV">WAV</option>
+        <option value="RAW">RAW</option>
+    `;
+
+    rateSelect.innerHTML = `
+        <option value="ALL">KHZ</option>
+        <option value="8000">8k</option>
+        <option value="11025">11k</option>
+        <option value="22050">22k</option>
+        <option value="44100">44k</option>
+    `;
+
+    channelSelect.innerHTML = `
+        <option value="ALL">CANAL</option>
+        <option value="1">MONO</option>
+        <option value="2">STEREO</option>
+    `;
+
+    const onFilterChange = () => scheduleSampleBrowserRender();
+    familySelect.addEventListener('change', onFilterChange);
+    formatSelect.addEventListener('change', onFilterChange);
+    rateSelect.addEventListener('change', onFilterChange);
+    channelSelect.addEventListener('change', onFilterChange);
+    activeToggle.addEventListener('change', onFilterChange);
+}
+
+function setSampleFilter(family) {
+    activeSampleFilter = family || 'ALL';
+    document.querySelectorAll('.sample-filter').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.family === activeSampleFilter);
+    });
+    scheduleSampleBrowserRender();
+}
+
+function requestAllSamples() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        return;
+    }
+    if (sampleRequestTimers.length) {
+        sampleRequestTimers.forEach(timerId => clearTimeout(timerId));
+        sampleRequestTimers = [];
+    }
+    const delayStep = 80;
+    padNames.forEach((family, padIndex) => {
+        const timerId = setTimeout(() => {
+            sendWebSocket({
+                cmd: 'getSamples',
+                family,
+                pad: padIndex
+            });
+        }, padIndex * delayStep);
+        sampleRequestTimers.push(timerId);
+    });
+}
+
+function scheduleSampleBrowserRender() {
+    if (sampleBrowserRenderTimer) {
+        clearTimeout(sampleBrowserRenderTimer);
+    }
+    sampleBrowserRenderTimer = setTimeout(() => {
+        sampleBrowserRenderTimer = null;
+        renderSampleBrowserList(activeSampleFilter);
+    }, 120);
+}
+
+function renderSampleBrowserList(family) {
+    const list = document.getElementById('sampleBrowserList');
+    if (!list) return;
+    const families = family === 'ALL' ? padNames : [family];
+    const familyFilter = document.getElementById('sampleFilterFamily')?.value || 'ALL';
+    const formatFilter = document.getElementById('sampleFilterFormat')?.value || 'ALL';
+    const rateFilter = document.getElementById('sampleFilterRate')?.value || 'ALL';
+    const channelFilter = document.getElementById('sampleFilterChannels')?.value || 'ALL';
+    const activeOnly = document.getElementById('sampleFilterActive')?.checked || false;
+    const activeLookup = getLoadedSampleLookup();
+    const rows = [];
+
+    families.forEach((fam) => {
+        const samples = sampleCatalog[fam] || [];
+        samples.forEach(sample => rows.push(sample));
+    });
+
+    list.innerHTML = '';
+
+    if (rows.length === 0) {
+        list.innerHTML = '<div class="sample-empty">Sin samples para este filtro.</div>';
+        return;
+    }
+
+    rows.sort((a, b) => a.family.localeCompare(b.family) || a.name.localeCompare(b.name));
+
+    const filteredRows = rows.filter(sample => {
+        if (familyFilter !== 'ALL' && sample.family !== familyFilter) return false;
+        if (formatFilter !== 'ALL' && sample.format !== formatFilter) return false;
+        if (rateFilter !== 'ALL' && String(sample.rate || '') !== rateFilter) return false;
+        if (channelFilter !== 'ALL' && String(sample.channels || '') !== channelFilter) return false;
+        if (activeOnly) {
+            const activeName = activeLookup[sample.family];
+            if (!activeName || activeName !== sample.name) return false;
+        }
+        return true;
+    });
+
+    if (filteredRows.length === 0) {
+        list.innerHTML = '<div class="sample-empty">Sin samples para este filtro.</div>';
+        return;
+    }
+
+    filteredRows.forEach(sample => {
+        const row = document.createElement('div');
+        row.className = 'sample-row instrument-card';
+        const isActive = activeLookup[sample.family] === sample.name;
+        if (isActive) {
+            row.classList.add('active');
+        }
+        const sizeKB = (sample.size / 1024).toFixed(1);
+        const format = sample.format || inferFormatFromName(sample.name);
+        const rate = sample.rate ? `${Math.round(sample.rate / 1000)}kHz` : '—';
+        const channels = sample.channels === 2 ? 'Stereo' : 'Mono';
+        row.innerHTML = `
+            <div class="inst-main">
+                <span class="inst-code">${sample.family}</span>
+                <div>
+                    <div class="inst-name">${sample.name}</div>
+                    <div class="inst-count">${sample.family} • ${sizeKB} KB</div>
+                </div>
+            </div>
+            <div class="inst-meta">
+                <span class="inst-current">Format: ${format} • ${rate} • ${channels}</span>
+                <span class="inst-quality">${isActive ? 'ACTIVO' : 'DISPONIBLE'}</span>
+            </div>
+            ${isActive ? '<span class="sample-row-badge">ACTIVE</span>' : ''}
+            <button class="sample-row-play" title="Reproducir">▶</button>
+        `;
+
+        row.querySelector('.sample-row-play').addEventListener('click', (e) => {
+            e.stopPropagation();
+            auditionSample(sample.family, sample.name);
+        });
+
+        row.addEventListener('click', () => {
+            auditionSample(sample.family, sample.name);
+        });
+
+        list.appendChild(row);
+    });
+}
+
+function auditionSample(family, filename) {
+    const padIndex = padNames.indexOf(family);
+    if (padIndex === -1) return;
+    loadSampleToPad(padIndex, family, filename, true);
+}
+
+function loadSampleToPad(padIndex, family, filename, autoPlay = false) {
+    if (autoPlay) {
+        pendingAutoPlayPad = padIndex;
+        setTimeout(() => {
+            if (pendingAutoPlayPad === padIndex) {
+                triggerPad(padIndex);
+            }
+        }, 350);
+    }
     sendWebSocket({
         cmd: 'loadSample',
         family: family,
@@ -1725,6 +2152,11 @@ function updatePadInfo(data) {
     };
     refreshPadSampleInfo(padIndex);
     showNotification(`Pad ${padIndex + 1}: ${filename} loaded`);
+
+    if (pendingAutoPlayPad === padIndex) {
+        pendingAutoPlayPad = null;
+        setTimeout(() => triggerPad(padIndex), 80);
+    }
 }
 
 
