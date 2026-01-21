@@ -14,6 +14,9 @@ let spectrumData = new Array(64).fill(0);
 let waveformData = new Array(128).fill(0);
 let isVisualizerActive = true;
 
+// Sample counts per family
+let sampleCounts = {};
+
 // Keyboard state
 let keyboardPadsActive = {};
 let keyboardHoldTimers = {};
@@ -43,6 +46,9 @@ const padDescriptions = [
     'Hi Conga',
     'Low Conga'
 ];
+
+const padSampleMetadata = new Array(16).fill(null);
+const DEFAULT_SAMPLE_QUALITY = '44.1kHz • 16-bit mono';
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -104,19 +110,10 @@ function handleWebSocketMessage(data) {
             break;
         case 'state':
             updateSequencerState(data);
-            // Actualizar info del dispositivo
-            if (data.samplesLoaded !== undefined) {
-                const el = document.getElementById('samplesCount');
-                if (el) el.textContent = data.samplesLoaded + ' samples';
+            updateDeviceStats(data);
+            if (Array.isArray(data.samples)) {
+                applySampleMetadataFromState(data.samples);
             }
-            if (data.memoryUsed !== undefined) {
-                const memoryMB = (data.memoryUsed / (1024 * 1024)).toFixed(2);
-                const el = document.getElementById('memoryUsed');
-                if (el) el.textContent = memoryMB + ' MB';
-            }
-            // Asumimos samples: 44.1kHz, mono, 16-bit
-            const formatEl = document.getElementById('sampleFormat');
-            if (formatEl) formatEl.textContent = '44.1kHz Mono 16-bit';
             break;
         case 'step':
             updateCurrentStep(data.step);
@@ -139,8 +136,8 @@ function handleWebSocketMessage(data) {
                 });
             }
             break;
-        case 'kitChanged':
-            showNotification(`Kit: ${data.name}`);
+        case 'sampleCounts':
+            handleSampleCountsMessage(data);
             break;
         case 'sampleList':
             displaySampleList(data);
@@ -203,7 +200,7 @@ function updateStatus(connected) {
 function createPads() {
     const grid = document.getElementById('padsGrid');
     
-    const families = ['BD', 'SD', 'CH', 'OH', 'CP', 'CB', 'RS', 'CL', 'MA', 'CY', 'HT', 'LT', 'MC', 'MT', 'HC', 'LC'];
+    const families = padNames;
     
     for (let i = 0; i < 16; i++) {
         const padContainer = document.createElement('div');
@@ -242,11 +239,12 @@ function createPads() {
             stopTremolo(i, pad);
         });
         
-        // Botón para seleccionar sample
+        // Botón para seleccionar sample (se añade después según count)
         const selectBtn = document.createElement('button');
         selectBtn.className = 'pad-select-btn';
-        selectBtn.textContent = '📂';
-        selectBtn.title = `Select ${families[i]} sample`;
+        selectBtn.style.display = 'none';  // Oculto por defecto
+        selectBtn.dataset.padIndex = i;
+        selectBtn.dataset.family = families[i];
         selectBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             showSampleSelector(i, families[i]);
@@ -255,6 +253,8 @@ function createPads() {
         padContainer.appendChild(pad);
         padContainer.appendChild(selectBtn);
         grid.appendChild(padContainer);
+
+        refreshPadSampleInfo(i);
     }
 }
 
@@ -315,6 +315,142 @@ function stopTremolo(padIndex, padElement) {
     padElement.style.animation = '';
 }
 
+// Actualizar botones de selección de samples según conteo
+function updateSampleButtons() {
+    document.querySelectorAll('.pad-select-btn').forEach((btn, index) => {
+        const family = padNames[index];
+        const count = sampleCounts[family] || 0;
+        
+        if (count > 1) {
+            btn.style.display = 'flex';
+            btn.innerHTML = `📂<span class="sample-count-badge">${count}</span>`;
+            btn.title = `${count} ${family} samples available`;
+        } else {
+            btn.style.display = 'none';
+        }
+    });
+}
+
+function handleSampleCountsMessage(payload) {
+    const sanitizedCounts = {};
+    let totalFiles = 0;
+    padNames.forEach((family) => {
+        const count = typeof payload[family] === 'number' ? payload[family] : 0;
+        sanitizedCounts[family] = count;
+        totalFiles += count;
+    });
+    sampleCounts = sanitizedCounts;
+    updateSampleButtons();
+    updateInstrumentCounts(totalFiles);
+    console.log('Sample counts received:', sanitizedCounts);
+}
+
+function updateInstrumentCounts(totalFiles) {
+    padNames.forEach((family) => {
+        const label = document.getElementById(`instCount-${family}`);
+        if (label) {
+            const count = sampleCounts[family] || 0;
+            label.textContent = count > 0 ? `${count} library files` : 'No files found';
+        }
+    });
+    const totalsEl = document.getElementById('libraryTotals');
+    if (totalsEl) {
+        const files = typeof totalFiles === 'number' ? totalFiles : Object.values(sampleCounts).reduce((sum, val) => sum + (val || 0), 0);
+        totalsEl.textContent = `${files} files / ${padNames.length} families`;
+    }
+}
+
+function refreshPadSampleInfo(padIndex) {
+    const infoEl = document.getElementById(`sampleInfo-${padIndex}`);
+    const meta = padSampleMetadata[padIndex];
+    if (!infoEl) return;
+    if (!meta) {
+        infoEl.textContent = '—';
+        infoEl.title = 'No sample loaded';
+    } else {
+        infoEl.textContent = `${meta.filename} • ${meta.sizeKB}KB`;
+        infoEl.title = `${meta.filename} - ${meta.sizeKB} KB - ${meta.format}`;
+    }
+    updateInstrumentMetadata(padIndex);
+}
+
+function applySampleMetadataFromState(sampleList) {
+    if (!Array.isArray(sampleList)) return;
+    sampleList.forEach(sample => {
+        const padIndex = sample.pad;
+        if (typeof padIndex !== 'number' || padIndex < 0 || padIndex >= padNames.length) {
+            return;
+        }
+        if (sample.loaded && sample.name) {
+            const sizeBytes = typeof sample.size === 'number' ? sample.size : 0;
+            padSampleMetadata[padIndex] = {
+                filename: sample.name,
+                sizeKB: (sizeBytes / 1024).toFixed(1),
+                format: sample.format ? sample.format.toUpperCase() : inferFormatFromName(sample.name),
+                quality: sample.quality || DEFAULT_SAMPLE_QUALITY
+            };
+        } else {
+            padSampleMetadata[padIndex] = null;
+        }
+        refreshPadSampleInfo(padIndex);
+    });
+}
+
+function inferFormatFromName(name) {
+    if (!name || typeof name !== 'string') return 'RAW/WAV';
+    const lower = name.toLowerCase();
+    if (lower.endsWith('.wav')) return 'WAV';
+    if (lower.endsWith('.raw')) return 'RAW';
+    return 'RAW/WAV';
+}
+
+function updateInstrumentMetadata(padIndex) {
+    const family = padNames[padIndex];
+    if (!family) return;
+    const meta = padSampleMetadata[padIndex];
+    const currentEl = document.getElementById(`instCurrent-${family}`);
+    const qualityEl = document.getElementById(`instQuality-${family}`);
+    if (!currentEl || !qualityEl) return;
+    if (!meta) {
+        currentEl.textContent = 'Current: —';
+        qualityEl.textContent = 'Format: —';
+        return;
+    }
+    currentEl.textContent = `Current: ${meta.filename} (${meta.sizeKB} KB)`;
+    qualityEl.textContent = `Format: ${meta.format} • ${meta.quality}`;
+}
+
+function updateDeviceStats(data) {
+    if (data.samplesLoaded !== undefined) {
+        const el = document.getElementById('samplesCount');
+        if (el) el.textContent = `${data.samplesLoaded}/${padNames.length} pads`;
+    }
+    if (data.memoryUsed !== undefined) {
+        const el = document.getElementById('memoryUsed');
+        if (el) el.textContent = formatBytes(data.memoryUsed);
+    }
+    if (data.psramFree !== undefined) {
+        const el = document.getElementById('psramFree');
+        if (el) el.textContent = `PSRAM free ${formatBytes(data.psramFree)}`;
+    }
+    const formatEl = document.getElementById('sampleFormat');
+    if (formatEl) formatEl.textContent = '44.1kHz Mono 16-bit';
+}
+
+function formatBytes(bytes) {
+    if (bytes === undefined || bytes === null) return '—';
+    if (bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let value = bytes;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024;
+        unitIndex++;
+    }
+    const decimals = unitIndex === 0 ? 0 : 1;
+    return `${value.toFixed(decimals)} ${units[unitIndex]}`;
+}
+
 function triggerPad(padIndex) {
     // Enviar al ESP32 (Protocolo Binario para baja latencia)
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -370,7 +506,7 @@ function createSequencer() {
     const grid = document.getElementById('sequencerGrid');
     const indicator = document.getElementById('stepIndicator');
     const trackNames = ['BD', 'SD', 'CH', 'OH', 'CP', 'CB', 'RS', 'CL', 'MA', 'CY', 'HT', 'LT', 'MC', 'MT', 'HC', 'LC'];
-    const trackColors = ['#e74c3c', '#3498db', '#f39c12', '#2ecc71', '#9b59b6', '#e67e22', '#1abc9c', '#95a5a6', '#f1c40f', '#16a085', '#d35400', '#8e44ad', '#c0392b', '#27ae60', '#2980b9', '#7f8c8d'];
+    const trackColors = ['#ff6b6b', '#f7b731', '#26de81', '#45aaf2', '#a55eea', '#fd9644', '#2bcbba', '#778ca3', '#fed330', '#0fb9b1', '#fc5c65', '#4b7bec', '#f368e0', '#20bf6b', '#a5b1c2', '#e84393'];
     
     // 16 tracks x 16 steps (con labels)
     for (let track = 0; track < 16; track++) {
@@ -550,22 +686,6 @@ function setupControls() {
             setTimeout(() => {
                 sendWebSocket({ cmd: 'getPattern' });
             }, 150);
-        });
-    });
-    
-    // Kit buttons
-    document.querySelectorAll('.btn-kit').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            document.querySelectorAll('.btn-kit').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            
-            const kit = parseInt(btn.dataset.kit);
-            
-            // Cambiar kit por WebSocket
-            sendWebSocket({
-                cmd: 'loadKit',
-                index: kit
-            });
         });
     });
     
@@ -988,6 +1108,9 @@ function initSectionManager() {
     });
     
     const closePanel = () => {
+        saveSectionConfig();
+        applySectionConfig();
+        generateSectionList();
         sectionManager.classList.remove('active');
         managerOverlay.classList.remove('active');
         menuToggle.classList.remove('active');
@@ -1257,14 +1380,16 @@ function updatePadInfo(data) {
     const padIndex = data.pad;
     const filename = data.filename;
     const size = data.size;
-    
-    const infoEl = document.getElementById(`sampleInfo-${padIndex}`);
-    if (infoEl) {
-        const sizeKB = (size / 1024).toFixed(1);
-        infoEl.textContent = `${filename} (${sizeKB}KB)`;
-        infoEl.title = `${filename} - ${sizeKB} KB - 44.1kHz Mono`;
-    }
-    
+    const sizeBytes = typeof size === 'number' ? size : 0;
+    const sizeKB = (sizeBytes / 1024).toFixed(1);
+    const format = data.format ? data.format.toUpperCase() : inferFormatFromName(filename);
+    padSampleMetadata[padIndex] = {
+        filename,
+        sizeKB,
+        format,
+        quality: DEFAULT_SAMPLE_QUALITY
+    };
+    refreshPadSampleInfo(padIndex);
     showNotification(`Pad ${padIndex + 1}: ${filename} loaded`);
 }
 

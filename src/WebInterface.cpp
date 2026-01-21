@@ -15,6 +15,54 @@ extern KitManager kitManager;
 extern SampleManager sampleManager;
 extern void triggerPadWithLED(int track, uint8_t velocity);  // Función que enciende LED
 
+static bool isSupportedSampleFile(const String& filename) {
+  return filename.endsWith(".raw") || filename.endsWith(".RAW") ||
+         filename.endsWith(".wav") || filename.endsWith(".WAV");
+}
+
+static const char* detectSampleFormat(const char* filename) {
+  if (!filename) {
+    return "";
+  }
+  String name = String(filename);
+  if (name.endsWith(".wav") || name.endsWith(".WAV")) {
+    return "wav";
+  }
+  if (name.endsWith(".raw") || name.endsWith(".RAW")) {
+    return "raw";
+  }
+  return "";
+}
+
+static void populateStateDocument(StaticJsonDocument<4096>& doc) {
+  doc["type"] = "state";
+  doc["playing"] = sequencer.isPlaying();
+  doc["tempo"] = sequencer.getTempo();
+  doc["pattern"] = sequencer.getCurrentPattern();
+  doc["step"] = sequencer.getCurrentStep();
+  doc["samplesLoaded"] = sampleManager.getLoadedSamplesCount();
+  doc["memoryUsed"] = sampleManager.getTotalMemoryUsed();
+  doc["psramFree"] = sampleManager.getFreePSRAM();
+
+  JsonArray sampleArray = doc.createNestedArray("samples");
+  for (int pad = 0; pad < MAX_SAMPLES; pad++) {
+    JsonObject sampleObj = sampleArray.createNestedObject();
+    sampleObj["pad"] = pad;
+    bool loaded = sampleManager.isSampleLoaded(pad);
+    sampleObj["loaded"] = loaded;
+    if (loaded) {
+      const char* name = sampleManager.getSampleName(pad);
+      sampleObj["name"] = name ? name : "";
+      sampleObj["size"] = sampleManager.getSampleLength(pad) * 2;
+      sampleObj["format"] = detectSampleFormat(name);
+    }
+  }
+}
+
+static bool isClientReady(AsyncWebSocketClient* client) {
+  return client != nullptr && client->status() == WS_CONNECTED;
+}
+
 WebInterface::WebInterface() {
   server = nullptr;
   ws = nullptr;
@@ -111,26 +159,61 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
                                      AwsEventType type, void *arg, uint8_t *data, size_t len) {
   if (type == WS_EVT_CONNECT) {
     Serial.printf("WebSocket client #%u connected\n", client->id());
-    broadcastSequencerState();
+    sendSequencerStateToClient(client);
     
-    // Enviar patrón actual con los 16 tracks
-    delay(100);
-    int pattern = sequencer.getCurrentPattern();
-    StaticJsonDocument<2048> responseDoc;
-    responseDoc["type"] = "pattern";
-    responseDoc["index"] = pattern;
-    
-    for (int track = 0; track < 16; track++) {
-      JsonArray trackSteps = responseDoc.createNestedArray(String(track));
-      for (int step = 0; step < 16; step++) {
-        trackSteps.add(sequencer.getStep(track, step));
+    // Enviar patrón actual con los 16 tracks solo al nuevo cliente
+    if (isClientReady(client)) {
+      int pattern = sequencer.getCurrentPattern();
+      StaticJsonDocument<4096> responseDoc;
+      responseDoc["type"] = "pattern";
+      responseDoc["index"] = pattern;
+      
+      for (int track = 0; track < 16; track++) {
+        JsonArray trackSteps = responseDoc.createNestedArray(String(track));
+        for (int step = 0; step < 16; step++) {
+          trackSteps.add(sequencer.getStep(track, step));
+        }
       }
+      
+      String output;
+      serializeJson(responseDoc, output);
+      client->text(output);
+      Serial.printf("[WebSocket] Sent pattern %d with 16 tracks to client %u\n", pattern, client->id());
     }
     
-    String output;
-    serializeJson(responseDoc, output);
-    ws->textAll(output);
-    Serial.printf("[WebSocket] Sent pattern %d with 16 tracks\n", pattern);
+    // Enviar conteo de samples disponibles por familia al nuevo cliente
+    if (isClientReady(client)) {
+      StaticJsonDocument<512> sampleCountDoc;
+      sampleCountDoc["type"] = "sampleCounts";
+      const char* families[] = {"BD", "SD", "CH", "OH", "CP", "CB", "RS", "CL", "MA", "CY", "HT", "LT", "MC", "MT", "HC", "LC"};
+      
+      for (int i = 0; i < 16; i++) {
+        String path = String("/") + String(families[i]);
+        File dir = LittleFS.open(path, "r");
+        int count = 0;
+        
+        if (dir && dir.isDirectory()) {
+          File file = dir.openNextFile();
+          while (file) {
+            if (!file.isDirectory()) {
+              String fileName = file.name();
+              if (isSupportedSampleFile(fileName)) {
+                count++;
+              }
+            }
+            file.close();
+            file = dir.openNextFile();
+          }
+          dir.close();
+        }
+        sampleCountDoc[families[i]] = count;
+      }
+      
+      String countOutput;
+      serializeJson(sampleCountDoc, countOutput);
+      client->text(countOutput);
+      Serial.printf("[WebSocket] Sent sample counts to client %u\n", client->id());
+    }
   } else if (type == WS_EVT_DISCONNECT) {
     Serial.printf("WebSocket client #%u disconnected\n", client->id());
   } else if (type == WS_EVT_DATA) {
@@ -188,24 +271,9 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             delay(50);
             broadcastSequencerState();
           }
-          else if (cmd == "loadKit") {
-            int kit = doc["index"];
-            kitManager.loadKit(kit);
-            Serial.printf("[WebSocket] Kit changed to: %d\n", kit);
-            
-            // Enviar configuración del kit a la web
-            StaticJsonDocument<512> responseDoc;
-            responseDoc["type"] = "kitChanged";
-            responseDoc["kit"] = kit;
-            responseDoc["name"] = kitManager.getCurrentKitName();
-            
-            String output;
-            serializeJson(responseDoc, output);
-            ws->textAll(output);
-          }
           else if (cmd == "getPattern") {
             int pattern = sequencer.getCurrentPattern();
-            StaticJsonDocument<2048> responseDoc;
+            StaticJsonDocument<4096> responseDoc;
             responseDoc["type"] = "pattern";
             responseDoc["index"] = pattern;
             
@@ -218,63 +286,67 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             
             String output;
             serializeJson(responseDoc, output);
-            ws->textAll(output);
+            if (isClientReady(client)) {
+              client->text(output);
+            } else {
+              ws->textAll(output);
+            }
           }
           else if (cmd == "getSamples") {
-            // Obtener lista de samples de una familia
+            // Obtener lista de samples de una familia desde LittleFS
             const char* family = doc["family"];
             int padIndex = doc["pad"];
             
             Serial.printf("[getSamples] Family: %s, Pad: %d\n", family, padIndex);
             
-            StaticJsonDocument<1024> responseDoc;
+            StaticJsonDocument<2048> responseDoc;
             responseDoc["type"] = "sampleList";
             responseDoc["family"] = family;
             responseDoc["pad"] = padIndex;
             
-            // Intentar ambos formatos de path
-            String path1 = String("/") + String(family);  // con barra inicial
-            String path2 = String(family);                 // sin barra inicial
+            String path = String("/") + String(family);
+            Serial.printf("[getSamples] Opening: %s\n", path.c_str());
             
-            Serial.printf("[getSamples] Trying path 1: %s\n", path1.c_str());
-            File dir = LittleFS.open(path1, "r");
-            if (!dir || !dir.isDirectory()) {
-              Serial.printf("[getSamples] Path 1 failed, trying path 2: %s\n", path2.c_str());
-              dir = LittleFS.open(path2, "r");
-            }
+            File dir = LittleFS.open(path, "r");
             
             if (dir && dir.isDirectory()) {
-              Serial.println("[getSamples] Directory opened successfully");
+              Serial.println("[getSamples] Directory OK, listing files:");
               JsonArray samples = responseDoc.createNestedArray("samples");
               File file = dir.openNextFile();
               int count = 0;
-              while (file && count < 10) {
+              
+              while (file) {
                 if (!file.isDirectory()) {
                   String filename = file.name();
-                  // Extraer solo el nombre del archivo sin el path
                   int lastSlash = filename.lastIndexOf('/');
                   if (lastSlash >= 0) {
                     filename = filename.substring(lastSlash + 1);
                   }
                   
-                  if (filename.endsWith(".raw")) {
-                    Serial.printf("[getSamples] Found: %s (%d bytes)\n", filename.c_str(), file.size());
+                  if (isSupportedSampleFile(filename)) {
                     JsonObject sampleObj = samples.createNestedObject();
                     sampleObj["name"] = filename;
                     sampleObj["size"] = file.size();
                     count++;
+                    Serial.printf("  [%d] %s (%d KB)\n", count, filename.c_str(), file.size() / 1024);
                   }
                 }
+                file.close();
                 file = dir.openNextFile();
               }
-              Serial.printf("[getSamples] Total samples found: %d\n", count);
+              dir.close();
+              Serial.printf("[getSamples] Total: %d samples\n", count);
             } else {
-              Serial.println("[getSamples] ERROR: Could not open directory with either path format");
+              Serial.printf("[getSamples] ERROR: Cannot open %s\n", path.c_str());
             }
             
             String output;
             serializeJson(responseDoc, output);
-            ws->textAll(output);
+            if (isClientReady(client)) {
+              client->text(output);
+            } else {
+              ws->textAll(output);
+            }
           }
           else if (cmd == "loadSample") {
             // Cargar un sample específico en un pad
@@ -282,7 +354,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             const char* filename = doc["filename"];
             int padIndex = doc["pad"];
             
-            String fullPath = String(family) + String("/") + String(filename);
+            String fullPath = String("/") + String(family) + String("/") + String(filename);
             Serial.printf("[loadSample] Loading %s to pad %d\n", fullPath.c_str(), padIndex);
             
             if (sampleManager.loadSample(fullPath.c_str(), padIndex)) {
@@ -291,6 +363,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
               responseDoc["pad"] = padIndex;
               responseDoc["filename"] = filename;
               responseDoc["size"] = sampleManager.getSampleLength(padIndex) * 2; // bytes
+              responseDoc["format"] = detectSampleFormat(filename);
               
               String output;
               serializeJson(responseDoc, output);
@@ -379,20 +452,22 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
 }
 
 void WebInterface::broadcastSequencerState() {
-  StaticJsonDocument<2048> doc;
-  doc["type"] = "state";
-  doc["playing"] = sequencer.isPlaying();
-  doc["tempo"] = sequencer.getTempo();
-  doc["pattern"] = sequencer.getCurrentPattern();
-  doc["step"] = sequencer.getCurrentStep();
-  
-  // Añadir info del sistema
-  doc["samplesLoaded"] = sampleManager.getLoadedSamplesCount();
-  doc["memoryUsed"] = sampleManager.getTotalMemoryUsed();
-  
+  StaticJsonDocument<4096> doc;
+  populateStateDocument(doc);
   String output;
   serializeJson(doc, output);
   ws->textAll(output);
+}
+
+void WebInterface::sendSequencerStateToClient(AsyncWebSocketClient* client) {
+  if (!isClientReady(client)) {
+    return;
+  }
+  StaticJsonDocument<4096> doc;
+  populateStateDocument(doc);
+  String output;
+  serializeJson(doc, output);
+  client->text(output);
 }
 
 void WebInterface::broadcastPadTrigger(int pad) {
@@ -421,7 +496,7 @@ void WebInterface::update() {
   // Solo cleanup, el broadcast de steps se hace via callback
   ws->cleanupClients();
   
-  // Broadcast audio visualization data every 200ms (~5fps) - reducido para evitar heap corruption
+  // Broadcast audio visualization data every 200ms (~5fps)
   static uint32_t lastVisUpdate = 0;
   if (millis() - lastVisUpdate > 200) {
     broadcastVisualizationData();

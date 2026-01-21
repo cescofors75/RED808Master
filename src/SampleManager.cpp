@@ -47,13 +47,39 @@ bool SampleManager::loadSample(const char* filename, int padIndex) {
     return false;
   }
   
-  // Parse WAV file
-  if (!parseWavFile(file, padIndex)) {
-    file.close();
-    return false;
+  bool success = false;
+  String fname = String(filename);
+
+  // DETECT .RAW OR .WAV
+  if (fname.endsWith(".raw") || fname.endsWith(".RAW")) {
+    // --- LOAD RAW (No Header, 16-bit signed, Mono) ---
+    size_t fileSize = file.size();
+    Serial.printf("[SampleManager] Reading RAW file %s (%d bytes)...\n", filename, fileSize);
+    
+    uint32_t numSamples = fileSize / 2; // 16-bit = 2 bytes per sample
+    
+    if (allocateSampleBuffer(padIndex, numSamples)) {
+      size_t bytesRead = file.read((uint8_t*)sampleBuffers[padIndex], fileSize);
+      if (bytesRead == fileSize) {
+        sampleLengths[padIndex] = numSamples;
+        success = true;
+      } else {
+        Serial.println("Failed to read RAW data");
+        freeSampleBuffer(padIndex);
+      }
+    }
+  } else {
+    // --- LOAD WAV (With Header Parsing) ---
+    // Parse WAV file
+    success = parseWavFile(file, padIndex);
   }
   
   file.close();
+  
+  if (!success) {
+    Serial.printf("❌ FAILED to load: %s\n", filename);
+    return false; 
+  }
   
   // Store sample name
   const char* name = strrchr(filename, '/');

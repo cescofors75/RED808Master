@@ -22,6 +22,7 @@ public:
   void update();
   
   void broadcastSequencerState();
+  void sendSequencerStateToClient(AsyncWebSocketClient* client);
   void broadcastPadTrigger(int pad);
   void broadcastStep(int step);
   void broadcastVisualizationData();

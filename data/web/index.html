@@ -70,12 +70,14 @@
                 </div>
             </div>
             
-            <div class="sequencer-grid" id="sequencerGrid">
-                <!-- 8 tracks x 16 steps -->
-            </div>
-            
-            <div class="step-indicator" id="stepIndicator">
-                <!-- Indicador de step actual -->
+            <div class="sequencer-grid-wrapper">
+                <div class="sequencer-grid" id="sequencerGrid">
+                    <!-- 16 tracks x 16 steps -->
+                </div>
+                
+                <div class="step-indicator" id="stepIndicator">
+                    <!-- Indicador de step actual -->
+                </div>
             </div>
         </section>
 
@@ -99,15 +101,6 @@
                     <button class="btn-pattern" data-pattern="2">DnB</button>
                     <button class="btn-pattern" data-pattern="3">BREAK</button>
                     <button class="btn-pattern" data-pattern="4">HOUSE</button>
-                </div>
-            </div>
-            
-            <div class="control-group">
-                <label>KIT:</label>
-                <div class="kit-buttons">
-                    <button class="btn-kit active" data-kit="0">CLASSIC</button>
-                    <button class="btn-kit" data-kit="1">HEAVY</button>
-                    <button class="btn-kit" data-kit="2">SOFT</button>
                 </div>
             </div>
             
@@ -183,15 +176,28 @@
 
         <!-- Device Info Section -->
         <section id="section-device" class="device-info" data-section="device" data-title="Device Info">
-            <div class="info-title">🎛️ DEVICE INFO</div>
+            <div class="info-title">🎛️ DEVICE + LIBRARY</div>
+            <div class="device-cards">
+                <div class="info-card emphasis">
+                    <span class="info-label">Samples Loaded</span>
+                    <span class="info-value" id="samplesCount">0</span>
+                    <span class="info-sub" id="libraryTotals">0 files / 0 families</span>
+                </div>
+                <div class="info-card">
+                    <span class="info-label">Memory Used</span>
+                    <span class="info-value" id="memoryUsed">0 MB</span>
+                    <span class="info-sub" id="psramFree">PSRAM free —</span>
+                </div>
+                <div class="info-card">
+                    <span class="info-label">Sample Format</span>
+                    <span class="info-value" id="sampleFormat">44.1kHz Mono 16-bit</span>
+                    <span class="info-sub">Renderer locked @ 16 voices</span>
+                </div>
+            </div>
             <div class="info-grid">
                 <div class="info-item">
                     <span class="info-label">Sampler:</span>
-                    <span class="info-value">ESP32-S3 @ 240MHz</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Audio Format:</span>
-                    <span class="info-value">44.1kHz Mono 16-bit</span>
+                    <span class="info-value">ESP32-S3 @ 240MHz (PSRAM)</span>
                 </div>
                 <div class="info-item">
                     <span class="info-label">Polyphony:</span>
@@ -202,12 +208,8 @@
                     <span class="info-value" id="tracksInfo">16 tracks x 16 steps</span>
                 </div>
                 <div class="info-item">
-                    <span class="info-label">Samples:</span>
-                    <span class="info-value" id="samplesCount">Loading...</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Memory Used:</span>
-                    <span class="info-value" id="memoryUsed">Calculating...</span>
+                    <span class="info-label">Visualizer:</span>
+                    <span class="info-value">32-band spectrum</span>
                 </div>
             </div>
         </section>
@@ -215,23 +217,215 @@
         <!-- Instruments Info Section -->
         <section id="section-instruments" class="device-info" data-section="instruments" data-title="Instrument Map">
             <div class="info-title">🥁 INSTRUMENT MAP (16 TRACKS)</div>
-            <div class="instruments-list">
-                <div class="instrument-row"><span class="inst-code">BD</span> Bass Drum (Bombo)</div>
-                <div class="instrument-row"><span class="inst-code">SD</span> Snare Drum (Caja)</div>
-                <div class="instrument-row"><span class="inst-code">CH</span> Closed Hi-Hat</div>
-                <div class="instrument-row"><span class="inst-code">OH</span> Open Hi-Hat</div>
-                <div class="instrument-row"><span class="inst-code">CP</span> Hand Clap (Palmas)</div>
-                <div class="instrument-row"><span class="inst-code">CB</span> Cowbell (Cencerro)</div>
-                <div class="instrument-row"><span class="inst-code">RS</span> Rim Shot (Aro)</div>
-                <div class="instrument-row"><span class="inst-code">CL</span> Claves</div>
-                <div class="instrument-row"><span class="inst-code">MA</span> Maracas</div>
-                <div class="instrument-row"><span class="inst-code">CY</span> Cymbal (Platillo)</div>
-                <div class="instrument-row"><span class="inst-code">HT</span> Hi Tom (Agudo)</div>
-                <div class="instrument-row"><span class="inst-code">LT</span> Low Tom (Grave)</div>
-                <div class="instrument-row"><span class="inst-code">MC</span> Mid Conga</div>
-                <div class="instrument-row"><span class="inst-code">MT</span> Mid Tom (Medio)</div>
-                <div class="instrument-row"><span class="inst-code">HC</span> Hi Conga</div>
-                <div class="instrument-row"><span class="inst-code">LC</span> Low Conga</div>
+            <div class="instrument-grid">
+                <div class="instrument-card" data-family="BD">
+                    <div class="inst-main">
+                        <span class="inst-code">BD</span>
+                        <div>
+                            <div class="inst-name">Bass Drum (Bombo)</div>
+                            <div class="inst-count" id="instCount-BD">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-BD">Current: —</span>
+                        <span class="inst-quality" id="instQuality-BD">Format: —</span>
+                    </div>
+                </div>
+                <div class="instrument-card" data-family="SD">
+                    <div class="inst-main">
+                        <span class="inst-code">SD</span>
+                        <div>
+                            <div class="inst-name">Snare Drum (Caja)</div>
+                            <div class="inst-count" id="instCount-SD">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-SD">Current: —</span>
+                        <span class="inst-quality" id="instQuality-SD">Format: —</span>
+                    </div>
+                </div>
+                <div class="instrument-card" data-family="CH">
+                    <div class="inst-main">
+                        <span class="inst-code">CH</span>
+                        <div>
+                            <div class="inst-name">Closed Hi-Hat</div>
+                            <div class="inst-count" id="instCount-CH">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-CH">Current: —</span>
+                        <span class="inst-quality" id="instQuality-CH">Format: —</span>
+                    </div>
+                </div>
+                <div class="instrument-card" data-family="OH">
+                    <div class="inst-main">
+                        <span class="inst-code">OH</span>
+                        <div>
+                            <div class="inst-name">Open Hi-Hat</div>
+                            <div class="inst-count" id="instCount-OH">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-OH">Current: —</span>
+                        <span class="inst-quality" id="instQuality-OH">Format: —</span>
+                    </div>
+                </div>
+                <div class="instrument-card" data-family="CP">
+                    <div class="inst-main">
+                        <span class="inst-code">CP</span>
+                        <div>
+                            <div class="inst-name">Hand Clap (Palmas)</div>
+                            <div class="inst-count" id="instCount-CP">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-CP">Current: —</span>
+                        <span class="inst-quality" id="instQuality-CP">Format: —</span>
+                    </div>
+                </div>
+                <div class="instrument-card" data-family="CB">
+                    <div class="inst-main">
+                        <span class="inst-code">CB</span>
+                        <div>
+                            <div class="inst-name">Cowbell (Cencerro)</div>
+                            <div class="inst-count" id="instCount-CB">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-CB">Current: —</span>
+                        <span class="inst-quality" id="instQuality-CB">Format: —</span>
+                    </div>
+                </div>
+                <div class="instrument-card" data-family="RS">
+                    <div class="inst-main">
+                        <span class="inst-code">RS</span>
+                        <div>
+                            <div class="inst-name">Rim Shot (Aro)</div>
+                            <div class="inst-count" id="instCount-RS">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-RS">Current: —</span>
+                        <span class="inst-quality" id="instQuality-RS">Format: —</span>
+                    </div>
+                </div>
+                <div class="instrument-card" data-family="CL">
+                    <div class="inst-main">
+                        <span class="inst-code">CL</span>
+                        <div>
+                            <div class="inst-name">Claves</div>
+                            <div class="inst-count" id="instCount-CL">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-CL">Current: —</span>
+                        <span class="inst-quality" id="instQuality-CL">Format: —</span>
+                    </div>
+                </div>
+                <div class="instrument-card" data-family="MA">
+                    <div class="inst-main">
+                        <span class="inst-code">MA</span>
+                        <div>
+                            <div class="inst-name">Maracas</div>
+                            <div class="inst-count" id="instCount-MA">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-MA">Current: —</span>
+                        <span class="inst-quality" id="instQuality-MA">Format: —</span>
+                    </div>
+                </div>
+                <div class="instrument-card" data-family="CY">
+                    <div class="inst-main">
+                        <span class="inst-code">CY</span>
+                        <div>
+                            <div class="inst-name">Cymbal (Platillo)</div>
+                            <div class="inst-count" id="instCount-CY">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-CY">Current: —</span>
+                        <span class="inst-quality" id="instQuality-CY">Format: —</span>
+                    </div>
+                </div>
+                <div class="instrument-card" data-family="HT">
+                    <div class="inst-main">
+                        <span class="inst-code">HT</span>
+                        <div>
+                            <div class="inst-name">Hi Tom (Agudo)</div>
+                            <div class="inst-count" id="instCount-HT">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-HT">Current: —</span>
+                        <span class="inst-quality" id="instQuality-HT">Format: —</span>
+                    </div>
+                </div>
+                <div class="instrument-card" data-family="LT">
+                    <div class="inst-main">
+                        <span class="inst-code">LT</span>
+                        <div>
+                            <div class="inst-name">Low Tom (Grave)</div>
+                            <div class="inst-count" id="instCount-LT">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-LT">Current: —</span>
+                        <span class="inst-quality" id="instQuality-LT">Format: —</span>
+                    </div>
+                </div>
+                <div class="instrument-card" data-family="MC">
+                    <div class="inst-main">
+                        <span class="inst-code">MC</span>
+                        <div>
+                            <div class="inst-name">Mid Conga</div>
+                            <div class="inst-count" id="instCount-MC">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-MC">Current: —</span>
+                        <span class="inst-quality" id="instQuality-MC">Format: —</span>
+                    </div>
+                </div>
+                <div class="instrument-card" data-family="MT">
+                    <div class="inst-main">
+                        <span class="inst-code">MT</span>
+                        <div>
+                            <div class="inst-name">Mid Tom (Medio)</div>
+                            <div class="inst-count" id="instCount-MT">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-MT">Current: —</span>
+                        <span class="inst-quality" id="instQuality-MT">Format: —</span>
+                    </div>
+                </div>
+                <div class="instrument-card" data-family="HC">
+                    <div class="inst-main">
+                        <span class="inst-code">HC</span>
+                        <div>
+                            <div class="inst-name">Hi Conga</div>
+                            <div class="inst-count" id="instCount-HC">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-HC">Current: —</span>
+                        <span class="inst-quality" id="instQuality-HC">Format: —</span>
+                    </div>
+                </div>
+                <div class="instrument-card" data-family="LC">
+                    <div class="inst-main">
+                        <span class="inst-code">LC</span>
+                        <div>
+                            <div class="inst-name">Low Conga</div>
+                            <div class="inst-count" id="instCount-LC">— library files</div>
+                        </div>
+                    </div>
+                    <div class="inst-meta">
+                        <span class="inst-current" id="instCurrent-LC">Current: —</span>
+                        <span class="inst-quality" id="instQuality-LC">Format: —</span>
+                    </div>
+                </div>
             </div>
         </section>
 

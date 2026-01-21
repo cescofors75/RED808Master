@@ -44,6 +44,12 @@ const uint32_t instrumentColors[16] = {
     0x80FF80   // 15: LC - Verde menta
 };
 
+// Utility to detect supported audio sample files (.raw or .wav)
+static bool isValidSampleFile(const String& filename) {
+    return filename.endsWith(".raw") || filename.endsWith(".RAW") ||
+           filename.endsWith(".wav") || filename.endsWith(".WAV");
+}
+
 // Variables para control del LED RGB fade
 volatile uint8_t ledBrightness = 0;
 volatile bool ledFading = false;
@@ -140,16 +146,19 @@ void listDir(const char * dirname, int levels){
 void setup() {
     Serial.begin(115200);
     
-    // Esperar más tiempo para que el monitor serial se conecte
-    for (int i = 0; i < 5; i++) {
+    // Esperar hasta que el monitor serial se conecte (máximo 10 segundos)
+    int waitCount = 0;
+    while (!Serial && waitCount < 20) {
         delay(500);
-        Serial.print(".");
+        waitCount++;
     }
     
-    Serial.println("\n\n");
+    // Mensajes de inicio visibles
+    Serial.println("\n\n\n");
     Serial.println("=================================");
     Serial.println("    BOOT START - RED808");
     Serial.println("=================================");
+    Serial.println("Serial Monitor Connected!");
     Serial.flush();
     delay(1000);
     
@@ -191,17 +200,61 @@ void setup() {
     Serial.println("[STEP 4] Initializing Sample Manager...");
     Serial.flush();
     
-    // 3. Sample Manager & Kit Manager
+    // 3. Sample Manager - Cargar todos los samples por familia
     sampleManager.begin();
     
-    // KitManager::begin() ya escanea kits y carga el primero (Kit 0)
-    // Pero vamos a darle un poco de tiempo entre el mounting y el acceso
-    delay(500);
-    if (kitManager.begin()) {
-        Serial.println("✓ Kit Manager listo y primer kit cargado.");
-    } else {
-        Serial.println("⚠️ No se encontraron kits o fallo al cargar.");
+    Serial.println("[STEP 5] Loading all samples from families...");
+    const char* families[] = {"BD", "SD", "CH", "OH", "CP", "CB", "RS", "CL", "MA", "CY", "HT", "LT", "MC", "MT", "HC", "LC"};
+    
+    for (int i = 0; i < 16; i++) {
+        String path = String("/") + String(families[i]);
+        Serial.printf("  [%d] %s: Opening %s... ", i, families[i], path.c_str());
+        
+        File dir = LittleFS.open(path, "r");
+        
+        if (dir && dir.isDirectory()) {
+            Serial.println("OK");
+            File file = dir.openNextFile();
+            bool loaded = false;
+            
+            while (file && !loaded) {
+                if (!file.isDirectory()) {
+                    String filename = file.name();
+                    if (isValidSampleFile(filename)) {
+                        // Extraer solo el nombre del archivo
+                        int lastSlash = filename.lastIndexOf('/');
+                        if (lastSlash >= 0) {
+                            filename = filename.substring(lastSlash + 1);
+                        }
+                        
+                        String fullPath = String("/") + String(families[i]) + "/" + filename;
+                        Serial.printf("       Loading %s... ", fullPath.c_str());
+                        
+                        if (sampleManager.loadSample(fullPath.c_str(), i)) {
+                            Serial.printf("✓ (%d bytes)\n", sampleManager.getSampleLength(i) * 2);
+                            loaded = true;
+                        } else {
+                            Serial.println("✗ FAILED");
+                        }
+                    }
+                }
+                file.close();
+                if (!loaded) {
+                    file = dir.openNextFile();
+                }
+            }
+            
+            dir.close();
+            
+            if (!loaded) {
+                Serial.println("       ✗ No compatible samples (.raw/.wav) found");
+            }
+        } else {
+            Serial.println("✗ Directory not found or not accessible");
+        }
     }
+    
+    Serial.printf("✓ Samples loaded: %d/16\n", sampleManager.getLoadedSamplesCount());
 
     // 4. Sequencer Setup
     sequencer.setStepCallback(onStepTrigger);
