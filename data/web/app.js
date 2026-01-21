@@ -20,9 +20,11 @@ let sampleCounts = {};
 // Keyboard state
 let keyboardPadsActive = {};
 let keyboardHoldTimers = {};
+let keyboardTremoloState = {};
 
 // Pad hold timers for long press detection
 let padHoldTimers = {};
+let trackMutedState = new Array(16).fill(false);
 
 // 16 instrumentos RED808
 const padNames = ['BD', 'SD', 'CH', 'OH', 'CP', 'CB', 'RS', 'CL', 'MA', 'CY', 'HT', 'LT', 'MC', 'MT', 'HC', 'LC'];
@@ -234,6 +236,7 @@ function createPads() {
             <div class="pad-number">${(i + 1).toString().padStart(2, '0')}</div>
             <div class="pad-name">${padNames[i]}</div>
             <div class="pad-sample-info" id="sampleInfo-${i}">...</div>
+            <div class="pad-corona" aria-hidden="true"></div>
         `;
         
         const keyLabel = padKeyBindings[i];
@@ -277,6 +280,7 @@ function createPads() {
             e.stopPropagation();
             showSampleSelector(i, families[i]);
         });
+
         
         padContainer.appendChild(pad);
         padContainer.appendChild(selectBtn);
@@ -295,7 +299,6 @@ function startTremolo(padIndex, padElement) {
     setTimeout(() => {
         padElement.style.animation = '';
     }, 350);
-    padHoldTimers[padIndex] = timer;
     
     // Tremolo: triggers repetidos cada 180ms (reducido para evitar saturación)
     tremoloIntervals[padIndex] = setTimeout(() => {
@@ -315,20 +318,6 @@ function startTremolo(padIndex, padElement) {
 
 function stopTremolo(padIndex, padElement) {
     // Detener
-    // Cancelar timer de pulsación larga si se suelta antes de 3 segundos
-    if (padHoldTimers[padIndex]) {
-        const wasHolding = padHoldTimers[padIndex];
-        clearTimeout(padHoldTimers[padIndex]);
-        delete padHoldTimers[padIndex];
-        
-        // Si había loop activo y se soltó rápido, pausar/reanudar
-        if (padLoopState[padIndex] && padLoopState[padIndex].active && !wasHolding._longPressTriggered) {
-            pauseLoop(padIndex);
-            // El estado se actualizará via WebSocket callback
-            return;
-        }
-    }
-    
     // Detener cualquier intervalo o timeout de tremolo
     if (tremoloIntervals[padIndex]) {
         clearTimeout(tremoloIntervals[padIndex]);
@@ -341,6 +330,50 @@ function stopTremolo(padIndex, padElement) {
     padElement.classList.remove('tremolo-active');
     padElement.style.filter = '';
     padElement.style.animation = '';
+}
+
+function startKeyboardTremolo(padIndex, padElement) {
+    stopKeyboardTremolo(padIndex, padElement);
+    if (!padElement) return;
+
+    const state = {
+        startTime: Date.now(),
+        currentRate: 220,
+        minRate: 60,
+        timeoutId: null
+    };
+    keyboardTremoloState[padIndex] = state;
+    padElement.classList.add('keyboard-tremolo');
+
+    const tick = () => {
+        triggerPad(padIndex);
+        padElement.classList.add('active');
+        padElement.style.filter = 'brightness(1.4)';
+        setTimeout(() => {
+            padElement.style.filter = 'brightness(1.1)';
+        }, 60);
+
+        const elapsed = Date.now() - state.startTime;
+        const rampFactor = Math.max(state.minRate, Math.round(220 * Math.pow(0.93, elapsed / 200)));
+        state.currentRate = rampFactor;
+        state.timeoutId = setTimeout(tick, state.currentRate);
+    };
+
+    tick();
+}
+
+function stopKeyboardTremolo(padIndex, padElement) {
+    const state = keyboardTremoloState[padIndex];
+    if (state && state.timeoutId) {
+        clearTimeout(state.timeoutId);
+    }
+    delete keyboardTremoloState[padIndex];
+
+    if (padElement) {
+        padElement.classList.remove('keyboard-tremolo');
+        padElement.classList.remove('active');
+        padElement.style.filter = '';
+    }
 }
 
 // Actualizar botones de selección de samples según conteo
@@ -531,6 +564,30 @@ function updatePadLoopVisual(padIndex) {
     updateTrackLoopVisual(padIndex);
 }
 
+function setTrackMuted(track, isMuted, sendCommand) {
+    trackMutedState[track] = !!isMuted;
+
+    const labelEl = document.querySelector(`.track-label[data-track="${track}"]`);
+    if (labelEl) {
+        labelEl.classList.toggle('muted', isMuted);
+    }
+    const muteBtn = document.querySelector(`.mute-btn[data-track="${track}"]`);
+    if (muteBtn) {
+        muteBtn.classList.toggle('muted', isMuted);
+    }
+    document.querySelectorAll(`.seq-step[data-track="${track}"]`).forEach(step => {
+        step.classList.toggle('track-muted', isMuted);
+    });
+
+    if (sendCommand) {
+        sendWebSocket({
+            cmd: 'mute',
+            track: track,
+            value: isMuted
+        });
+    }
+}
+
 function updateTrackLoopVisual(trackIndex) {
     const label = document.querySelector(`.track-label[data-track="${trackIndex}"]`);
     const steps = document.querySelectorAll(`.seq-step[data-track="${trackIndex}"]`);
@@ -569,24 +626,11 @@ function createSequencer() {
         
         const muteBtn = document.createElement('button');
         muteBtn.className = 'mute-btn';
-        muteBtn.textContent = 'M';
+        muteBtn.textContent = '🔇';
         muteBtn.dataset.track = track;
         muteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            muteBtn.classList.toggle('muted');
-            const isMuted = muteBtn.classList.contains('muted');
-            
-            // Atenuar visualmente los steps de esta pista
-            document.querySelectorAll(`.seq-step[data-track="${track}"]`).forEach(step => {
-                step.style.opacity = isMuted ? '0.3' : '1';
-            });
-            
-            // Enviar comando de mute al ESP32
-            sendWebSocket({
-                cmd: 'mute',
-                track: track,
-                value: isMuted
-            });
+            setTrackMuted(track, !trackMutedState[track], true);
         });
         
         const name = document.createElement('span');
@@ -881,6 +925,7 @@ function updateBpmMeter(value) {
     const display = document.getElementById('meterBpmValue');
     const bar = document.getElementById('meterBpmBar');
     const slider = document.getElementById('tempoSlider');
+    const meter = document.getElementById('meter-bpm');
     if (!display || !bar || !slider) return;
     display.textContent = Math.round(value);
     const min = parseFloat(slider.min) || 40;
@@ -888,6 +933,11 @@ function updateBpmMeter(value) {
     bar.style.width = `${getNormalizedPercentage(value, min, max).toFixed(1)}%`;
     if (bar.parentElement) {
         bar.parentElement.classList.add('active');
+    }
+    if (meter) {
+        const duration = Math.max(0.2, 60 / Math.max(1, value));
+        meter.style.setProperty('--bpm-heart-duration', `${duration}s`);
+        meter.classList.add('bpm-heart');
     }
 }
 
@@ -1005,6 +1055,11 @@ function updateSequencerState(data) {
         for (let track = 0; track < padNames.length; track++) {
             updatePadLoopVisual(track);
         }
+    }
+    if (Array.isArray(data.trackMuted)) {
+        data.trackMuted.forEach((muted, track) => {
+            setTrackMuted(track, !!muted, false);
+        });
     }
     
     // Update playing state
@@ -1178,7 +1233,7 @@ function setupKeyboardControls() {
                 keyboardPadsActive[padIndex] = true;
                 const padElement = document.querySelector(`.pad[data-pad="${padIndex}"]`);
                 if (padElement) {
-                    startTremolo(padIndex, padElement);
+                    startKeyboardTremolo(padIndex, padElement);
                 }
             }
         }
@@ -1238,7 +1293,7 @@ function setupKeyboardControls() {
                 keyboardPadsActive[padIndex] = false;
                 const padElement = document.querySelector(`.pad[data-pad="${padIndex}"]`);
                 if (padElement) {
-                    stopTremolo(padIndex, padElement);
+                    stopKeyboardTremolo(padIndex, padElement);
                 }
             }
         }

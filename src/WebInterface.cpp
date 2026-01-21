@@ -54,6 +54,11 @@ static void populateStateDocument(StaticJsonDocument<4096>& doc) {
       loopPaused.add(sequencer.isLoopPaused(track));
     }
 
+    JsonArray trackMuted = doc.createNestedArray("trackMuted");
+    for (int track = 0; track < MAX_TRACKS; track++) {
+      trackMuted.add(sequencer.isTrackMuted(track));
+    }
+
   JsonArray sampleArray = doc.createNestedArray("samples");
   for (int pad = 0; pad < MAX_SAMPLES; pad++) {
     JsonObject sampleObj = sampleArray.createNestedObject();
