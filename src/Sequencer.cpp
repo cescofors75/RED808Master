@@ -136,6 +136,14 @@ bool Sequencer::getStep(int track, int step) {
   return steps[currentPattern][track][step];
 }
 
+bool Sequencer::getStep(int pattern, int track, int step) {
+  if (pattern < 0 || pattern >= MAX_PATTERNS) return false;
+  if (track < 0 || track >= MAX_TRACKS) return false;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return false;
+  
+  return steps[pattern][track][step];
+}
+
 void Sequencer::clearPattern(int pattern) {
   if (pattern < 0 || pattern >= MAX_PATTERNS) return;
   

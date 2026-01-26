@@ -33,8 +33,8 @@ AudioEngine::AudioEngine() : i2sPort(I2S_NUM_0),
   
   // Initialize volume
   masterVolume = 100; // Master stays at 100% by default
-  sequencerVolume = 80; // 80% default
-  liveVolume = 80; // 80% default
+  sequencerVolume = 100; // 100% default (can go up to 150)
+  liveVolume = 100; // 100% default (can go up to 150)
   
   // Initialize visualization
   captureIndex = 0;
@@ -155,7 +155,8 @@ void AudioEngine::triggerSampleLive(int padIndex, uint8_t velocity) {
   voices[voiceIndex].length = sampleLengths[padIndex];
   voices[voiceIndex].active = true;
   voices[voiceIndex].velocity = velocity;
-  voices[voiceIndex].volume = liveVolume;
+  // Apply 20% boost to livepads so they sound louder than sequencer at same volume setting
+  voices[voiceIndex].volume = (liveVolume * 120) / 100;
   voices[voiceIndex].pitchShift = 1.0f;
   voices[voiceIndex].loop = false;
   
@@ -337,7 +338,7 @@ void AudioEngine::setSampleRateReduction(uint32_t rate) {
 
 // Volume Control
 void AudioEngine::setMasterVolume(uint8_t volume) {
-  masterVolume = constrain(volume, 0, 100);
+  masterVolume = constrain(volume, 0, 150);
   Serial.printf("[AudioEngine] Master volume: %d%%\n", masterVolume);
 }
 
@@ -346,7 +347,7 @@ uint8_t AudioEngine::getMasterVolume() {
 }
 
 void AudioEngine::setSequencerVolume(uint8_t volume) {
-  sequencerVolume = constrain(volume, 0, 100);
+  sequencerVolume = constrain(volume, 0, 150);
   Serial.printf("[AudioEngine] Sequencer volume: %d%%\n", sequencerVolume);
 }
 
@@ -355,7 +356,7 @@ uint8_t AudioEngine::getSequencerVolume() {
 }
 
 void AudioEngine::setLiveVolume(uint8_t volume) {
-  liveVolume = constrain(volume, 0, 100);
+  liveVolume = constrain(volume, 0, 150);
   Serial.printf("[AudioEngine] Live volume: %d%%\n", liveVolume);
 }
 

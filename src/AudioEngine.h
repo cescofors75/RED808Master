@@ -101,11 +101,11 @@ public:
   void setSampleRateReduction(uint32_t rate);
   
   // Volume Control
-  void setMasterVolume(uint8_t volume); // 0-100
+  void setMasterVolume(uint8_t volume); // 0-150
   uint8_t getMasterVolume();
-  void setSequencerVolume(uint8_t volume); // 0-100
+  void setSequencerVolume(uint8_t volume); // 0-150
   uint8_t getSequencerVolume();
-  void setLiveVolume(uint8_t volume); // 0-100
+  void setLiveVolume(uint8_t volume); // 0-150
   uint8_t getLiveVolume();
   
   // Processing

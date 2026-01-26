@@ -10,7 +10,7 @@
 // --- CONFIGURACIÓN DE HARDWARE ---
 #define I2S_BCK   42    // BCLK - Bit Clock
 #define I2S_WS    41    // LRC/WS - Word Select (Left/Right Clock)
-#define I2S_DOUT  43    // DIN/DOUT - Data (TX pin)
+#define I2S_DOUT  40   // DIN/DOUT - Data (TX pin)
 
 // LED RGB integrado ESP32-S3
 #define RGB_LED_PIN  48

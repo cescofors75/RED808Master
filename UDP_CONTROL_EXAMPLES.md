@@ -363,6 +363,98 @@ void loop() {
 
 ---
 
+### Ejemplo - Sincronizar Patrón desde MASTER a SLAVE
+
+```cpp
+// Variables globales para almacenar el patrón sincronizado
+bool syncedPattern[16][16];  // [track][step]
+int syncedPatternNum = -1;
+
+void requestPattern(int patternNum) {
+  StaticJsonDocument<128> doc;
+  doc["cmd"] = "get_pattern";
+  doc["pattern"] = patternNum;
+  
+  String json;
+  serializeJson(doc, json);
+  
+  udp.beginPacket(drumMachineIP, udpPort);
+  udp.print(json);
+  udp.endPacket();
+  
+  Serial.printf("Requesting pattern %d from MASTER...\n", patternNum);
+}
+
+void receivePatternSync() {
+  int packetSize = udp.parsePacket();
+  if (packetSize > 0) {
+    char response[2048];
+    int len = udp.read(response, 2047);
+    response[len] = 0;
+    
+    // Parsear respuesta
+    StaticJsonDocument<2048> doc;
+    if (deserializeJson(doc, response) == DeserializationError::Ok) {
+      const char* cmd = doc["cmd"];
+      
+      if (strcmp(cmd, "pattern_sync") == 0) {
+        syncedPatternNum = doc["pattern"];
+        JsonArray data = doc["data"];
+        
+        // Copiar datos del patrón
+        for (int t = 0; t < 16; t++) {
+          JsonArray track = data[t];
+          for (int s = 0; s < 16; s++) {
+            syncedPattern[t][s] = track[s] ? true : false;
+          }
+        }
+        
+        Serial.printf("✓ Pattern %d synced from MASTER!\n", syncedPatternNum + 1);
+        
+        // Opcional: Mostrar patrón en Serial
+        printPattern();
+      }
+    }
+  }
+}
+
+void printPattern() {
+  Serial.println("\n=== Pattern ===");
+  for (int t = 0; t < 16; t++) {
+    Serial.printf("Track %2d: ", t);
+    for (int s = 0; s < 16; s++) {
+      Serial.print(syncedPattern[t][s] ? "■" : "·");
+      Serial.print(" ");
+    }
+    Serial.println();
+  }
+  Serial.println("===============\n");
+}
+
+void loop() {
+  // Solicitar patrón 0 del MASTER
+  requestPattern(0);
+  
+  // Esperar respuesta (timeout de 500ms)
+  unsigned long timeout = millis() + 500;
+  while (millis() < timeout) {
+    receivePatternSync();
+    if (syncedPatternNum != -1) {
+      break;
+    }
+    delay(10);
+  }
+  
+  if (syncedPatternNum == -1) {
+    Serial.println("⚠ Timeout - No response from MASTER");
+  }
+  
+  delay(5000);  // Repetir cada 5 segundos
+}
+```
+
+---
+
 ## Ejemplos de Comandos JSON por UDP
 
 ### 1. CONTROL DEL SEQUENCER
@@ -385,6 +477,24 @@ void loop() {
 #### Cambiar patrón (0-4: HIP HOP, TECHNO, DnB, BREAK, HOUSE)
 ```json
 {"cmd":"selectPattern","index":0}
+```
+
+#### Solicitar sincronización de patrón (MASTER → SLAVE)
+```json
+{"cmd":"get_pattern","pattern":0}
+```
+- `pattern`: 0-15 (número de patrón a sincronizar, opcional - por defecto el patrón activo)
+- **Respuesta**: El MASTER envía un mensaje `pattern_sync` con todos los steps del patrón:
+```json
+{
+  "cmd":"pattern_sync",
+  "pattern":0,
+  "data":[
+    [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
+    [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+    ...
+  ]
+}
 ```
 
 ---

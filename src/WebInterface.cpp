@@ -653,6 +653,33 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int volume = doc["value"];
     audioEngine.setMasterVolume(volume);
   }
+  else if (cmd == "get_pattern") {
+    int patternNum = doc.containsKey("pattern") ? doc["pattern"].as<int>() : sequencer.getCurrentPattern();
+    
+    // Crear respuesta con el patrón
+    StaticJsonDocument<2048> response;
+    response["cmd"] = "pattern_sync";
+    response["pattern"] = patternNum;
+    
+    JsonArray data = response.createNestedArray("data");
+    for (int t = 0; t < MAX_TRACKS; t++) {
+      JsonArray track = data.createNestedArray();
+      for (int s = 0; s < STEPS_PER_PATTERN; s++) {
+        track.add(sequencer.getStep(patternNum, t, s) ? 1 : 0);
+      }
+    }
+    
+    // Enviar UDP de vuelta al slave (solo si es una petición UDP)
+    if (udp.remoteIP() != IPAddress(0, 0, 0, 0)) {
+      String json;
+      serializeJson(response, json);
+      udp.beginPacket(udp.remoteIP(), udp.remotePort());
+      udp.write((uint8_t*)json.c_str(), json.length());
+      udp.endPacket();
+      
+      Serial.printf("► Pattern %d sent to SLAVE %s\n", patternNum + 1, udp.remoteIP().toString().c_str());
+    }
+  }
 }
 
 // Manejar paquetes UDP entrantes

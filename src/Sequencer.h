@@ -32,6 +32,7 @@ public:
   // Pattern editing
   void setStep(int track, int step, bool active, uint8_t velocity = 127);
   bool getStep(int track, int step);
+  bool getStep(int pattern, int track, int step);  // Get step from specific pattern
   void clearPattern(int pattern);
   void clearPattern(); // Clear current pattern
   void clearTrack(int track);
