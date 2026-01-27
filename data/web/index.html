@@ -57,220 +57,242 @@
             </button>
         </header>
 
-        <!-- Section Manager Panel -->
-        <div id="sectionManager" class="section-manager">
-            <div class="section-manager-header">
-                <h3>📋 SECCIONES</h3>
+        <!-- Tab Manager Panel (nuevo sistema de tabs) -->
+        <div id="tabManager" class="tab-manager">
+            <div class="tab-manager-header">
+                <h3>📋 NAVEGACIÓN</h3>
                 <button id="closeManager" class="close-manager">✕</button>
             </div>
-            <div class="section-manager-content">
-                <p class="manager-hint">👁️ Mostrar/Ocultar | ↕️ Reordenar</p>
-                <div id="sectionList" class="section-list">
+            <div class="tab-manager-content">
+                <div id="tabList" class="tab-list">
                     <!-- Se genera dinámicamente -->
                 </div>
             </div>
         </div>
         <div id="managerOverlay" class="manager-overlay"></div>
+        
+        <!-- Tab Navigation Bar -->
+        <nav class="tab-navigation">
+            <button class="tab-btn active" data-tab="performance">🎹 LIVE</button>
+            <button class="tab-btn" data-tab="sequencer">🎵 SEQUENCER</button>
+            <button class="tab-btn" data-tab="controls">🎛️ CONTROLES</button>
+            <button class="tab-btn" data-tab="fx">🔊 FX</button>
+            <button class="tab-btn" data-tab="info">📊 INFO</button>
+        </nav>
 
-        <!-- Live Pads Section -->
-        <section id="section-pads" class="pads-section" data-section="pads" data-title="Live Pads">
-            <h2>LIVE PADS</h2>
-            <div class="pads-grid" id="padsGrid">
-                <!-- Los pads se generarán dinámicamente -->
-            </div>
-        </section>
-
-        <!-- Audio Visualizer Section -->
-        <section id="section-visualizer" class="visualizer-section" data-section="visualizer" data-title="Audio Visualizer">
-            <div class="visualizer-grid">
-                <div class="visualizer-panel visualizer-full">
-                    <h3>SPECTRUM ANALYZER</h3>
-                    <canvas id="spectrumCanvas" width="600" height="200"></canvas>
+        <!-- TAB: Performance (Live Pads + Visualizer) -->
+        <div id="tab-performance" class="tab-content active">
+            <!-- Live Pads Section -->
+            <section id="section-pads" class="pads-section" data-section="pads" data-title="Live Pads">
+                <h2>LIVE PADS</h2>
+                <div class="pads-grid" id="padsGrid">
+                    <!-- Los pads se generarán dinámicamente -->
                 </div>
-            </div>
-        </section>
+            </section>
 
-        <!-- Sequencer Section -->
-        <section id="section-sequencer" class="sequencer-section" data-section="sequencer" data-title="Sequencer">
-            <div class="sequencer-header">
-                <h2>SEQUENCER</h2>
-                <div class="sequencer-controls">
-                    <button id="playBtn" class="btn btn-play">▶ PLAY</button>
-                    <button id="stopBtn" class="btn btn-stop">■ STOP</button>
-                    <button id="clearBtn" class="btn btn-clear">✕ CLEAR</button>
-                    <div class="pattern-display">
-                        <span class="pattern-label">PATTERN:</span>
-                        <span id="currentPatternName" class="pattern-name">HIP HOP</span>
+            <!-- Audio Visualizer Section -->
+            <section id="section-visualizer" class="visualizer-section" data-section="visualizer" data-title="Audio Visualizer">
+                <div class="visualizer-grid">
+                    <div class="visualizer-panel visualizer-full">
+                        <h3>SPECTRUM ANALYZER</h3>
+                        <canvas id="spectrumCanvas" width="600" height="200"></canvas>
                     </div>
                 </div>
-            </div>
-            
-            <div class="sequencer-grid-wrapper">
-                <div class="sequencer-grid" id="sequencerGrid">
-                    <!-- 16 tracks x 16 steps -->
+            </section>
+        </div>
+
+        <!-- TAB: Sequencer -->
+        <div id="tab-sequencer" class="tab-content">
+            <!-- Sequencer Section -->
+            <section id="section-sequencer" class="sequencer-section" data-section="sequencer" data-title="Sequencer">
+                <div class="sequencer-header">
+                    <h2>SEQUENCER</h2>
+                    <div class="sequencer-controls">
+                        <button id="playBtn" class="btn btn-play">▶ PLAY</button>
+                        <button id="stopBtn" class="btn btn-stop">■ STOP</button>
+                        <button id="clearBtn" class="btn btn-clear">✕ CLEAR</button>
+                        <div class="pattern-display">
+                            <span class="pattern-label">PATTERN:</span>
+                            <span id="currentPatternName" class="pattern-name">HIP HOP</span>
+                        </div>
+                    </div>
                 </div>
                 
-                <div class="step-indicator" id="stepIndicator">
-                    <!-- Indicador de step actual -->
+                <div class="sequencer-grid-wrapper">
+                    <div class="sequencer-grid" id="sequencerGrid">
+                        <!-- 16 tracks x 16 steps -->
+                    </div>
+                    
+                    <div class="step-indicator" id="stepIndicator">
+                        <!-- Indicador de step actual -->
+                    </div>
                 </div>
-            </div>
-        </section>
+            </section>
+        </div>
 
-        <!-- Controls Section -->
-        <section id="section-controls" class="controls-section" data-section="controls" data-title="Controls">
-            <div class="control-group">
-                <label for="tempoSlider">TEMPO: <span id="tempoValue">110</span> BPM</label>
-                <input type="range" id="tempoSlider" min="60" max="200" value="110" class="slider">
-            </div>
-            
-            <div class="control-group">
-                <label for="sequencerVolumeSlider">VOLUMEN SEQUENCER: <span id="sequencerVolumeValue">100</span>%</label>
-                <input type="range" id="sequencerVolumeSlider" min="0" max="150" value="100" class="slider">
-            </div>
-
-            <div class="control-group">
-                <label for="liveVolumeSlider">VOLUMEN LIVE PADS: <span id="liveVolumeValue">100</span>%</label>
-                <input type="range" id="liveVolumeSlider" min="0" max="150" value="100" class="slider">
-            </div>
-            
-            <div class="control-group">
-                <label>PATTERN:</label>
-                <div class="pattern-buttons">
-                    <button class="btn-pattern active" data-pattern="0">HIP HOP</button>
-                    <button class="btn-pattern" data-pattern="1">TECHNO</button>
-                    <button class="btn-pattern" data-pattern="2">DnB</button>
-                    <button class="btn-pattern" data-pattern="3">BREAK</button>
-                    <button class="btn-pattern" data-pattern="4">HOUSE</button>
-                </div>
-            </div>
-            
-            <div class="control-group">
-                <button id="colorToggle" class="btn-color-toggle">🎨 COLOR MODE</button>
-            </div>
-        </section>
-
-        <!-- FX Section -->
-        <section id="section-fx" class="fx-section" data-section="fx" data-title="Sound FX">
-            <h2>SOUND FX</h2>
-            <div class="fx-grid">
-                <div class="fx-control">
-                    <label for="filterType">FILTER TYPE</label>
-                    <select id="filterType" class="fx-select">
-                        <option value="0">NONE</option>
-                        <option value="1">LOW PASS</option>
-                        <option value="2">HIGH PASS</option>
-                        <option value="3">BAND PASS</option>
-                        <option value="4">NOTCH</option>
-                    </select>
+        <!-- TAB: Controls -->
+        <div id="tab-controls" class="tab-content">
+            <!-- Controls Section -->
+            <section id="section-controls" class="controls-section" data-section="controls" data-title="Controls">
+                <div class="control-group">
+                    <label for="tempoSlider">TEMPO: <span id="tempoValue">110</span> BPM</label>
+                    <input type="range" id="tempoSlider" min="60" max="200" value="110" class="slider">
                 </div>
                 
-                <div class="fx-control">
-                    <label for="filterCutoff">CUTOFF: <span id="filterCutoffValue">8000</span> Hz</label>
-                    <input type="range" id="filterCutoff" min="100" max="16000" value="8000" class="slider">
+                <div class="control-group">
+                    <label for="sequencerVolumeSlider">VOLUMEN SEQUENCER: <span id="sequencerVolumeValue">100</span>%</label>
+                    <input type="range" id="sequencerVolumeSlider" min="0" max="150" value="100" class="slider">
                 </div>
-                
-                <div class="fx-control">
-                    <label for="filterResonance">RESONANCE: <span id="filterResonanceValue">1.0</span></label>
-                    <input type="range" id="filterResonance" min="0.5" max="20" step="0.1" value="1.0" class="slider">
-                </div>
-                
-                <div class="fx-control">
-                    <label for="bitCrush">BIT CRUSH: <span id="bitCrushValue">16</span> bits</label>
-                    <input type="range" id="bitCrush" min="4" max="16" value="16" class="slider">
-                </div>
-                
-                <div class="fx-control">
-                    <label for="distortion">DISTORTION: <span id="distortionValue">0</span></label>
-                    <input type="range" id="distortion" min="0" max="100" value="0" class="slider">
-                </div>
-                
-                <div class="fx-control">
-                    <label for="sampleRate">SAMPLE RATE: <span id="sampleRateValue">44100</span> Hz</label>
-                    <input type="range" id="sampleRate" min="8000" max="44100" step="1000" value="44100" class="slider">
-                </div>
-            </div>
-        </section>
 
-        <!-- Keyboard Shortcuts Legend -->
-        <section id="section-keyboard" class="keyboard-legend" data-section="keyboard" data-title="Keyboard Shortcuts">
-            <div class="legend-title">⌨️ KEYBOARD SHORTCUTS</div>
-            <div class="legend-grid">
-                <div class="legend-item">
-                    <span class="legend-key">1-9, 0, Q-U</span>
-                    <span class="legend-desc">Trigger Pads 1-16 (Tremolo)</span>
+                <div class="control-group">
+                    <label for="liveVolumeSlider">VOLUMEN LIVE PADS: <span id="liveVolumeValue">100</span>%</label>
+                    <input type="range" id="liveVolumeSlider" min="0" max="150" value="100" class="slider">
                 </div>
-                <div class="legend-item">
-                    <span class="legend-key">SPACE</span>
-                    <span class="legend-desc">Play / Pause</span>
+                
+                <div class="control-group">
+                    <label>PATTERN:</label>
+                    <div class="pattern-buttons">
+                        <button class="btn-pattern active" data-pattern="0">HIP HOP</button>
+                        <button class="btn-pattern" data-pattern="1">TECHNO</button>
+                        <button class="btn-pattern" data-pattern="2">DnB</button>
+                        <button class="btn-pattern" data-pattern="3">BREAK</button>
+                        <button class="btn-pattern" data-pattern="4">HOUSE</button>
+                    </div>
                 </div>
-                <div class="legend-item">
-                    <span class="legend-key">[ / ]</span>
-                    <span class="legend-desc">BPM +5 / -5</span>
+                
+                <div class="control-group">
+                    <button id="colorToggle" class="btn-color-toggle">🎨 COLOR MODE</button>
                 </div>
-                <div class="legend-item">
-                    <span class="legend-key">- / +</span>
-                    <span class="legend-desc">Live Volume +5 / -5</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-key">A / S</span>
-                    <span class="legend-desc">Sequencer Volume +5 / -5</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-key">SHIFT + PAD</span>
-                    <span class="legend-desc">Mute / Unmute Track</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-key">N / B</span>
-                    <span class="legend-desc">Pattern Next / Previous</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-key">C</span>
-                    <span class="legend-desc">Mono / Multicolor</span>
-                </div>
-            </div>
-        </section>
+            </section>
 
-        <!-- Device Info Section -->
-        <section id="section-device" class="device-info" data-section="device" data-title="Device Info">
-            <div class="info-title">🎛️ DEVICE + LIBRARY</div>
-            <div class="device-cards">
-                <div class="info-card emphasis">
-                    <span class="info-label">Samples Loaded</span>
-                    <span class="info-value" id="samplesCount">0</span>
-                    <span class="info-sub" id="libraryTotals">0 files / 0 families</span>
+            <!-- Keyboard Shortcuts Legend -->
+            <section id="section-keyboard" class="keyboard-legend" data-section="keyboard" data-title="Keyboard Shortcuts">
+                <div class="legend-title">⌨️ KEYBOARD SHORTCUTS</div>
+                <div class="legend-grid">
+                    <div class="legend-item">
+                        <span class="legend-key">1-9, 0, Q-U</span>
+                        <span class="legend-desc">Trigger Pads 1-16 (Tremolo)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-key">SPACE</span>
+                        <span class="legend-desc">Play / Pause</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-key">[ / ]</span>
+                        <span class="legend-desc">BPM +5 / -5</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-key">- / +</span>
+                        <span class="legend-desc">Live Volume +5 / -5</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-key">A / S</span>
+                        <span class="legend-desc">Sequencer Volume +5 / -5</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-key">SHIFT + PAD</span>
+                        <span class="legend-desc">Mute / Unmute Track</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-key">N / B</span>
+                        <span class="legend-desc">Pattern Next / Previous</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-key">C</span>
+                        <span class="legend-desc">Mono / Multicolor</span>
+                    </div>
                 </div>
-                <div class="info-card">
-                    <span class="info-label">Memory Used</span>
-                    <span class="info-value" id="memoryUsed">0 MB</span>
-                    <span class="info-sub" id="psramFree">PSRAM free —</span>
-                </div>
-                <div class="info-card">
-                    <span class="info-label">Sample Format</span>
-                    <span class="info-value" id="sampleFormat">44.1kHz Mono 16-bit</span>
-                    <span class="info-sub">Renderer locked @ 16 voices</span>
-                </div>
-            </div>
-            <div class="info-grid">
-                <div class="info-item">
-                    <span class="info-label">Sampler:</span>
-                    <span class="info-value">ESP32-S3 @ 240MHz (PSRAM)</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Polyphony:</span>
-                    <span class="info-value">16 voices</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Tracks:</span>
-                    <span class="info-value" id="tracksInfo">16 tracks x 16 steps</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Visualizer:</span>
-                    <span class="info-value">32-band spectrum</span>
-                </div>
-            </div>
-        </section>
+            </section>
+        </div>
 
-        <!-- Instruments Info Section -->
+        <!-- TAB: FX -->
+        <div id="tab-fx" class="tab-content">
+            <!-- FX Section -->
+            <section id="section-fx" class="fx-section" data-section="fx" data-title="Sound FX">
+                <h2>SOUND FX</h2>
+                <div class="fx-grid">
+                    <div class="fx-control">
+                        <label for="filterType">FILTER TYPE</label>
+                        <select id="filterType" class="fx-select">
+                            <option value="0">NONE</option>
+                            <option value="1">LOW PASS</option>
+                            <option value="2">HIGH PASS</option>
+                            <option value="3">BAND PASS</option>
+                            <option value="4">NOTCH</option>
+                        </select>
+                    </div>
+                    
+                    <div class="fx-control">
+                        <label for="filterCutoff">CUTOFF: <span id="filterCutoffValue">8000</span> Hz</label>
+                        <input type="range" id="filterCutoff" min="100" max="16000" value="8000" class="slider">
+                    </div>
+                    
+                    <div class="fx-control">
+                        <label for="filterResonance">RESONANCE: <span id="filterResonanceValue">1.0</span></label>
+                        <input type="range" id="filterResonance" min="0.5" max="20" step="0.1" value="1.0" class="slider">
+                    </div>
+                    
+                    <div class="fx-control">
+                        <label for="bitCrush">BIT CRUSH: <span id="bitCrushValue">16</span> bits</label>
+                        <input type="range" id="bitCrush" min="4" max="16" value="16" class="slider">
+                    </div>
+                    
+                    <div class="fx-control">
+                        <label for="distortion">DISTORTION: <span id="distortionValue">0</span></label>
+                        <input type="range" id="distortion" min="0" max="100" value="0" class="slider">
+                    </div>
+                    
+                    <div class="fx-control">
+                        <label for="sampleRate">SAMPLE RATE: <span id="sampleRateValue">44100</span> Hz</label>
+                        <input type="range" id="sampleRate" min="8000" max="44100" step="1000" value="44100" class="slider">
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- TAB: Info (Device + Instruments) -->
+        <div id="tab-info" class="tab-content">
+            <!-- Device Info Section -->
+            <section id="section-device" class="device-info" data-section="device" data-title="Device Info">
+                <div class="info-title">🎛️ DEVICE + LIBRARY</div>
+                <div class="device-cards">
+                    <div class="info-card emphasis">
+                        <span class="info-label">Samples Loaded</span>
+                        <span class="info-value" id="samplesCount">0</span>
+                        <span class="info-sub" id="libraryTotals">0 files / 0 families</span>
+                    </div>
+                    <div class="info-card">
+                        <span class="info-label">Memory Used</span>
+                        <span class="info-value" id="memoryUsed">0 MB</span>
+                        <span class="info-sub" id="psramFree">PSRAM free —</span>
+                    </div>
+                    <div class="info-card">
+                        <span class="info-label">Sample Format</span>
+                        <span class="info-value" id="sampleFormat">44.1kHz Mono 16-bit</span>
+                        <span class="info-sub">Renderer locked @ 16 voices</span>
+                    </div>
+                </div>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">Sampler:</span>
+                        <span class="info-value">ESP32-S3 @ 240MHz (PSRAM)</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Polyphony:</span>
+                        <span class="info-value">16 voices</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Tracks:</span>
+                        <span class="info-value" id="tracksInfo">16 tracks x 16 steps</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Visualizer:</span>
+                        <span class="info-value">32-band spectrum</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Instruments Info Section -->
         <section id="section-instruments" class="device-info" data-section="instruments" data-title="Instrument Map">
             <div class="info-title">🥁 INSTRUMENT MAP (16 TRACKS)</div>
             <div class="instrument-tabs">
@@ -510,6 +532,8 @@
                 </div>
             </div>
         </section>
+        </div>
+        <!-- Fin de Tabs -->
 
         <!-- Footer -->
         <footer class="footer">

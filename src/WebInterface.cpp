@@ -95,6 +95,76 @@ static bool isClientReady(AsyncWebSocketClient* client) {
   return client != nullptr && client->status() == WS_CONNECTED;
 }
 
+static void sendSampleCounts(AsyncWebSocketClient* client) {
+  if (!client || !isClientReady(client)) {
+    Serial.println("[sendSampleCounts] Client not ready");
+    return;
+  }
+  
+  StaticJsonDocument<512> sampleCountDoc;
+  sampleCountDoc["type"] = "sampleCounts";
+  const char* families[] = {"BD", "SD", "CH", "OH", "CP", "CB", "RS", "CL", "MA", "CY", "HT", "LT", "MC", "MT", "HC", "LC"};
+  
+  Serial.println("[SampleCount] === Counting samples in LittleFS ===");
+  int totalFiles = 0;
+  
+  for (int i = 0; i < 16; i++) {
+    String path = String("/") + String(families[i]);
+    int count = 0;
+    
+    File dir = LittleFS.open(path);
+    if (!dir) {
+      Serial.printf("[SampleCount] ERROR: Cannot open %s\n", path.c_str());
+      sampleCountDoc[families[i]] = 0;
+      continue;
+    }
+    
+    if (!dir.isDirectory()) {
+      Serial.printf("[SampleCount] ERROR: %s is not a directory\n", path.c_str());
+      dir.close();
+      sampleCountDoc[families[i]] = 0;
+      continue;
+    }
+    
+    // Iterar archivos en el directorio
+    File file = dir.openNextFile();
+    while (file) {
+      if (!file.isDirectory()) {
+        // Obtener nombre del archivo
+        String fullName = file.name();
+        String fileName = fullName;
+        
+        // Extraer solo el nombre del archivo si incluye ruta
+        int lastSlash = fullName.lastIndexOf('/');
+        if (lastSlash >= 0) {
+          fileName = fullName.substring(lastSlash + 1);
+        }
+        
+        // Verificar si es un archivo de audio soportado
+        if (isSupportedSampleFile(fileName)) {
+          count++;
+          Serial.printf("[SampleCount]   %s/%s\n", families[i], fileName.c_str());
+        }
+      }
+      file.close();
+      file = dir.openNextFile();
+    }
+    dir.close();
+    
+    sampleCountDoc[families[i]] = count;
+    totalFiles += count;
+    Serial.printf("[SampleCount] %s: %d files\n", families[i], count);
+  }
+  
+  Serial.printf("[SampleCount] === TOTAL: %d samples ===\n", totalFiles);
+  
+  String countOutput;
+  serializeJson(sampleCountDoc, countOutput);
+  Serial.printf("[SampleCount] JSON: %s\n", countOutput.c_str());
+  client->text(countOutput);
+  Serial.printf("[SampleCount] Sent to client %u\n", client->id());
+}
+
 WebInterface::WebInterface() {
   server = nullptr;
   ws = nullptr;
@@ -110,20 +180,20 @@ bool WebInterface::begin(const char* ssid, const char* password) {
   // Inicio del WiFi
   Serial.println("  Configurando WiFi...");
   WiFi.mode(WIFI_OFF);
-  delay(200);
-  
-  // POTENCIA MÁXIMA para mejor velocidad y cobertura
-  Serial.println("  Configurando potencia TX máxima (19.5dBm)...");
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);  // Potencia máxima
   delay(100);
   
   Serial.println("  Activando modo AP...");
   WiFi.mode(WIFI_AP);
-  delay(200);
+  delay(100);
+  
+  // Potencia media (15dBm) - más estable que máxima
+  Serial.println("  Configurando potencia TX media (15dBm)...");
+  WiFi.setTxPower(WIFI_POWER_15dBm);
+  delay(50);
   
   Serial.println("  Iniciando SoftAP...");
   WiFi.softAP(ssid, password, 1, 0, 4);  // Canal 1, no oculto, max 4 conexiones
-  delay(300);
+  delay(200);
   
   IPAddress IP = WiFi.softAPIP();
   Serial.print("RED808 AP IP: ");
@@ -238,70 +308,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
     }
     
     // Enviar conteo de samples disponibles por familia al nuevo cliente
-    if (isClientReady(client)) {
-      StaticJsonDocument<512> sampleCountDoc;
-      sampleCountDoc["type"] = "sampleCounts";
-      const char* families[] = {"BD", "SD", "CH", "OH", "CP", "CB", "RS", "CL", "MA", "CY", "HT", "LT", "MC", "MT", "HC", "LC"};
-      
-      Serial.println("[SampleCount] === Counting samples in LittleFS ===");
-      int totalFiles = 0;
-      
-      for (int i = 0; i < 16; i++) {
-        String path = String("/") + String(families[i]);
-        int count = 0;
-        
-        File dir = LittleFS.open(path);
-        if (!dir) {
-          Serial.printf("[SampleCount] ERROR: Cannot open %s\n", path.c_str());
-          sampleCountDoc[families[i]] = 0;
-          continue;
-        }
-        
-        if (!dir.isDirectory()) {
-          Serial.printf("[SampleCount] ERROR: %s is not a directory\n", path.c_str());
-          dir.close();
-          sampleCountDoc[families[i]] = 0;
-          continue;
-        }
-        
-        // Iterar archivos en el directorio
-        File file = dir.openNextFile();
-        while (file) {
-          if (!file.isDirectory()) {
-            // Obtener nombre del archivo
-            String fullName = file.name();
-            String fileName = fullName;
-            
-            // Extraer solo el nombre del archivo si incluye ruta
-            int lastSlash = fullName.lastIndexOf('/');
-            if (lastSlash >= 0) {
-              fileName = fullName.substring(lastSlash + 1);
-            }
-            
-            // Verificar si es un archivo de audio soportado
-            if (isSupportedSampleFile(fileName)) {
-              count++;
-              Serial.printf("[SampleCount]   %s/%s\n", families[i], fileName.c_str());
-            }
-          }
-          file.close();
-          file = dir.openNextFile();
-        }
-        dir.close();
-        
-        sampleCountDoc[families[i]] = count;
-        totalFiles += count;
-        Serial.printf("[SampleCount] %s: %d files\n", families[i], count);
-      }
-      
-      Serial.printf("[SampleCount] === TOTAL: %d samples ===\n", totalFiles);
-      
-      String countOutput;
-      serializeJson(sampleCountDoc, countOutput);
-      Serial.printf("[SampleCount] JSON: %s\n", countOutput.c_str());
-      client->text(countOutput);
-      Serial.printf("[SampleCount] Sent to client %u\n", client->id());
-    }
+    sendSampleCounts(client);
   } else if (type == WS_EVT_DISCONNECT) {
     Serial.printf("WebSocket client #%u disconnected\n", client->id());
   } else if (type == WS_EVT_DATA) {
@@ -353,6 +360,11 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             } else {
               ws->textAll(output);
             }
+          }
+          else if (cmd == "getSampleCounts") {
+            // Nuevo comando para obtener conteos de samples
+            Serial.println("[getSampleCounts] Request received");
+            sendSampleCounts(client);
           }
           else if (cmd == "getSamples") {
             // Obtener lista de samples de una familia desde LittleFS

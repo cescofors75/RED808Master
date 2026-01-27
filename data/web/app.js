@@ -97,7 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupKeyboardControls();
     initSampleBrowser();
     initInstrumentTabs();
-    initSectionManager();
+    initTabSystem(); // Nuevo sistema de tabs
 });
 
 // WebSocket Connection
@@ -110,7 +110,10 @@ function initWebSocket() {
         isConnected = true;
         updateStatus(true);
         syncLedMonoMode();
-        setTimeout(requestAllSamples, 200);
+        setTimeout(() => {
+            requestSampleCounts();
+            requestAllSamples();
+        }, 300);
     };
     
     ws.onclose = () => {
@@ -394,6 +397,7 @@ function stopKeyboardTremolo(padIndex, padElement) {
 
 // Actualizar botones de selección de samples según conteo
 function updateSampleButtons() {
+    let buttonsShown = 0;
     document.querySelectorAll('.pad-select-btn').forEach((btn, index) => {
         const family = padNames[index];
         const count = sampleCounts[family] || 0;
@@ -401,11 +405,13 @@ function updateSampleButtons() {
         if (count > 1) {
             btn.style.display = 'flex';
             btn.innerHTML = `📂<span class="sample-count-badge">${count}</span>`;
-            btn.title = `${count} ${family} samples available`;
+            btn.title = `${count} ${family} samples available - Click to change`;
+            buttonsShown++;
         } else {
             btn.style.display = 'none';
         }
     });
+    console.log(`Sample buttons updated: ${buttonsShown} buttons shown`);
 }
 
 function handleSampleCountsMessage(payload) {
@@ -1559,7 +1565,112 @@ function adjustSequencerVolume(change) {
 }
 
 // ========================================
-// SECTION MANAGER
+// TAB SYSTEM (Nuevo sistema de pestañas)
+// ========================================
+
+let currentTab = 'performance';
+
+function initTabSystem() {
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    const tabContents = document.querySelectorAll('.tab-content');
+    const menuToggle = document.getElementById('menuToggle');
+    const closeManager = document.getElementById('closeManager');
+    const managerOverlay = document.getElementById('managerOverlay');
+    const tabManager = document.getElementById('tabManager');
+    
+    // Cargar el tab guardado
+    const savedTab = localStorage.getItem('currentTab');
+    if (savedTab) {
+        switchTab(savedTab);
+    }
+    
+    // Event listeners para los botones de tabs
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tabId = btn.getAttribute('data-tab');
+            switchTab(tabId);
+        });
+    });
+    
+    // Event listeners para el menú hamburguesa
+    menuToggle.addEventListener('click', () => {
+        tabManager.classList.add('active');
+        managerOverlay.classList.add('active');
+        menuToggle.classList.add('active');
+        generateTabList();
+    });
+    
+    const closePanel = () => {
+        tabManager.classList.remove('active');
+        managerOverlay.classList.remove('active');
+        menuToggle.classList.remove('active');
+    };
+    
+    closeManager.addEventListener('click', closePanel);
+    managerOverlay.addEventListener('click', closePanel);
+}
+
+function switchTab(tabId) {
+    currentTab = tabId;
+    
+    // Actualizar botones
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        if (btn.getAttribute('data-tab') === tabId) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+    
+    // Actualizar contenido
+    document.querySelectorAll('.tab-content').forEach(content => {
+        if (content.id === `tab-${tabId}`) {
+            content.classList.add('active');
+        } else {
+            content.classList.remove('active');
+        }
+    });
+    
+    // Guardar preferencia
+    localStorage.setItem('currentTab', tabId);
+    
+    // Actualizar visualizador si estamos en performance
+    if (tabId === 'performance') {
+        isVisualizerActive = true;
+        visualizerNeedsRedraw = true;
+    }
+}
+
+function generateTabList() {
+    const tabList = document.getElementById('tabList');
+    if (!tabList) return;
+    
+    const tabs = [
+        { id: 'performance', icon: '🎹', label: 'LIVE Performance' },
+        { id: 'sequencer', icon: '🎵', label: 'SEQUENCER' },
+        { id: 'controls', icon: '🎛️', label: 'CONTROLES' },
+        { id: 'fx', icon: '🔊', label: 'SOUND FX' },
+        { id: 'info', icon: '📊', label: 'INFO & DEVICE' }
+    ];
+    
+    tabList.innerHTML = '';
+    
+    tabs.forEach(tab => {
+        const item = document.createElement('div');
+        item.className = `tab-list-item ${currentTab === tab.id ? 'active' : ''}`;
+        item.innerHTML = `<span>${tab.icon}</span><span>${tab.label}</span>`;
+        item.addEventListener('click', () => {
+            switchTab(tab.id);
+            document.getElementById('tabManager').classList.remove('active');
+            document.getElementById('managerOverlay').classList.remove('active');
+            document.getElementById('menuToggle').classList.remove('active');
+        });
+        tabList.appendChild(item);
+    });
+}
+
+// ========================================
+// SECTION MANAGER (Deprecated)
 // ========================================
 
 let sectionOrder = [];
@@ -1997,6 +2108,13 @@ function setSampleFilter(family) {
         btn.classList.toggle('active', btn.dataset.family === activeSampleFilter);
     });
     scheduleSampleBrowserRender();
+}
+
+function requestSampleCounts() {
+    console.log('[requestSampleCounts] Requesting sample counts from ESP32');
+    sendWebSocket({
+        cmd: 'getSampleCounts'
+    });
 }
 
 function requestAllSamples() {
