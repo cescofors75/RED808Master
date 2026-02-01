@@ -136,8 +136,38 @@ bool SampleManager::parseWavFile(fs::File& file, int padIndex) {
     return false;
   }
   
-  // Calculate sample length
-  uint32_t numSamples = header.dataSize / (header.bitsPerSample / 8);
+  // ===== BUSCAR EL CHUNK "data" (puede no estar en posición 44) =====
+  file.seek(36); // Empezar después del header básico RIFF/WAVE/fmt
+  
+  uint32_t actualDataSize = 0;
+  bool foundDataChunk = false;
+  
+  while (file.available() >= 8) {
+    char chunkId[4];
+    uint32_t chunkSize;
+    
+    if (file.read((uint8_t*)chunkId, 4) != 4) break;
+    if (file.read((uint8_t*)&chunkSize, 4) != 4) break;
+    
+    if (memcmp(chunkId, "data", 4) == 0) {
+      actualDataSize = chunkSize;
+      foundDataChunk = true;
+      Serial.printf("✓ Data chunk encontrado en posición %d, tamaño: %d bytes\n", file.position() - 8, chunkSize);
+      break;
+    } else {
+      // Skip this chunk (puede ser LIST, INFO, etc.)
+      Serial.printf("  Saltando chunk '%.4s' (%d bytes)\n", chunkId, chunkSize);
+      file.seek(file.position() + chunkSize);
+    }
+  }
+  
+  if (!foundDataChunk) {
+    Serial.println("❌ No se encontró el chunk 'data' en el WAV");
+    return false;
+  }
+  
+  // Calculate sample length usando el tamaño REAL del data chunk
+  uint32_t numSamples = actualDataSize / (header.bitsPerSample / 8);
   
   // If stereo, we'll mix down to mono
   if (header.numChannels == 2) {
@@ -152,7 +182,7 @@ bool SampleManager::parseWavFile(fs::File& file, int padIndex) {
     return false;
   }
   
-  // Read sample data
+  // Read sample data (file está posicionado justo después del header del data chunk)
   if (header.numChannels == 1) {
     // Mono - direct read
     size_t bytesRead = file.read((uint8_t*)sampleBuffers[padIndex], numSamples * 2);
@@ -183,7 +213,18 @@ bool SampleManager::allocateSampleBuffer(int padIndex, uint32_t size) {
   size_t bytes = size * sizeof(int16_t);
   
   if (bytes > MAX_SAMPLE_SIZE) {
-    Serial.printf("Sample too large: %d bytes (max %d)\n", bytes, MAX_SAMPLE_SIZE);
+    Serial.printf("❌ Sample demasiado grande: %d bytes (máx %d = %.1fMB)\n", 
+                  bytes, MAX_SAMPLE_SIZE, MAX_SAMPLE_SIZE / (1024.0 * 1024.0));
+    return false;
+  }
+  
+  // Verificar PSRAM disponible
+  size_t freePsram = ESP.getFreePsram();
+  size_t minRequired = bytes + (100 * 1024); // +100KB margen de seguridad
+  
+  if (freePsram < minRequired) {
+    Serial.printf("❌ PSRAM insuficiente: necesita %d bytes, disponible %d bytes\n", 
+                  minRequired, freePsram);
     return false;
   }
   
@@ -191,11 +232,12 @@ bool SampleManager::allocateSampleBuffer(int padIndex, uint32_t size) {
   sampleBuffers[padIndex] = (int16_t*)ps_malloc(bytes);
   
   if (sampleBuffers[padIndex] == nullptr) {
-    Serial.printf("Failed to allocate %d bytes in PSRAM\n", bytes);
+    Serial.printf("❌ Fallo al alocar %d bytes en PSRAM (libre: %d bytes)\n", bytes, freePsram);
     return false;
   }
   
-  Serial.printf("Allocated %d bytes in PSRAM for pad %d\n", bytes, padIndex + 1);
+  Serial.printf("✅ Alocados %d bytes (%.1fKB) en PSRAM para pad %d (libre: %d bytes)\n", 
+                bytes, bytes / 1024.0, padIndex + 1, ESP.getFreePsram());
   return true;
 }
 

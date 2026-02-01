@@ -12,7 +12,7 @@
 #include "AudioEngine.h"
 
 #define MAX_SAMPLES 8
-#define MAX_SAMPLE_SIZE (512 * 1024) // 512KB per sample
+#define MAX_SAMPLE_SIZE (2 * 1024 * 1024) // 2MB per sample (suficiente para samples largos)
 
 // WAV file header structure
 struct WavHeader {
