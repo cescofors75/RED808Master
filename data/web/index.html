@@ -375,104 +375,166 @@
         <!-- TAB: MIDI -->
         <div id="tab-midi" class="tab-content">
             <section id="section-midi" class="midi-section" data-section="midi" data-title="MIDI Control">
-                <div class="midi-header">
-                    <h2>🎹 MIDI USB CONTROL</h2>
-                    <div class="midi-status" id="midiStatus">
-                        <span class="midi-status-dot" id="midiStatusDot"></span>
-                        <span id="midiStatusText">Esperando dispositivo USB...</span>
-                    </div>
-                </div>
-
-                <!-- Device Info Card -->
-                <div class="midi-device-card" id="midiDeviceCard" style="display:none;">
-                    <h3>✓ Dispositivo MIDI Conectado</h3>
-                    <div class="midi-device-info">
-                        <div class="midi-info-row">
-                            <span class="midi-label">Dispositivo:</span>
-                            <span class="midi-value" id="midiDeviceName">—</span>
-                        </div>
-                        <div class="midi-info-row">
-                            <span class="midi-label">Vendor ID:</span>
-                            <span class="midi-value" id="midiVendorId">—</span>
-                        </div>
-                        <div class="midi-info-row">
-                            <span class="midi-label">Product ID:</span>
-                            <span class="midi-value" id="midiProductId">—</span>
-                        </div>
-                        <div class="midi-info-row">
-                            <span class="midi-label">Conectado hace:</span>
-                            <span class="midi-value" id="midiConnectTime">—</span>
+                
+                <!-- MIDI Dashboard Header -->
+                <div class="midi-dashboard-header">
+                    <div class="midi-title-group">
+                        <h2>🎹 MIDI USB DASHBOARD</h2>
+                        <div class="midi-connection-badge" id="midiConnectionBadge">
+                            <span class="badge-dot"></span>
+                            <span class="badge-text">Desconectado</span>
                         </div>
                     </div>
                 </div>
 
-                <!-- MIDI Mapping Guide -->
-                <div class="midi-mapping-card">
-                    <h3>🗺️ MIDI Mapping</h3>
-                    <p class="midi-description">
-                        Conecta un teclado MIDI o pad controller via USB. Los mensajes se mapean automáticamente:
-                    </p>
-                    <div class="midi-mapping-grid">
-                        <div class="midi-map-item">
-                            <span class="midi-map-key">Note 36 (C1)</span>
-                            <span class="midi-map-arrow">→</span>
-                            <span class="midi-map-target">BD (Bass Drum)</span>
+                <!-- Stats Overview -->
+                <div class="midi-stats-row">
+                    <div class="stat-card">
+                        <div class="stat-icon">🎵</div>
+                        <div class="stat-content">
+                            <div class="stat-value" id="midiTotalNotes">0</div>
+                            <div class="stat-label">Notas MIDI</div>
                         </div>
-                        <div class="midi-map-item">
-                            <span class="midi-map-key">Note 37 (C#1)</span>
-                            <span class="midi-map-arrow">→</span>
-                            <span class="midi-map-target">SD (Snare)</span>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">⚡</div>
+                        <div class="stat-content">
+                            <div class="stat-value" id="midiAvgVelocity">—</div>
+                            <div class="stat-label">Velocity Media</div>
                         </div>
-                        <div class="midi-map-item">
-                            <span class="midi-map-key">Note 38 (D1)</span>
-                            <span class="midi-map-arrow">→</span>
-                            <span class="midi-map-target">CH (Closed Hi-hat)</span>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🎛️</div>
+                        <div class="stat-content">
+                            <div class="stat-value" id="midiCCMessages">0</div>
+                            <div class="stat-label">CC Messages</div>
                         </div>
-                        <div class="midi-map-item">
-                            <span class="midi-map-key">Note 39 (D#1)</span>
-                            <span class="midi-map-arrow">→</span>
-                            <span class="midi-map-target">OH (Open Hi-hat)</span>
-                        </div>
-                        <div class="midi-map-item">
-                            <span class="midi-map-key">Note 40 (E1)</span>
-                            <span class="midi-map-arrow">→</span>
-                            <span class="midi-map-target">CP (Clap)</span>
-                        </div>
-                        <div class="midi-map-item">
-                            <span class="midi-map-key">Note 41 (F1)</span>
-                            <span class="midi-map-arrow">→</span>
-                            <span class="midi-map-target">RS (Rimshot)</span>
-                        </div>
-                        <div class="midi-map-item">
-                            <span class="midi-map-key">Note 42 (F#1)</span>
-                            <span class="midi-map-arrow">→</span>
-                            <span class="midi-map-target">CL (Claves)</span>
-                        </div>
-                        <div class="midi-map-item">
-                            <span class="midi-map-key">Note 43 (G1)</span>
-                            <span class="midi-map-arrow">→</span>
-                            <span class="midi-map-target">CY (Cymbal)</span>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">⏱️</div>
+                        <div class="stat-content">
+                            <div class="stat-value" id="midiUptime">00:00</div>
+                            <div class="stat-label">Tiempo Activo</div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Live MIDI Monitor -->
-                <div class="midi-monitor-card">
-                    <h3>📡 Monitor en Vivo</h3>
-                    <div class="midi-stats">
-                        <div class="midi-stat">
-                            <span class="midi-stat-label">Total Mensajes:</span>
-                            <span class="midi-stat-value" id="midiTotalMessages">0</span>
+                <!-- Main Dashboard Grid -->
+                <div class="midi-dashboard-grid">
+                    
+                    <!-- Left Column: Device Info & Mapping -->
+                    <div class="midi-left-column">
+                        
+                        <!-- Device Info Card -->
+                        <div class="dashboard-card device-info-card" id="midiDeviceCard">
+                            <div class="card-header">
+                                <h3><span class="card-icon">🔌</span> Dispositivo Conectado</h3>
+                                <div class="signal-indicator">
+                                    <span class="signal-bar"></span>
+                                    <span class="signal-bar"></span>
+                                    <span class="signal-bar"></span>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="device-detail">
+                                    <span class="detail-label">Dispositivo:</span>
+                                    <span class="detail-value" id="midiDeviceName">Esperando conexión...</span>
+                                </div>
+                                <div class="device-detail">
+                                    <span class="detail-label">Vendor ID:</span>
+                                    <span class="detail-value" id="midiVendorId">—</span>
+                                </div>
+                                <div class="device-detail">
+                                    <span class="detail-label">Product ID:</span>
+                                    <span class="detail-value" id="midiProductId">—</span>
+                                </div>
+                                <div class="device-detail">
+                                    <span class="detail-label">Puerto USB:</span>
+                                    <span class="detail-value">OTG (GPIO 19/20)</span>
+                                </div>
+                            </div>
                         </div>
-                        <div class="midi-stat">
-                            <span class="midi-stat-label">Mensajes/seg:</span>
-                            <span class="midi-stat-value" id="midiMessagesPerSecond">0</span>
+
+                        <!-- MIDI Mapping Card -->
+                        <div class="dashboard-card mapping-card">
+                            <div class="card-header">
+                                <h3><span class="card-icon">🗺️</span> Note Mapping</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="mapping-grid">
+                                    <div class="mapping-item" data-note="36">
+                                        <span class="note-badge">36</span>
+                                        <span class="note-name">C1</span>
+                                        <span class="pad-target">BD</span>
+                                        <div class="velocity-bar"><div class="velocity-fill"></div></div>
+                                    </div>
+                                    <div class="mapping-item" data-note="37">
+                                        <span class="note-badge">37</span>
+                                        <span class="note-name">C#1</span>
+                                        <span class="pad-target">SD</span>
+                                        <div class="velocity-bar"><div class="velocity-fill"></div></div>
+                                    </div>
+                                    <div class="mapping-item" data-note="38">
+                                        <span class="note-badge">38</span>
+                                        <span class="note-name">D1</span>
+                                        <span class="pad-target">CH</span>
+                                        <div class="velocity-bar"><div class="velocity-fill"></div></div>
+                                    </div>
+                                    <div class="mapping-item" data-note="39">
+                                        <span class="note-badge">39</span>
+                                        <span class="note-name">D#1</span>
+                                        <span class="pad-target">OH</span>
+                                        <div class="velocity-bar"><div class="velocity-fill"></div></div>
+                                    </div>
+                                    <div class="mapping-item" data-note="40">
+                                        <span class="note-badge">40</span>
+                                        <span class="note-name">E1</span>
+                                        <span class="pad-target">CP</span>
+                                        <div class="velocity-bar"><div class="velocity-fill"></div></div>
+                                    </div>
+                                    <div class="mapping-item" data-note="41">
+                                        <span class="note-badge">41</span>
+                                        <span class="note-name">F1</span>
+                                        <span class="pad-target">RS</span>
+                                        <div class="velocity-bar"><div class="velocity-fill"></div></div>
+                                    </div>
+                                    <div class="mapping-item" data-note="42">
+                                        <span class="note-badge">42</span>
+                                        <span class="note-name">F#1</span>
+                                        <span class="pad-target">CL</span>
+                                        <div class="velocity-bar"><div class="velocity-fill"></div></div>
+                                    </div>
+                                    <div class="mapping-item" data-note="43">
+                                        <span class="note-badge">43</span>
+                                        <span class="note-name">G1</span>
+                                        <span class="pad-target">CB</span>
+                                        <div class="velocity-bar"><div class="velocity-fill"></div></div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <div class="midi-messages" id="midiMessages">
-                        <div class="midi-placeholder">Esperando mensajes MIDI...</div>
+
+                    <!-- Right Column: Live Monitor -->
+                    <div class="midi-right-column">
+                        <div class="dashboard-card monitor-card">
+                            <div class="card-header">
+                                <h3><span class="card-icon">📡</span> Monitor en Tiempo Real</h3>
+                                <button class="clear-monitor-btn" id="clearMidiMonitor">🗑️ Limpiar</button>
+                            </div>
+                            <div class="card-body">
+                                <div class="monitor-display" id="midiMonitor">
+                                    <div class="monitor-placeholder">
+                                        <div class="placeholder-icon">🎹</div>
+                                        <div class="placeholder-text">Esperando mensajes MIDI...</div>
+                                        <div class="placeholder-hint">Conecta un dispositivo y toca algunas notas</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
+
             </section>
         </div>
 

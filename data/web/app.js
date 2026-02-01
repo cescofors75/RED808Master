@@ -303,6 +303,12 @@ function handleWebSocketMessage(data) {
         case 'midiMessage':
             handleMIDIMessage(data);
             break;
+        case 'uploadProgress':
+            handleUploadProgress(data);
+            break;
+        case 'uploadComplete':
+            handleUploadComplete(data);
+            break;
     }
     
     // Call keyboard controls handler if function exists
@@ -393,6 +399,7 @@ function createPads() {
         pad.innerHTML = `
             <div class="pad-header">
                 <span class="pad-number">${(i + 1).toString().padStart(2, '0')}</span>
+                <button class="pad-upload-btn" data-pad="${i}" title="Subir WAV">📤</button>
             </div>
             <div class="pad-content">
                 <div class="pad-name">${padNames[i]}</div>
@@ -431,6 +438,16 @@ function createPads() {
         pad.addEventListener('mouseleave', () => {
             stopTremolo(i, pad);
         });
+        
+        // Event listener para botón de upload
+        const uploadBtn = pad.querySelector('.pad-upload-btn');
+        if (uploadBtn) {
+            uploadBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                showUploadDialog(i);
+            });
+        }
         
         // Botón para seleccionar sample (se añade después según count)
         const selectBtn = document.createElement('button');
@@ -1002,6 +1019,24 @@ function setupControls() {
             });
         }
     });
+    
+    // Clear MIDI Monitor button
+    const clearMidiBtn = document.getElementById('clearMidiMonitor');
+    if (clearMidiBtn) {
+        clearMidiBtn.addEventListener('click', () => {
+            midiMessagesQueue.length = 0;
+            const monitor = document.getElementById('midiMonitor');
+            if (monitor) {
+                monitor.innerHTML = `
+                    <div class="monitor-placeholder">
+                        <div class="placeholder-icon">🎹</div>
+                        <div class="placeholder-text">Monitor limpiado</div>
+                        <div class="placeholder-hint">Esperando nuevos mensajes MIDI...</div>
+                    </div>
+                `;
+            }
+        });
+    }
     
     // Tempo slider
     const tempoSlider = document.getElementById('tempoSlider');
@@ -2181,105 +2216,252 @@ function applyFilterPreset(filterType, cutoffFreq) {
 // MIDI FUNCTIONS
 // ============================================
 
-let midiTotalMessages = 0;
+// ============================================
+// MIDI DASHBOARD - Professional Version
+// ============================================
+
+let midiTotalNotes = 0;
+let midiCCMessages = 0;
+let midiVelocitySum = 0;
+let midiVelocityCount = 0;
+let midiConnectTimestamp = null;
+let midiUptimeInterval = null;
 const midiMessagesQueue = [];
-const MAX_MIDI_MESSAGES_DISPLAY = 20;
+const MAX_MIDI_MESSAGES_DISPLAY = 50;
 
 function handleMIDIDeviceMessage(data) {
-    const statusDot = document.getElementById('midiStatusDot');
-    const statusText = document.getElementById('midiStatusText');
+    const badge = document.getElementById('midiConnectionBadge');
     const deviceCard = document.getElementById('midiDeviceCard');
     
     if (data.connected) {
         // Device connected
-        statusDot.classList.add('connected');
-        statusDot.classList.remove('disconnected');
-        statusText.textContent = 'Dispositivo MIDI conectado';
+        badge.classList.add('connected');
+        badge.querySelector('.badge-text').textContent = 'Conectado';
         
-        // Show device card
-        deviceCard.style.display = 'block';
+        deviceCard.classList.add('connected');
         document.getElementById('midiDeviceName').textContent = data.deviceName || 'USB MIDI Device';
         document.getElementById('midiVendorId').textContent = data.vendorId ? `0x${data.vendorId.toString(16).toUpperCase()}` : '—';
         document.getElementById('midiProductId').textContent = data.productId ? `0x${data.productId.toString(16).toUpperCase()}` : '—';
         
-        const connectTime = data.connectTime ? new Date(data.connectTime).toLocaleTimeString('es-ES') : '—';
-        document.getElementById('midiConnectTime').textContent = connectTime;
+        // Start uptime counter
+        midiConnectTimestamp = Date.now();
+        if (midiUptimeInterval) clearInterval(midiUptimeInterval);
+        midiUptimeInterval = setInterval(updateMidiUptime, 1000);
         
         console.log('[MIDI] Device connected:', data.deviceName);
     } else {
         // Device disconnected
-        statusDot.classList.remove('connected');
-        statusDot.classList.add('disconnected');
-        statusText.textContent = 'Dispositivo MIDI desconectado';
-        deviceCard.style.display = 'none';
+        badge.classList.remove('connected');
+        badge.querySelector('.badge-text').textContent = 'Desconectado';
+        
+        deviceCard.classList.remove('connected');
+        document.getElementById('midiDeviceName').textContent = 'Esperando conexión...';
+        document.getElementById('midiVendorId').textContent = '—';
+        document.getElementById('midiProductId').textContent = '—';
+        
+        // Stop uptime counter
+        if (midiUptimeInterval) {
+            clearInterval(midiUptimeInterval);
+            midiUptimeInterval = null;
+        }
+        document.getElementById('midiUptime').textContent = '00:00';
         
         console.log('[MIDI] Device disconnected');
     }
 }
 
+function updateMidiUptime() {
+    if (!midiConnectTimestamp) return;
+    
+    const elapsed = Math.floor((Date.now() - midiConnectTimestamp) / 1000);
+    const minutes = Math.floor(elapsed / 60);
+    const seconds = elapsed % 60;
+    document.getElementById('midiUptime').textContent = 
+        `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
 function handleMIDIMessage(data) {
-    midiTotalMessages++;
-    
     // Update stats
-    document.getElementById('midiTotalMessages').textContent = midiTotalMessages;
+    if (data.messageType === 'noteOn') {
+        midiTotalNotes++;
+        midiVelocitySum += data.data2 || 0;
+        midiVelocityCount++;
+        
+        document.getElementById('midiTotalNotes').textContent = midiTotalNotes;
+        const avgVel = Math.round(midiVelocitySum / midiVelocityCount);
+        document.getElementById('midiAvgVelocity').textContent = avgVel;
+        
+        // Animate velocity bar for the note
+        animateNoteVelocity(data.data1, data.data2);
+        
+        // Highlight mapping item
+        highlightMappingItem(data.data1);
+    } else if (data.messageType === 'cc') {
+        midiCCMessages++;
+        document.getElementById('midiCCMessages').textContent = midiCCMessages;
+    }
     
-    // Add to queue
-    midiMessagesQueue.unshift(data);
+    // Add to message queue
+    const messageEntry = {
+        ...data,
+        timestamp: Date.now()
+    };
+    
+    midiMessagesQueue.unshift(messageEntry);
     if (midiMessagesQueue.length > MAX_MIDI_MESSAGES_DISPLAY) {
         midiMessagesQueue.pop();
     }
     
-    // Update display
-    updateMIDIMessagesDisplay();
+    // Update monitor display
+    updateMIDIMonitorDisplay();
     
-    // Log to console
     console.log(`[MIDI] ${data.messageType} Ch:${data.channel} Data1:${data.data1} Data2:${data.data2}`);
 }
 
-function updateMIDIMessagesDisplay() {
-    const container = document.getElementById('midiMessages');
-    if (!container) return;
+function animateNoteVelocity(note, velocity) {
+    const item = document.querySelector(`.mapping-item[data-note="${note}"]`);
+    if (!item) return;
     
-    // Clear placeholder
-    container.innerHTML = '';
+    const velocityFill = item.querySelector('.velocity-fill');
+    const percent = Math.round((velocity / 127) * 100);
+    velocityFill.style.width = `${percent}%`;
     
-    // Create message items
-    midiMessagesQueue.forEach((msg, index) => {
-        const item = document.createElement('div');
-        item.className = 'midi-message-item';
-        
-        const typeSpan = document.createElement('span');
-        typeSpan.className = 'midi-message-type';
-        typeSpan.textContent = formatMIDIType(msg.messageType);
-        
-        const dataSpan = document.createElement('span');
-        dataSpan.className = 'midi-message-data';
-        dataSpan.textContent = formatMIDIData(msg);
-        
-        const timeSpan = document.createElement('span');
-        timeSpan.className = 'midi-message-time';
-        const elapsed = Date.now() - msg.timestamp;
-        timeSpan.textContent = elapsed < 1000 ? 'ahora' : `${Math.floor(elapsed / 1000)}s`;
-        
-        item.appendChild(typeSpan);
-        item.appendChild(dataSpan);
-        item.appendChild(timeSpan);
-        
-        container.appendChild(item);
-    });
+    // Reset after 500ms
+    setTimeout(() => {
+        velocityFill.style.width = '0%';
+    }, 500);
 }
 
-function formatMIDIType(type) {
-    const types = {
+function highlightMappingItem(note) {
+    const item = document.querySelector(`.mapping-item[data-note="${note}"]`);
+    if (!item) return;
+    
+    item.classList.add('active');
+    setTimeout(() => {
+        item.classList.remove('active');
+    }, 300);
+}
+
+function updateMIDIMonitorDisplay() {
+    const monitor = document.getElementById('midiMonitor');
+    if (!monitor) return;
+    
+    // Remove placeholder if exists
+    const placeholder = monitor.querySelector('.monitor-placeholder');
+    if (placeholder) {
+        placeholder.remove();
+    }
+    
+    // Clear monitor
+    monitor.innerHTML = '';
+    
+    // Add messages
+    midiMessagesQueue.forEach((msg) => {
+        const entry = createMIDIMessageEntry(msg);
+        monitor.appendChild(entry);
+    });
+    
+    // Auto-scroll to top (newest messages)
+    monitor.scrollTop = 0;
+}
+
+function createMIDIMessageEntry(msg) {
+    const entry = document.createElement('div');
+    entry.className = `midi-message-entry ${getMIDIMessageClass(msg.messageType)}`;
+    
+    // Header
+    const header = document.createElement('div');
+    header.className = 'message-header';
+    
+    const type = document.createElement('div');
+    type.className = `message-type ${getMIDIMessageClass(msg.messageType)}`;
+    type.innerHTML = `
+        <span class="message-type-icon">${getMIDIIcon(msg.messageType)}</span>
+        <span>${getMIDITypeName(msg.messageType)}</span>
+    `;
+    
+    const time = document.createElement('div');
+    time.className = 'message-time';
+    const elapsed = Date.now() - msg.timestamp;
+    time.textContent = elapsed < 1000 ? 'ahora' : `${Math.floor(elapsed / 1000)}s ago`;
+    
+    header.appendChild(type);
+    header.appendChild(time);
+    
+    // Details
+    const details = document.createElement('div');
+    details.className = 'message-details';
+    details.innerHTML = getMIDIDetailsHTML(msg);
+    
+    entry.appendChild(header);
+    entry.appendChild(details);
+    
+    return entry;
+}
+
+function getMIDIMessageClass(type) {
+    const classes = {
+        'noteOn': 'note-on',
+        'noteOff': 'note-off',
+        'cc': 'cc',
+        'pitchBend': 'pitchbend',
+        'program': 'program'
+    };
+    return classes[type] || 'other';
+}
+
+function getMIDIIcon(type) {
+    const icons = {
+        'noteOn': '🎹',
+        'noteOff': '⬜',
+        'cc': '🎛️',
+        'pitchBend': '🎚️',
+        'program': '📋',
+        'aftertouch': '👆'
+    };
+    return icons[type] || '📨';
+}
+
+function getMIDITypeName(type) {
+    const names = {
         'noteOn': 'Note On',
         'noteOff': 'Note Off',
         'cc': 'Control Change',
-        'program': 'Program Change',
         'pitchBend': 'Pitch Bend',
-        'aftertouch': 'Aftertouch',
-        'pressure': 'Channel Pressure'
+        'program': 'Program Change',
+        'aftertouch': 'Aftertouch'
     };
-    return types[type] || type;
+    return names[type] || type;
+}
+
+function getMIDIDetailsHTML(msg) {
+    let html = `<span><span class="label">Canal:</span> <span class="value">${msg.channel}</span></span>`;
+    
+    if (msg.messageType === 'noteOn' || msg.messageType === 'noteOff') {
+        const noteName = getNoteNameFromNumber(msg.data1);
+        html += `<span><span class="label">Nota:</span> <span class="value">${msg.data1} (${noteName})</span></span>`;
+        html += `<span><span class="label">Velocity:</span> <span class="value">${msg.data2}</span></span>`;
+    } else if (msg.messageType === 'cc') {
+        html += `<span><span class="label">CC:</span> <span class="value">${msg.data1}</span></span>`;
+        html += `<span><span class="label">Valor:</span> <span class="value">${msg.data2}</span></span>`;
+    } else if (msg.messageType === 'pitchBend') {
+        const bendValue = (msg.data1 | (msg.data2 << 7)) - 8192;
+        html += `<span><span class="label">Bend:</span> <span class="value">${bendValue}</span></span>`;
+    } else {
+        html += `<span><span class="label">Data1:</span> <span class="value">${msg.data1}</span></span>`;
+        if (msg.data2 !== undefined) {
+            html += `<span><span class="label">Data2:</span> <span class="value">${msg.data2}</span></span>`;
+        }
+    }
+    
+    return html;
+}
+
+function getNoteNameFromNumber(noteNumber) {
+    const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const octave = Math.floor(noteNumber / 12) - 1;
+    const noteName = notes[noteNumber % 12];
+    return `${noteName}${octave}`;
 }
 
 function formatMIDIData(msg) {
@@ -2304,6 +2486,140 @@ setInterval(() => {
     // This would need backend support to send real-time stats
     // For now we can estimate based on message timestamps
 }, 1000);
+
+// ============================================
+// SAMPLE UPLOAD FUNCTIONS
+// ============================================
+
+function showUploadDialog(padIndex) {
+    // Crear input file oculto
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.wav';
+    input.style.display = 'none';
+    
+    input.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        // Validar extensión
+        if (!file.name.toLowerCase().endsWith('.wav')) {
+            if (window.showToast) {
+                window.showToast('❌ Solo se permiten archivos WAV', window.TOAST_TYPES.ERROR, 3000);
+            }
+            return;
+        }
+        
+        // Validar tamaño (max 2MB)
+        if (file.size > 2 * 1024 * 1024) {
+            if (window.showToast) {
+                window.showToast('❌ Archivo demasiado grande (max 2MB)', window.TOAST_TYPES.ERROR, 3000);
+            }
+            return;
+        }
+        
+        uploadSample(padIndex, file);
+    });
+    
+    document.body.appendChild(input);
+    input.click();
+    setTimeout(() => input.remove(), 1000);
+}
+
+let currentUploadPad = -1;
+
+function uploadSample(padIndex, file) {
+    currentUploadPad = padIndex;
+    const padName = padNames[padIndex];
+    
+    console.log(`[Upload] Starting upload: ${file.name} to pad ${padIndex} (${padName})`);
+    
+    // Mostrar toast de inicio
+    if (window.showToast) {
+        window.showToast(`📤 Subiendo ${file.name} a ${padName}...`, window.TOAST_TYPES.INFO, 2000);
+    }
+    
+    // Deshabilitar botón de upload durante el proceso
+    const btn = document.querySelector(`.pad-upload-btn[data-pad="${padIndex}"]`);
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳';
+    }
+    
+    // Crear FormData
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('pad', padIndex);
+    
+    // Enviar via fetch con progreso
+    fetch('/api/upload', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('[Upload] Response:', data);
+    })
+    .catch(error => {
+        console.error('[Upload] Error:', error);
+        if (window.showToast) {
+            window.showToast(`❌ Error al subir archivo: ${error.message}`, window.TOAST_TYPES.ERROR, 4000);
+        }
+        
+        // Re-habilitar botón
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '📤';
+        }
+        currentUploadPad = -1;
+    });
+}
+
+function handleUploadProgress(data) {
+    if (data.pad !== currentUploadPad) return;
+    
+    console.log(`[Upload] Progress: ${data.percent}%`);
+    
+    const btn = document.querySelector(`.pad-upload-btn[data-pad="${data.pad}"]`);
+    if (btn) {
+        btn.textContent = `${data.percent}%`;
+    }
+}
+
+function handleUploadComplete(data) {
+    console.log(`[Upload] Complete:`, data);
+    
+    const btn = document.querySelector(`.pad-upload-btn[data-pad="${data.pad}"]`);
+    if (btn) {
+        btn.disabled = false;
+        btn.textContent = '📤';
+    }
+    
+    if (data.success) {
+        if (window.showToast) {
+            const padName = padNames[data.pad];
+            window.showToast(`✅ ${padName}: ${data.message}`, window.TOAST_TYPES.SUCCESS, 3000);
+        }
+        
+        // Actualizar info del pad
+        refreshPadSampleInfo(data.pad);
+        
+        // Animación de éxito en el pad
+        const pad = document.querySelector(`.pad[data-pad="${data.pad}"]`);
+        if (pad) {
+            pad.style.animation = 'padPulseSuccess 0.5s ease-out';
+            setTimeout(() => {
+                pad.style.animation = '';
+            }, 500);
+        }
+    } else {
+        if (window.showToast) {
+            window.showToast(`❌ Error: ${data.message}`, window.TOAST_TYPES.ERROR, 4000);
+        }
+    }
+    
+    currentUploadPad = -1;
+}
 
 // Export to window
 window.applyFilterPreset = applyFilterPreset;

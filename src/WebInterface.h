@@ -46,6 +46,10 @@ public:
   void broadcastMIDIMessage(const MIDIMessage& msg);
   void broadcastMIDIDeviceStatus(bool connected, const MIDIDeviceInfo& info);
   
+  // Sample upload functions
+  void broadcastUploadProgress(int pad, int percent);
+  void broadcastUploadComplete(int pad, bool success, const String& message);
+  
   String getIP();
   
 private:
@@ -65,6 +69,10 @@ private:
   void onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, 
                        AwsEventType type, void *arg, uint8_t *data, size_t len);
   void processCommand(const JsonDocument& doc);  // Función común para procesar comandos
+  
+  // File upload handlers
+  void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);
+  bool validateWavFile(File& file, uint32_t& sampleRate, uint16_t& channels, uint16_t& bitsPerSample);
 };
 
 #endif

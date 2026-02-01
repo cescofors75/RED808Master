@@ -374,6 +374,17 @@ bool WebInterface::begin(const char* ssid, const char* password) {
     request->send(200, "application/json", output);
   });
   
+  // Endpoint para subir samples WAV
+  server->on("/api/upload", HTTP_POST, 
+    [](AsyncWebServerRequest *request){
+      // No enviar respuesta aquí - se maneja en handleUpload cuando final=true
+    },
+    [this](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+      // Handler del upload (chunked)
+      handleUpload(request, filename, index, data, len, final);
+    }
+  );
+  
   server->begin();
   Serial.println("✓ RED808 Web Server iniciado");
   
@@ -1184,5 +1195,243 @@ void WebInterface::broadcastMIDIDeviceStatus(bool connected, const MIDIDeviceInf
   
   Serial.printf("[WebInterface] MIDI device status broadcast: %s\n", 
                 connected ? "connected" : "disconnected");
+}
+
+// ========================================
+// SAMPLE UPLOAD FUNCTIONS
+// ========================================
+
+// Variables estáticas para mantener estado del upload
+static File uploadFile;
+static String uploadFilename;
+static int uploadPad = -1;
+static size_t uploadSize = 0;
+static size_t uploadReceived = 0;
+
+void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+  // Obtener pad del parámetro de la URL
+  if (index == 0) {
+    // Primera parte del upload
+    uploadFilename = filename;
+    uploadReceived = 0;
+    
+    if (!request->hasParam("pad", true)) {
+      Serial.println("[Upload] ERROR: Missing 'pad' parameter");
+      request->send(400, "application/json", "{\"success\":false,\"message\":\"Missing pad parameter\"}");
+      broadcastUploadComplete(-1, false, "Missing pad parameter");
+      return;
+    }
+    
+    uploadPad = request->getParam("pad", true)->value().toInt();
+    
+    if (uploadPad < 0 || uploadPad >= MAX_SAMPLES) {
+      Serial.printf("[Upload] ERROR: Invalid pad number: %d\n", uploadPad);
+      request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid pad number\"}");
+      broadcastUploadComplete(uploadPad, false, "Invalid pad number");
+      return;
+    }
+    
+    // Validar extensión
+    if (!filename.endsWith(".wav") && !filename.endsWith(".WAV")) {
+      Serial.printf("[Upload] ERROR: Invalid file type: %s\n", filename.c_str());
+      request->send(400, "application/json", "{\"success\":false,\"message\":\"Only WAV files are supported\"}");
+      broadcastUploadComplete(uploadPad, false, "Only WAV files are supported");
+      return;
+    }
+    
+    // Obtener nombre de la familia del pad
+    const char* families[] = {"BD", "SD", "CH", "OH", "CP", "RS", "CL", "CY",
+                              "CB", "MA", "HC", "HT", "MC", "MT", "LC", "LT"};
+    String familyName = families[uploadPad];
+    
+    // Crear directorio si no existe
+    String dirPath = "/" + familyName;
+    if (!LittleFS.exists(dirPath)) {
+      LittleFS.mkdir(dirPath);
+    }
+    
+    // Crear path completo
+    String filePath = dirPath + "/" + filename;
+    
+    Serial.println("\n╔═══════════════════════════════════════════════╗");
+    Serial.printf("║  📤 UPLOAD INICIADO: %s\n", filename.c_str());
+    Serial.println("╚═══════════════════════════════════════════════╝");
+    Serial.printf("[Upload] Pad: %d (%s)\n", uploadPad, familyName.c_str());
+    Serial.printf("[Upload] File: %s\n", filePath.c_str());
+    
+    // Abrir archivo para escritura
+    uploadFile = LittleFS.open(filePath, "w");
+    if (!uploadFile) {
+      Serial.println("[Upload] ERROR: Failed to create file");
+      request->send(500, "application/json", "{\"success\":false,\"message\":\"Failed to create file on flash\"}");
+      broadcastUploadComplete(uploadPad, false, "Failed to create file on flash");
+      return;
+    }
+    
+    uploadSize = request->contentLength();
+    Serial.printf("[Upload] Expected size: %d bytes\n", uploadSize);
+    
+    // Validar tamaño (max 2MB para seguridad)
+    if (uploadSize > 2 * 1024 * 1024) {
+      Serial.println("[Upload] ERROR: File too large (max 2MB)");
+      uploadFile.close();
+      request->send(413, "application/json", "{\"success\":false,\"message\":\"File too large (max 2MB)\"}");
+      broadcastUploadComplete(uploadPad, false, "File too large (max 2MB)");
+      return;
+    }
+  }
+  
+  // Escribir chunk de datos
+  if (uploadFile && len) {
+    size_t written = uploadFile.write(data, len);
+    if (written != len) {
+      Serial.printf("[Upload] ERROR: Write failed (%d/%d bytes)\n", written, len);
+      uploadFile.close();
+      request->send(500, "application/json", "{\"success\":false,\"message\":\"Write error\"}");
+      broadcastUploadComplete(uploadPad, false, "Write error");
+      return;
+    }
+    
+    uploadReceived += len;
+    
+    // Progreso cada 10%
+    int percent = (uploadReceived * 100) / uploadSize;
+    static int lastPercent = -1;
+    if (percent != lastPercent && percent % 10 == 0) {
+      Serial.printf("[Upload] Progress: %d%% (%d/%d bytes)\n", percent, uploadReceived, uploadSize);
+      broadcastUploadProgress(uploadPad, percent);
+      lastPercent = percent;
+    }
+  }
+  
+  // Upload completado
+  if (final) {
+    if (uploadFile) {
+      uploadFile.close();
+      
+      Serial.printf("[Upload] ✓ File written: %d bytes\n", uploadReceived);
+      
+      // Validar formato WAV
+      String filePath = "/" + String((const char*[]){"BD", "SD", "CH", "OH", "CP", "RS", "CL", "CY",
+                                                      "CB", "MA", "HC", "HT", "MC", "MT", "LC", "LT"}[uploadPad]) + "/" + uploadFilename;
+      File checkFile = LittleFS.open(filePath, "r");
+      
+      uint32_t sampleRate = 0;
+      uint16_t channels = 0;
+      uint16_t bitsPerSample = 0;
+      
+      if (!validateWavFile(checkFile, sampleRate, channels, bitsPerSample)) {
+        checkFile.close();
+        LittleFS.remove(filePath);
+        Serial.println("[Upload] ERROR: Invalid WAV format");
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid WAV format\"}");
+        broadcastUploadComplete(uploadPad, false, "Invalid WAV format");
+        return;
+      }
+      
+      checkFile.close();
+      
+      Serial.printf("[Upload] ✓ Valid WAV: %dHz, %dch, %dbit\n", sampleRate, channels, bitsPerSample);
+      
+      // Cargar sample en el pad
+      bool loaded = sampleManager.loadSample(filePath.c_str(), uploadPad);
+      
+      if (loaded) {
+        Serial.printf("[Upload] ✓ Sample loaded to pad %d\n", uploadPad);
+        Serial.println("╔═══════════════════════════════════════════════╗");
+        Serial.println("║       ✅ UPLOAD COMPLETADO CON ÉXITO         ║");
+        Serial.println("╚═══════════════════════════════════════════════╝\n");
+        
+        // Enviar respuesta HTTP exitosa
+        request->send(200, "application/json", "{\"success\":true,\"message\":\"Sample uploaded successfully\"}");
+        
+        broadcastUploadComplete(uploadPad, true, "Sample uploaded and loaded successfully");
+        
+        // Broadcast state update
+        broadcastSequencerState();
+      } else {
+        Serial.println("[Upload] ERROR: Failed to load sample");
+        LittleFS.remove(filePath);
+        
+        // Enviar respuesta HTTP de error
+        request->send(500, "application/json", "{\"success\":false,\"message\":\"Failed to load sample\"}");
+        
+        broadcastUploadComplete(uploadPad, false, "Failed to load sample");
+      }
+    }
+    
+    // Reset variables
+    uploadPad = -1;
+    uploadFilename = "";
+    uploadSize = 0;
+    uploadReceived = 0;
+  }
+}
+
+bool WebInterface::validateWavFile(File& file, uint32_t& sampleRate, uint16_t& channels, uint16_t& bitsPerSample) {
+  if (!file || file.size() < 44) {
+    return false;
+  }
+  
+  file.seek(0);
+  uint8_t header[44];
+  if (file.read(header, 44) != 44) {
+    return false;
+  }
+  
+  // Verificar firma RIFF
+  if (memcmp(header, "RIFF", 4) != 0 || memcmp(header + 8, "WAVE", 4) != 0) {
+    return false;
+  }
+  
+  // Extraer parámetros
+  channels = header[22] | (header[23] << 8);
+  sampleRate = header[24] | (header[25] << 8) | (header[26] << 16) | (header[27] << 24);
+  bitsPerSample = header[34] | (header[35] << 8);
+  
+  // Validar parámetros
+  if (sampleRate != 44100 && sampleRate != 48000) {
+    Serial.printf("[Validate] Invalid sample rate: %d (expected 44100 or 48000)\n", sampleRate);
+    return false;
+  }
+  
+  if (channels < 1 || channels > 2) {
+    Serial.printf("[Validate] Invalid channels: %d (expected 1 or 2)\n", channels);
+    return false;
+  }
+  
+  if (bitsPerSample != 16) {
+    Serial.printf("[Validate] Invalid bit depth: %d (expected 16)\n", bitsPerSample);
+    return false;
+  }
+  
+  return true;
+}
+
+void WebInterface::broadcastUploadProgress(int pad, int percent) {
+  if (!initialized || !ws) return;
+  
+  StaticJsonDocument<128> doc;
+  doc["type"] = "uploadProgress";
+  doc["pad"] = pad;
+  doc["percent"] = percent;
+  
+  String output;
+  serializeJson(doc, output);
+  ws->textAll(output);
+}
+
+void WebInterface::broadcastUploadComplete(int pad, bool success, const String& message) {
+  if (!initialized || !ws) return;
+  
+  StaticJsonDocument<256> doc;
+  doc["type"] = "uploadComplete";
+  doc["pad"] = pad;
+  doc["success"] = success;
+  doc["message"] = message;
+  
+  String output;
+  serializeJson(doc, output);
+  ws->textAll(output);
 }
 
