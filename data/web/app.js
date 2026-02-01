@@ -483,17 +483,25 @@ function handleSampleCountsMessage(payload) {
 }
 
 function updateInstrumentCounts(totalFiles) {
-    padNames.forEach((family) => {
+    // Todas las 16 familias que envía el backend
+    const allFamilies = ['BD', 'SD', 'CH', 'OH', 'CP', 'CB', 'RS', 'CL', 'MA', 'CY', 'HT', 'LT', 'MC', 'MT', 'HC', 'LC'];
+    
+    allFamilies.forEach((family) => {
         const label = document.getElementById(`instCount-${family}`);
         if (label) {
             const count = sampleCounts[family] || 0;
             label.textContent = count > 0 ? `${count} library files` : 'No files found';
         }
     });
+    
     const totalsEl = document.getElementById('libraryTotals');
     if (totalsEl) {
         const files = typeof totalFiles === 'number' ? totalFiles : Object.values(sampleCounts).reduce((sum, val) => sum + (val || 0), 0);
-        totalsEl.textContent = `${files} files / ${padNames.length} families`;
+        // Contar familias activas (las 8 de padNames)
+        const activeFamilies = padNames.length;
+        // Contar total de familias con samples
+        const totalFamilies = allFamilies.filter(f => (sampleCounts[f] || 0) > 0).length;
+        totalsEl.textContent = `${files} files total (${activeFamilies} active / ${totalFamilies} families)`;
     }
 }
 
@@ -1009,7 +1017,7 @@ function setupControls() {
             setTimeout(() => {
                 const totalLoaded = Object.keys(sampleCatalog).length;
                 console.log(`Total familias cargadas: ${totalLoaded}`);
-                if (statusEl) statusEl.textContent = `${totalLoaded}/16 familias cargadas`;
+                if (statusEl) statusEl.textContent = `${totalLoaded}/8 familias cargadas`;
             }, 5000);
         });
     }

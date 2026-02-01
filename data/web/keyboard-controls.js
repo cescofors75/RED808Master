@@ -136,7 +136,7 @@ function handleKeyboardShortcut(e) {
     return true;
   }
   
-  // M: Toggle Color Mode (was C, moved to avoid conflict)
+  // M: Toggle Color Mode
   if (key === 'M' && !selectedCell) {
     e.preventDefault();
     const colorToggle = document.getElementById('colorToggle');
@@ -236,7 +236,7 @@ function handleKeyboardShortcut(e) {
       case '_':
         // Move up (previous track) - but only if Shift is pressed to avoid conflict
         if (e.shiftKey) {
-          newTrack = (track - 1 + 16) % 16;
+          newTrack = (track - 1 + 8) % 8;
           navigate = true;
           showToast('↑ Track ' + (newTrack + 1), TOAST_TYPES.INFO, 1000);
         }
@@ -245,7 +245,7 @@ function handleKeyboardShortcut(e) {
       case '=':
         // Move down (next track) - but only if Shift is pressed to avoid conflict
         if (e.shiftKey) {
-          newTrack = (track + 1) % 16;
+          newTrack = (track + 1) % 8;
           navigate = true;
           showToast('↓ Track ' + (newTrack + 1), TOAST_TYPES.INFO, 1000);
         }
@@ -761,7 +761,7 @@ window.handleKeyboardWebSocketMessage = function(data) {
     window.patternVelocities = data.velocities;
     
     // Update UI for all steps - velocities comes as object with string keys "0", "1", etc.
-    for (let track = 0; track < 16; track++) {
+    for (let track = 0; track < 8; track++) {
       const trackKey = track.toString();
       const trackVels = data.velocities[trackKey];
       if (!trackVels) continue; // Skip if track velocities undefined
