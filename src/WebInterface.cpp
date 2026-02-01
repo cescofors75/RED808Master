@@ -443,21 +443,21 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
           
           if (cmd == "getPattern") {
             int pattern = sequencer.getCurrentPattern();
-            StaticJsonDocument<6144> responseDoc;
+            StaticJsonDocument<3072> responseDoc;
             responseDoc["type"] = "pattern";
             responseDoc["index"] = pattern;
             
-            // Send steps (active/inactive)
-            for (int track = 0; track < 16; track++) {
+            // Send steps (active/inactive) - Solo 8 tracks activos
+            for (int track = 0; track < 8; track++) {
               JsonArray trackSteps = responseDoc.createNestedArray(String(track));
               for (int step = 0; step < 16; step++) {
                 trackSteps.add(sequencer.getStep(track, step));
               }
             }
             
-            // Send velocities (NEW)
+            // Send velocities
             JsonObject velocitiesObj = responseDoc.createNestedObject("velocities");
-            for (int track = 0; track < 16; track++) {
+            for (int track = 0; track < 8; track++) {
               JsonArray trackVels = velocitiesObj.createNestedArray(String(track));
               for (int step = 0; step < 16; step++) {
                 trackVels.add(sequencer.getStepVelocity(track, step));
@@ -476,45 +476,16 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             // Cliente solicita inicialización completa (se llama después de conectar)
             Serial.printf("[init] Client %u requesting full initialization\n", client->id());
             
-            // 1. Enviar estado del sequencer
+            // 1. Enviar solo estado del sequencer (sin patrón)
             yield(); // Give time to other tasks
             sendSequencerStateToClient(client);
-            delay(10); // Small delay to avoid overload
+            delay(50); // Aumentado delay para estabilidad
             
-            // 2. Enviar patrón actual con velocities
-            yield();
-            if (isClientReady(client)) {
-              int pattern = sequencer.getCurrentPattern();
-              StaticJsonDocument<6144> responseDoc;
-              responseDoc["type"] = "pattern";
-              responseDoc["index"] = pattern;
-              
-              // Send steps
-              for (int track = 0; track < 16; track++) {
-                JsonArray trackSteps = responseDoc.createNestedArray(String(track));
-                for (int step = 0; step < 16; step++) {
-                  trackSteps.add(sequencer.getStep(track, step));
-                }
-              }
-              
-              // Send velocities
-              JsonObject velocitiesObj = responseDoc.createNestedObject("velocities");
-              for (int track = 0; track < 16; track++) {
-                JsonArray trackVels = velocitiesObj.createNestedArray(String(track));
-                for (int step = 0; step < 16; step++) {
-                  trackVels.add(sequencer.getStepVelocity(track, step));
-                }
-              }
-              
-              String output;
-              serializeJson(responseDoc, output);
-              client->text(output);
-              Serial.printf("[init] Pattern sent to client %u\n", client->id());
-            }
-            delay(10);
+            // 2. Cliente solicitará patrón con getPattern cuando esté listo
+            // NO enviamos patrón automáticamente para evitar overflow
             
             // 3. Cliente solicitará samples con getSampleCounts cuando esté listo
-            Serial.println("[init] Complete. Client should request samples next.");
+            Serial.println("[init] Complete. Client should request pattern and samples next.");
           }
           else if (cmd == "getSampleCounts") {
             // Nuevo comando para obtener conteos de samples
@@ -664,8 +635,9 @@ void WebInterface::update() {
   // Proteger contra llamadas antes de inicialización
   if (!initialized || !ws || !server) return;
   
-  // Solo cleanup, el broadcast de steps se hace via callback
-  ws->cleanupClients();
+  // DESACTIVADO: cleanupClients() causa crashes con clientes recién conectados
+  // La librería maneja la limpieza automáticamente en segundo plano
+  // ws->cleanupClients();
   
   // Limpiar clientes UDP inactivos cada 10 segundos
   static unsigned long lastCleanup = 0;
@@ -756,12 +728,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     // Enviar estado actualizado
     broadcastSequencerState();
     
-    // Enviar datos del patrón (matriz de steps)
-    StaticJsonDocument<6144> patternDoc;
+    // Enviar datos del patrón (matriz de steps) - Solo 8 tracks activos
+    StaticJsonDocument<3072> patternDoc;
     patternDoc["type"] = "pattern";
     patternDoc["index"] = pattern;
     
-    for (int track = 0; track < 16; track++) {
+    for (int track = 0; track < 8; track++) {
       JsonArray trackSteps = patternDoc.createNestedArray(String(track));
       for (int step = 0; step < 16; step++) {
         trackSteps.add(sequencer.getStep(track, step));
@@ -769,7 +741,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     }
     
     JsonObject velocitiesObj = patternDoc.createNestedObject("velocities");
-    for (int track = 0; track < 16; track++) {
+    for (int track = 0; track < 8; track++) {
       JsonArray trackVels = velocitiesObj.createNestedArray(String(track));
       for (int step = 0; step < 16; step++) {
         trackVels.add(sequencer.getStepVelocity(track, step));

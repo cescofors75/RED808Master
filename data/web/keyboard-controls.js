@@ -590,15 +590,15 @@ function selectPad(pad) {
   });
   
   const padElement = document.querySelector(`[data-pad="${pad}"]`);
+  if (padElement) {
+    padElement.classList.add('selected-pad');
+  }
+}
 
 // Export para app.js
 window.selectCell = selectCell;
 window.selectTrack = selectTrack;
 window.selectPad = selectPad;
-  if (padElement) {
-    padElement.classList.add('selected-pad');
-  }
-}
 
 // ============= TRACK FILTER UI =============
 

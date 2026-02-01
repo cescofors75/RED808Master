@@ -131,13 +131,19 @@ function initWebSocket() {
         console.log('[WS] Requesting initialization...');
         setTimeout(() => {
             sendWebSocket({ cmd: 'init' });
-        }, 100); // Reducido de 300ms a 100ms
+        }, 100);
+        
+        // Solicitar patrón después de init (ahora no se envía automáticamente)
+        setTimeout(() => {
+            console.log('[WS] Requesting pattern...');
+            sendWebSocket({ cmd: 'getPattern' });
+        }, 300);
         
         // Solicitar samples de forma lazy (no bloquea UI)
         setTimeout(() => {
             console.log('[WS] Requesting sample counts (lazy)...');
             requestSampleCounts();
-        }, 800); // Reducido de 1500ms a 800ms
+        }, 1000);
     };
     
     ws.onclose = () => {
@@ -1396,10 +1402,17 @@ function updateSequencerState(data) {
         document.querySelectorAll('.btn-pattern').forEach(btn => {
             btn.classList.toggle('active', parseInt(btn.dataset.pattern) === data.pattern);
         });
+        
+        // Solo solicitar patrón si cambió (no en cada state update)
+        const currentActiveButton = document.querySelector('.btn-pattern.active');
+        const currentPatternIndex = currentActiveButton ? parseInt(currentActiveButton.dataset.pattern) : -1;
+        if (currentPatternIndex !== data.pattern) {
+            // Pattern changed, request new pattern data
+            setTimeout(() => {
+                sendWebSocket({ cmd: 'getPattern' });
+            }, 100);
+        }
     }
-    
-    // Request current pattern data
-    sendWebSocket({ cmd: 'getPattern' });
 }
 
 // Send WebSocket message
