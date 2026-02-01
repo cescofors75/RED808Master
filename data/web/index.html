@@ -60,6 +60,7 @@
             <button class="tab-btn" data-tab="sequencer">🎵 SEQUENCER</button>
             <button class="tab-btn" data-tab="controls">🎛️ CONTROLES</button>
             <button class="tab-btn" data-tab="fx">🔊 FX</button>
+            <button class="tab-btn" data-tab="midi">🎹 MIDI</button>
             <button class="tab-btn" data-tab="info">📊 INFO</button>
         </nav>
 
@@ -366,6 +367,110 @@
                             <strong>Ver Activos:</strong>
                             <p>Los filtros activos se muestran<br>con badges en pads y tracks</p>
                         </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- TAB: MIDI -->
+        <div id="tab-midi" class="tab-content">
+            <section id="section-midi" class="midi-section" data-section="midi" data-title="MIDI Control">
+                <div class="midi-header">
+                    <h2>🎹 MIDI USB CONTROL</h2>
+                    <div class="midi-status" id="midiStatus">
+                        <span class="midi-status-dot" id="midiStatusDot"></span>
+                        <span id="midiStatusText">Esperando dispositivo USB...</span>
+                    </div>
+                </div>
+
+                <!-- Device Info Card -->
+                <div class="midi-device-card" id="midiDeviceCard" style="display:none;">
+                    <h3>✓ Dispositivo MIDI Conectado</h3>
+                    <div class="midi-device-info">
+                        <div class="midi-info-row">
+                            <span class="midi-label">Dispositivo:</span>
+                            <span class="midi-value" id="midiDeviceName">—</span>
+                        </div>
+                        <div class="midi-info-row">
+                            <span class="midi-label">Vendor ID:</span>
+                            <span class="midi-value" id="midiVendorId">—</span>
+                        </div>
+                        <div class="midi-info-row">
+                            <span class="midi-label">Product ID:</span>
+                            <span class="midi-value" id="midiProductId">—</span>
+                        </div>
+                        <div class="midi-info-row">
+                            <span class="midi-label">Conectado hace:</span>
+                            <span class="midi-value" id="midiConnectTime">—</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MIDI Mapping Guide -->
+                <div class="midi-mapping-card">
+                    <h3>🗺️ MIDI Mapping</h3>
+                    <p class="midi-description">
+                        Conecta un teclado MIDI o pad controller via USB. Los mensajes se mapean automáticamente:
+                    </p>
+                    <div class="midi-mapping-grid">
+                        <div class="midi-map-item">
+                            <span class="midi-map-key">Note 36 (C1)</span>
+                            <span class="midi-map-arrow">→</span>
+                            <span class="midi-map-target">BD (Bass Drum)</span>
+                        </div>
+                        <div class="midi-map-item">
+                            <span class="midi-map-key">Note 37 (C#1)</span>
+                            <span class="midi-map-arrow">→</span>
+                            <span class="midi-map-target">SD (Snare)</span>
+                        </div>
+                        <div class="midi-map-item">
+                            <span class="midi-map-key">Note 38 (D1)</span>
+                            <span class="midi-map-arrow">→</span>
+                            <span class="midi-map-target">CH (Closed Hi-hat)</span>
+                        </div>
+                        <div class="midi-map-item">
+                            <span class="midi-map-key">Note 39 (D#1)</span>
+                            <span class="midi-map-arrow">→</span>
+                            <span class="midi-map-target">OH (Open Hi-hat)</span>
+                        </div>
+                        <div class="midi-map-item">
+                            <span class="midi-map-key">Note 40 (E1)</span>
+                            <span class="midi-map-arrow">→</span>
+                            <span class="midi-map-target">CP (Clap)</span>
+                        </div>
+                        <div class="midi-map-item">
+                            <span class="midi-map-key">Note 41 (F1)</span>
+                            <span class="midi-map-arrow">→</span>
+                            <span class="midi-map-target">RS (Rimshot)</span>
+                        </div>
+                        <div class="midi-map-item">
+                            <span class="midi-map-key">Note 42 (F#1)</span>
+                            <span class="midi-map-arrow">→</span>
+                            <span class="midi-map-target">CL (Claves)</span>
+                        </div>
+                        <div class="midi-map-item">
+                            <span class="midi-map-key">Note 43 (G1)</span>
+                            <span class="midi-map-arrow">→</span>
+                            <span class="midi-map-target">CY (Cymbal)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live MIDI Monitor -->
+                <div class="midi-monitor-card">
+                    <h3>📡 Monitor en Vivo</h3>
+                    <div class="midi-stats">
+                        <div class="midi-stat">
+                            <span class="midi-stat-label">Total Mensajes:</span>
+                            <span class="midi-stat-value" id="midiTotalMessages">0</span>
+                        </div>
+                        <div class="midi-stat">
+                            <span class="midi-stat-label">Mensajes/seg:</span>
+                            <span class="midi-stat-value" id="midiMessagesPerSecond">0</span>
+                        </div>
+                    </div>
+                    <div class="midi-messages" id="midiMessages">
+                        <div class="midi-placeholder">Esperando mensajes MIDI...</div>
                     </div>
                 </div>
             </section>

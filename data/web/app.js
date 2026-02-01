@@ -297,6 +297,12 @@ function handleWebSocketMessage(data) {
                 console.log(`Received ${data.presets.length} filter presets`);
             }
             break;
+        case 'midiDevice':
+            handleMIDIDeviceMessage(data);
+            break;
+        case 'midiMessage':
+            handleMIDIMessage(data);
+            break;
     }
     
     // Call keyboard controls handler if function exists
@@ -2170,6 +2176,134 @@ function applyFilterPreset(filterType, cutoffFreq) {
         );
     }
 }
+
+// ============================================
+// MIDI FUNCTIONS
+// ============================================
+
+let midiTotalMessages = 0;
+const midiMessagesQueue = [];
+const MAX_MIDI_MESSAGES_DISPLAY = 20;
+
+function handleMIDIDeviceMessage(data) {
+    const statusDot = document.getElementById('midiStatusDot');
+    const statusText = document.getElementById('midiStatusText');
+    const deviceCard = document.getElementById('midiDeviceCard');
+    
+    if (data.connected) {
+        // Device connected
+        statusDot.classList.add('connected');
+        statusDot.classList.remove('disconnected');
+        statusText.textContent = 'Dispositivo MIDI conectado';
+        
+        // Show device card
+        deviceCard.style.display = 'block';
+        document.getElementById('midiDeviceName').textContent = data.deviceName || 'USB MIDI Device';
+        document.getElementById('midiVendorId').textContent = data.vendorId ? `0x${data.vendorId.toString(16).toUpperCase()}` : '—';
+        document.getElementById('midiProductId').textContent = data.productId ? `0x${data.productId.toString(16).toUpperCase()}` : '—';
+        
+        const connectTime = data.connectTime ? new Date(data.connectTime).toLocaleTimeString('es-ES') : '—';
+        document.getElementById('midiConnectTime').textContent = connectTime;
+        
+        console.log('[MIDI] Device connected:', data.deviceName);
+    } else {
+        // Device disconnected
+        statusDot.classList.remove('connected');
+        statusDot.classList.add('disconnected');
+        statusText.textContent = 'Dispositivo MIDI desconectado';
+        deviceCard.style.display = 'none';
+        
+        console.log('[MIDI] Device disconnected');
+    }
+}
+
+function handleMIDIMessage(data) {
+    midiTotalMessages++;
+    
+    // Update stats
+    document.getElementById('midiTotalMessages').textContent = midiTotalMessages;
+    
+    // Add to queue
+    midiMessagesQueue.unshift(data);
+    if (midiMessagesQueue.length > MAX_MIDI_MESSAGES_DISPLAY) {
+        midiMessagesQueue.pop();
+    }
+    
+    // Update display
+    updateMIDIMessagesDisplay();
+    
+    // Log to console
+    console.log(`[MIDI] ${data.messageType} Ch:${data.channel} Data1:${data.data1} Data2:${data.data2}`);
+}
+
+function updateMIDIMessagesDisplay() {
+    const container = document.getElementById('midiMessages');
+    if (!container) return;
+    
+    // Clear placeholder
+    container.innerHTML = '';
+    
+    // Create message items
+    midiMessagesQueue.forEach((msg, index) => {
+        const item = document.createElement('div');
+        item.className = 'midi-message-item';
+        
+        const typeSpan = document.createElement('span');
+        typeSpan.className = 'midi-message-type';
+        typeSpan.textContent = formatMIDIType(msg.messageType);
+        
+        const dataSpan = document.createElement('span');
+        dataSpan.className = 'midi-message-data';
+        dataSpan.textContent = formatMIDIData(msg);
+        
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'midi-message-time';
+        const elapsed = Date.now() - msg.timestamp;
+        timeSpan.textContent = elapsed < 1000 ? 'ahora' : `${Math.floor(elapsed / 1000)}s`;
+        
+        item.appendChild(typeSpan);
+        item.appendChild(dataSpan);
+        item.appendChild(timeSpan);
+        
+        container.appendChild(item);
+    });
+}
+
+function formatMIDIType(type) {
+    const types = {
+        'noteOn': 'Note On',
+        'noteOff': 'Note Off',
+        'cc': 'Control Change',
+        'program': 'Program Change',
+        'pitchBend': 'Pitch Bend',
+        'aftertouch': 'Aftertouch',
+        'pressure': 'Channel Pressure'
+    };
+    return types[type] || type;
+}
+
+function formatMIDIData(msg) {
+    switch(msg.messageType) {
+        case 'noteOn':
+        case 'noteOff':
+            return `Ch${msg.channel} Note:${msg.data1} Vel:${msg.data2}`;
+        case 'cc':
+            return `Ch${msg.channel} CC:${msg.data1} Val:${msg.data2}`;
+        case 'program':
+            return `Ch${msg.channel} Program:${msg.data1}`;
+        case 'pitchBend':
+            const bend = (msg.data2 << 7) | msg.data1;
+            return `Ch${msg.channel} Bend:${bend}`;
+        default:
+            return `Ch${msg.channel} D1:${msg.data1} D2:${msg.data2}`;
+    }
+}
+
+// Update messages per second periodically
+setInterval(() => {
+    // This would need backend support to send real-time stats
+    // For now we can estimate based on message timestamps
+}, 1000);
 
 // Export to window
 window.applyFilterPreset = applyFilterPreset;

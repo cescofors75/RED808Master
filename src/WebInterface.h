@@ -14,6 +14,7 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <map>
+#include "MIDIController.h"
 
 #define UDP_PORT 8888  // Puerto para recibir comandos UDP
 
@@ -40,6 +41,11 @@ public:
   void broadcastStep(int step);
   void broadcastVisualizationData();
   
+  // MIDI functions
+  void setMIDIController(MIDIController* controller);
+  void broadcastMIDIMessage(const MIDIMessage& msg);
+  void broadcastMIDIDeviceStatus(bool connected, const MIDIDeviceInfo& info);
+  
   String getIP();
   
 private:
@@ -47,6 +53,9 @@ private:
   AsyncWebSocket* ws;
   WiFiUDP udp;  // Servidor UDP
   bool initialized;
+  
+  // MIDI Controller reference
+  MIDIController* midiController;
   
   // Tracking de clientes UDP
   std::map<String, UdpClient> udpClients;

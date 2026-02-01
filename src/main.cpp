@@ -6,6 +6,7 @@
 #include "KitManager.h"
 #include "Sequencer.h"
 #include "WebInterface.h"
+#include "MIDIController.h"
 
 // --- CONFIGURACIÓN DE HARDWARE ---
 #define I2S_BCK   42    // BCLK - Bit Clock
@@ -22,6 +23,7 @@ SampleManager sampleManager;
 KitManager kitManager;
 Sequencer sequencer;
 WebInterface webInterface;
+MIDIController midiController;
 Adafruit_NeoPixel rgbLed(RGB_LED_NUM, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);
 
 // Colores por instrumento - Colores AKAI APC mini profesionales en formato GRB (8 tracks)
@@ -122,6 +124,7 @@ void systemTask(void *pvParameters) {
         sequencer.update();
         webInterface.update(); // WiFi activado
         webInterface.handleUdp(); // Manejar comandos UDP
+        midiController.update(); // Procesar eventos MIDI USB
         
         // Fade out del LED después de trigger
         if (ledFading && millis() - lastLedUpdate > 20) {  // Más lento (cada 20ms)
@@ -454,6 +457,40 @@ void setup() {
         delay(1200); // Más tiempo para ver el verde
     } else {
         Serial.println("❌ WiFi falló - continuando sin WiFi");
+    }
+
+    // --- INICIALIZAR MIDI USB HOST ---
+    Serial.println("\n[STEP 6.5] Initializing MIDI USB Host...");
+    Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    if (midiController.begin()) {
+        // Conectar MIDI controller con WebInterface
+        webInterface.setMIDIController(&midiController);
+        
+        // Callback para mensajes MIDI
+        midiController.setMessageCallback([](const MIDIMessage& msg) {
+            // Broadcast a la web
+            webInterface.broadcastMIDIMessage(msg);
+            
+            // Mapear MIDI notes a pads (36-43 = BD,SD,CH,OH,CP,RS,CL,CY)
+            if (msg.type == MIDI_NOTE_ON && msg.data2 > 0) {
+                int pad = msg.data1 - 36;
+                if (pad >= 0 && pad < 8) {
+                    triggerPadWithLED(pad, msg.data2);
+                }
+            }
+        });
+        
+        // Callback para conexión/desconexión de dispositivos
+        midiController.setDeviceCallback([](bool connected, const MIDIDeviceInfo& info) {
+            webInterface.broadcastMIDIDeviceStatus(connected, info);
+        });
+        
+        Serial.println("✅ MIDI USB Host ready on USB OTG port");
+        Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    } else {
+        Serial.println("⚠️  MIDI USB Host initialization failed");
+        Serial.println("   Continuando sin soporte MIDI USB");
+        Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
     }
 
     // --- LANZAMIENTO DE TAREAS OPTIMIZADAS ---

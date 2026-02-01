@@ -195,6 +195,7 @@ WebInterface::WebInterface() {
   server = nullptr;
   ws = nullptr;
   initialized = false;
+  midiController = nullptr;
 }
 
 WebInterface::~WebInterface() {
@@ -1124,3 +1125,64 @@ void WebInterface::handleUdp() {
     }
   }
 }
+
+// ========================================
+// MIDI Functions
+// ========================================
+
+void WebInterface::setMIDIController(MIDIController* controller) {
+  midiController = controller;
+  Serial.println("[WebInterface] MIDI Controller reference set");
+}
+
+void WebInterface::broadcastMIDIMessage(const MIDIMessage& msg) {
+  if (!initialized || !ws) return;
+  
+  StaticJsonDocument<256> doc;
+  doc["type"] = "midiMessage";
+  
+  // Message type string
+  const char* msgType = "unknown";
+  switch (msg.type) {
+    case MIDI_NOTE_ON: msgType = "noteOn"; break;
+    case MIDI_NOTE_OFF: msgType = "noteOff"; break;
+    case MIDI_CONTROL_CHANGE: msgType = "cc"; break;
+    case MIDI_PROGRAM_CHANGE: msgType = "program"; break;
+    case MIDI_PITCH_BEND: msgType = "pitchBend"; break;
+    case MIDI_AFTERTOUCH: msgType = "aftertouch"; break;
+    case MIDI_CHANNEL_PRESSURE: msgType = "pressure"; break;
+  }
+  
+  doc["messageType"] = msgType;
+  doc["channel"] = msg.channel + 1; // 1-16 for display
+  doc["data1"] = msg.data1;
+  doc["data2"] = msg.data2;
+  doc["timestamp"] = msg.timestamp;
+  
+  String output;
+  serializeJson(doc, output);
+  ws->textAll(output);
+}
+
+void WebInterface::broadcastMIDIDeviceStatus(bool connected, const MIDIDeviceInfo& info) {
+  if (!initialized || !ws) return;
+  
+  StaticJsonDocument<512> doc;
+  doc["type"] = "midiDevice";
+  doc["connected"] = connected;
+  
+  if (connected) {
+    doc["deviceName"] = info.deviceName;
+    doc["vendorId"] = info.vendorId;
+    doc["productId"] = info.productId;
+    doc["connectTime"] = info.connectTime;
+  }
+  
+  String output;
+  serializeJson(doc, output);
+  ws->textAll(output);
+  
+  Serial.printf("[WebInterface] MIDI device status broadcast: %s\n", 
+                connected ? "connected" : "disconnected");
+}
+
