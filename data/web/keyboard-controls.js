@@ -603,6 +603,9 @@ window.selectPad = selectPad;
 // ============= TRACK FILTER UI =============
 
 function showTrackFilterPanel(track) {
+  // Always set selectedTrack when panel is shown
+  selectedTrack = track;
+  
   let panel = document.getElementById('track-filter-panel');
   if (!panel) {
     panel = createTrackFilterPanel();

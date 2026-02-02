@@ -151,8 +151,10 @@ void AudioEngine::triggerSampleSequencer(int padIndex, uint8_t velocity) {
   voices[voiceIndex].loop = false;
   voices[voiceIndex].padIndex = padIndex;
   voices[voiceIndex].isLivePad = false;
-  Serial.printf("[AudioEngine] *** SEQ PAD %d -> Voice %d, Length: %d samples, Velocity: %d ***\n",
-                padIndex, voiceIndex, sampleLengths[padIndex], velocity);
+  
+  const char* filterStatus = trackFilterActive[padIndex] ? "FILTER ON" : "no filter";
+  Serial.printf("[AudioEngine] *** SEQ TRACK %d -> Voice %d, Length: %d, Vel: %d, %s ***\n",
+                padIndex, voiceIndex, sampleLengths[padIndex], velocity, filterStatus);
 }
 
 void AudioEngine::triggerSampleLive(int padIndex, uint8_t velocity) {
@@ -293,6 +295,10 @@ void AudioEngine::fillBuffer(int16_t* buffer, size_t samples) {
         // Check if track has filter (for sequencer tracks)
         else if (!voice.isLivePad && voice.padIndex < MAX_AUDIO_TRACKS && trackFilterActive[voice.padIndex]) {
           filtered = applyFilter(filtered, trackFilters[voice.padIndex]);
+          // Debug: print only once per voice activation
+          if (voice.position == 0) {
+            Serial.printf("[FILTER APPLIED] Track %d, Type: %d\n", voice.padIndex, trackFilters[voice.padIndex].filterType);
+          }
         }
       }
       
@@ -606,10 +612,11 @@ bool AudioEngine::setTrackFilter(int track, FilterType type, float cutoff, float
   // Calculate coefficients for this filter
   if (type != FILTER_NONE) {
     calculateBiquadCoeffs(trackFilters[track]);
+    Serial.printf("[AudioEngine] Track %d filter ACTIVE: %s (cutoff: %.1f Hz, Q: %.2f, gain: %.1f dB)\n",
+                  track, getFilterName(type), cutoff, resonance, gain);
+  } else {
+    Serial.printf("[AudioEngine] Track %d filter CLEARED\n", track);
   }
-  
-  Serial.printf("[AudioEngine] Track %d filter: %s (cutoff: %.1f Hz, Q: %.2f, gain: %.1f dB)\n",
-                track, getFilterName(type), cutoff, resonance, gain);
   return true;
 }
 

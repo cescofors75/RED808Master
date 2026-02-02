@@ -1100,7 +1100,7 @@ body:not(.mono-mode) .pad.tremolo-active {
     transition: all 0.2s;
     font-weight: 300;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    z-index: 1000 !important;
+    z-index: 100 !important;
     position: absolute !important;
     bottom: 6px !important;
     left: 6px !important;
@@ -1109,7 +1109,7 @@ body:not(.mono-mode) .pad.tremolo-active {
     pointer-events: auto !important;
     width: 22px;
     height: 22px;
-    display: flex;
+    display: flex !important;
     align-items: center;
     justify-content: center;
     opacity: 0.65;

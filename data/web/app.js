@@ -226,17 +226,13 @@ function handleWebSocketMessage(data) {
                 // Create or update badge on track label
                 const trackLabel = document.querySelector(`.track-label[data-track="${data.track}"]`);
                 if (trackLabel && data.filterType !== undefined) {
-                    // Always remove existing badge first to avoid duplicates
-                    let badge = trackLabel.querySelector('.track-filter-badge');
-                    if (badge) {
-                        badge.remove();
-                        badge = null;
-                    }
+                    // Remove ALL existing badges from this track to avoid duplicates
+                    trackLabel.querySelectorAll('.track-filter-badge').forEach(b => b.remove());
                     
-                    // Only create badge if filter type is NOT 0 (NONE)
-                    if (data.filterType !== 0 && data.filterType > 0) {
+                    // Only create badge if filter type is NOT 0 (NONE) and is valid
+                    if (data.filterType > 0 && data.filterType < 10) {
                         // Create new badge
-                        badge = document.createElement('div');
+                        const badge = document.createElement('div');
                         badge.className = 'track-filter-badge';
                         const filterIcons = ['⭕', '🔽', '🔼', '🎯', '🚫', '📊', '📈', '⛰️', '🌀', '💫'];
                         const cutoff = data.cutoff || '?';
@@ -254,11 +250,10 @@ function handleWebSocketMessage(data) {
             }
             console.log(`Track ${data.track} filter cleared, active filters: ${data.activeFilters}`);
             
-            // Remove badge from track label
+            // Remove ALL badges from track label
             const trackLabel = document.querySelector(`.track-label[data-track="${data.track}"]`);
             if (trackLabel) {
-                const badge = trackLabel.querySelector('.track-filter-badge');
-                if (badge) badge.remove();
+                trackLabel.querySelectorAll('.track-filter-badge').forEach(badge => badge.remove());
             }
             break;
         case 'padFilterSet':
@@ -402,8 +397,8 @@ function createPads() {
         pad.innerHTML = `
             <div class="pad-header">
                 <span class="pad-number">${(i + 1).toString().padStart(2, '0')}</span>
-                <button class="pad-upload-btn" data-pad="${i}" title="Load Sample">+</button>
             </div>
+            <button class="pad-upload-btn" data-pad="${i}" title="Load Sample">+</button>
             <div class="pad-content">
                 <div class="pad-name">${padNames[i]}</div>
                 <div class="pad-sample-info" id="sampleInfo-${i}"><span class="sample-file">...</span><span class="sample-quality">44.1k•16b•M</span></div>
@@ -891,6 +886,10 @@ function createSequencer() {
         filterBtn.dataset.track = track;
         filterBtn.addEventListener('click', (e) => {
             e.stopPropagation();
+            // Set selected track globally so filter panel can use it
+            if (window.keyboard_controls_module) {
+                window.keyboard_controls_module.selectedTrack = track;
+            }
             if (window.showTrackFilterPanel) {
                 window.showTrackFilterPanel(track);
             }
@@ -2145,15 +2144,13 @@ function applyFilterPreset(filterType, cutoffFreq) {
         // Create or update badge on track label
         const trackLabel = document.querySelector(`.track-label[data-track="${track}"]`);
         if (trackLabel) {
-            // Always remove existing badge first to avoid duplicates
-            let badge = trackLabel.querySelector('.track-filter-badge');
-            if (badge) badge.remove();
+            // Remove ALL existing badges first to avoid duplicates
+            trackLabel.querySelectorAll('.track-filter-badge').forEach(b => b.remove());
             
-            if (filterType === 0) {
-                // Type 0 = NONE, badge already removed
-            } else {
+            // Only create badge if filter type is NOT 0 (NONE) and is valid
+            if (filterType > 0 && filterType < 10) {
                 // Create new badge
-                badge = document.createElement('div');
+                const badge = document.createElement('div');
                 badge.className = 'track-filter-badge';
                 const filterIcons = ['⭕', '🔽', '🔼', '🎯', '🚫', '📊', '📈', '⛰️', '🌀', '💫'];
                 badge.innerHTML = `${filterIcons[filterType]} <span class="badge-freq">${cutoffFreq}Hz</span>`;
