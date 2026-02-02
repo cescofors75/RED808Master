@@ -304,6 +304,9 @@ function handleKeyboardShortcut(e) {
     if (padIndex !== null) {
       e.preventDefault();
       
+      // Auto-select pad when triggered via keyboard (for filter shortcuts)
+      selectPad(padIndex);
+      
       // Handle Shift + pad = mute/unmute
       if (e.shiftKey) {
         if (window.setTrackMuted && window.trackMutedState) {
@@ -526,23 +529,18 @@ function applyPadFilter(pad, filter) {
     window.sendWebSocket(cmd);
   }
   
-  // Update visual indicator (purple corona)
-  const padElement = document.querySelector(`[data-pad="${pad}"]`);
-  if (padElement) {
-    // Show toast notification
-    const filterName = filter.name || (filter.type === 0 ? 'Filter cleared' : 'Filter applied');
-    showToast(`Pad ${pad + 1}: ${filterName}`, filter.type === 0 ? TOAST_TYPES.INFO : TOAST_TYPES.SUCCESS, 2500);
-    
-    if (filter.type === 0) {
-      // Remove filter class
-      padElement.classList.remove('has-filter');
-    } else {
-      // Add filter class (shows purple glow)
-      padElement.classList.add('has-filter');
-    }
+  // Update pad filter state and visual indicator
+  if (window.padFilterState) {
+    window.padFilterState[pad] = filter.type;
+  }
+  if (window.updatePadFilterIndicator) {
+    window.updatePadFilterIndicator(pad);
   }
   
-  // Toast notification already shown above (line ~457)
+  // Show toast notification
+  const filterName = filter.name || (filter.type === 0 ? 'Filter cleared' : 'Filter applied');
+  const padNames = ['BD', 'SD', 'CH', 'OH', 'CP', 'RS', 'CL', 'CY'];
+  showToast(`${padNames[pad]}: ${filterName}`, filter.type === 0 ? TOAST_TYPES.INFO : TOAST_TYPES.SUCCESS, 2500);
 }
 
 // ============= UI SELECTION =============
@@ -997,6 +995,7 @@ function createKeyboardSidebar() {
           <div class="key-item"><kbd>8</kbd><span>CY (Cymbal)</span></div>
         </div>
         <div class="key-note">Hold = Tremolo | Shift+Key = Mute Track</div>
+        <div class="key-note">Auto-selects pad for Shift+F1-F10 filters</div>
       </div>
       
       <div class="key-section">

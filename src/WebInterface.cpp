@@ -93,6 +93,13 @@ static void populateStateDocument(StaticJsonDocument<6144>& doc) {
       sampleObj["format"] = detectSampleFormat(name);
     }
   }
+  
+  // Send pad filter states (for live pads)
+  JsonArray padFilters = doc.createNestedArray("padFilters");
+  for (int pad = 0; pad < 8; pad++) {
+    FilterType filterType = audioEngine.getPadFilter(pad);
+    padFilters.add((int)filterType);
+  }
 }
 
 static bool isClientReady(AsyncWebSocketClient* client) {

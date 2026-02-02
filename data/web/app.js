@@ -35,6 +35,9 @@ let keyboardTremoloState = {};
 let padHoldTimers = {};
 let trackMutedState = new Array(8).fill(false);
 
+// Pad filter state (stores active filter type for each pad)
+let padFilterState = new Array(8).fill(0); // 0 = FILTER_NONE
+
 // 8 instrumentos principales
 const padNames = ['BD', 'SD', 'CH', 'OH', 'CP', 'RS', 'CL', 'CY'];
 
@@ -184,6 +187,15 @@ function handleWebSocketMessage(data) {
             updateDeviceStats(data);
             if (Array.isArray(data.samples)) {
                 applySampleMetadataFromState(data.samples);
+            }
+            // Load pad filter states
+            if (Array.isArray(data.padFilters)) {
+                data.padFilters.forEach((filterType, padIndex) => {
+                    if (padIndex < 8) {
+                        padFilterState[padIndex] = filterType;
+                        updatePadFilterIndicator(padIndex);
+                    }
+                });
             }
             break;
         case 'step':
@@ -399,6 +411,8 @@ function createPads() {
                 <span class="pad-number">${(i + 1).toString().padStart(2, '0')}</span>
             </div>
             <button class="pad-upload-btn" data-pad="${i}" title="Load Sample">+</button>
+            <button class="pad-filter-btn" data-pad="${i}" title="Filter">F</button>
+            <span class="pad-filter-indicator" data-pad="${i}" style="display:none;"></span>
             <div class="pad-content">
                 <div class="pad-name">${padNames[i]}</div>
                 <div class="pad-sample-info" id="sampleInfo-${i}"><span class="sample-file">...</span><span class="sample-quality">44.1k•16b•M</span></div>
@@ -444,6 +458,16 @@ function createPads() {
                 e.preventDefault();
                 e.stopPropagation();
                 showUploadDialog(i);
+            });
+        }
+        
+        // Event listener para botón F de filtro
+        const filterBtn = pad.querySelector('.pad-filter-btn');
+        if (filterBtn) {
+            filterBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                showPadFilterSelector(i, pad);
             });
         }
         
@@ -551,6 +575,101 @@ function stopKeyboardTremolo(padIndex, padElement) {
         padElement.classList.remove('keyboard-tremolo');
         padElement.classList.remove('active');
         padElement.style.filter = '';
+    }
+}
+
+// Show filter selector overlay for pad
+function showPadFilterSelector(padIndex, padElement) {
+    // Remove any existing overlay
+    const existingOverlay = document.querySelector('.pad-filter-overlay');
+    if (existingOverlay) {
+        existingOverlay.remove();
+    }
+    
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'pad-filter-overlay';
+    
+    // Create filter grid (10 filters in 3x4 grid)
+    const filterGrid = document.createElement('div');
+    filterGrid.className = 'pad-filter-grid';
+    
+    FILTER_TYPES.forEach((filter, index) => {
+        const filterBtn = document.createElement('button');
+        filterBtn.className = 'pad-filter-option';
+        filterBtn.dataset.filterType = index;
+        if (index === padFilterState[padIndex]) {
+            filterBtn.classList.add('active');
+        }
+        
+        filterBtn.innerHTML = `
+            <span class="filter-icon">${filter.icon}</span>
+            <span class="filter-name">${filter.name}</span>
+        `;
+        
+        filterBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setPadFilter(padIndex, index);
+            overlay.remove();
+        });
+        
+        filterGrid.appendChild(filterBtn);
+    });
+    
+    overlay.appendChild(filterGrid);
+    
+    // Close overlay when clicking outside
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+            overlay.remove();
+        }
+    });
+    
+    // Position overlay over the pad
+    const padContainer = padElement.closest('.pad-container');
+    padContainer.style.position = 'relative';
+    padContainer.appendChild(overlay);
+}
+
+// Set filter for a specific pad
+function setPadFilter(padIndex, filterType) {
+    padFilterState[padIndex] = filterType;
+    
+    // Update visual indicator
+    updatePadFilterIndicator(padIndex);
+    
+    // Send to ESP32
+    if (isConnected) {
+        const msg = {
+            cmd: 'setPadFilter',
+            pad: padIndex,
+            filterType: filterType
+        };
+        ws.send(JSON.stringify(msg));
+        console.log(`[Pad Filter] Set pad ${padIndex} to filter ${FILTER_TYPES[filterType].name}`);
+    }
+}
+
+// Clear filter for a specific pad
+function clearPadFilter(padIndex) {
+    setPadFilter(padIndex, 0);
+}
+
+// Update pad filter indicator visual
+function updatePadFilterIndicator(padIndex) {
+    const indicator = document.querySelector(`.pad-filter-indicator[data-pad="${padIndex}"]`);
+    if (indicator) {
+        const filterType = padFilterState[padIndex];
+        if (filterType > 0) {
+            indicator.style.display = 'flex';
+            const filter = FILTER_TYPES[filterType];
+            indicator.innerHTML = `
+                <span class="filter-icon">${filter.icon}</span>
+                <span class="filter-name">${filter.name}</span>
+            `;
+        } else {
+            indicator.style.display = 'none';
+        }
     }
 }
 
@@ -1562,6 +1681,12 @@ function setupKeyboardControls() {
     window.keyboardPadsActive = keyboardPadsActive;
     window.startKeyboardTremolo = startKeyboardTremolo;
     window.stopKeyboardTremolo = stopKeyboardTremolo;
+    
+    // Export pad filter functions and state
+    window.padFilterState = padFilterState;
+    window.updatePadFilterIndicator = updatePadFilterIndicator;
+    window.setPadFilter = setPadFilter;
+    window.clearPadFilter = clearPadFilter;
 }
 
 function changePattern(delta) {
