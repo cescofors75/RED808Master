@@ -366,6 +366,15 @@ bool WebInterface::begin(const char* ssid, const char* password) {
     doc["samplesLoaded"] = sampleManager.getLoadedSamplesCount();
     doc["memoryUsed"] = sampleManager.getTotalMemoryUsed();
     
+    // Info MIDI USB
+    MIDIDeviceInfo midiInfo = midiController->getDeviceInfo();
+    doc["midiConnected"] = midiInfo.connected;
+    if (midiInfo.connected) {
+      doc["midiDevice"] = midiInfo.deviceName;
+      doc["midiVendorId"] = String(midiInfo.vendorId, HEX);
+      doc["midiProductId"] = String(midiInfo.productId, HEX);
+    }
+    
     // Uptime
     doc["uptime"] = millis();
     
