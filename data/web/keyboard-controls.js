@@ -537,7 +537,7 @@ function applyPadFilter(pad, filter) {
     window.updatePadFilterIndicator(pad);
   }
   
-  // Show toast notification
+  // Show toast notification for filter changes
   const filterName = filter.name || (filter.type === 0 ? 'Filter cleared' : 'Filter applied');
   const padNames = ['BD', 'SD', 'CH', 'OH', 'CP', 'RS', 'CL', 'CY'];
   showToast(`${padNames[pad]}: ${filterName}`, filter.type === 0 ? TOAST_TYPES.INFO : TOAST_TYPES.SUCCESS, 2500);
@@ -844,28 +844,21 @@ window.handleKeyboardWebSocketMessage = function(data) {
 }
 
 function updateFilterIndicator(type, index, activeCount) {
+  // Esta función ahora está deshabilitada porque usamos el nuevo sistema de badges de filtro
+  // Los filtros de pads se muestran con .pad-filter-indicator en app.js
+  // Los filtros de tracks se muestran con .track-filter-badge en app.js
+  
+  // Removemos cualquier indicador antiguo .filter-indicator si existe
   const selector = type === 'track' 
     ? `[data-track="${index}"]` 
     : `[data-pad="${index}"]`;
   
   const element = document.querySelector(selector);
   if (element) {
-    const hasFilter = element.querySelector('.filter-indicator');
-    if (hasFilter) {
-      // Update existing indicator
-    } else {
-      // Add new indicator
-      const indicator = document.createElement('div');
-      indicator.className = 'filter-indicator';
-      indicator.textContent = 'F';
-      element.appendChild(indicator);
+    const oldIndicator = element.querySelector('.filter-indicator');
+    if (oldIndicator) {
+      oldIndicator.remove();
     }
-  }
-  
-  // Update count display
-  const countElement = document.getElementById(`${type}-filter-count`);
-  if (countElement) {
-    countElement.textContent = activeCount;
   }
 }
 

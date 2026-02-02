@@ -865,11 +865,7 @@ function triggerPad(padIndex) {
         ws.send(data);
     }
     
-    // Show toast with pad name
-    const padName = padNames[padIndex] || `Pad ${padIndex + 1}`;
-    if (window.showToast && window.TOAST_TYPES) {
-        window.showToast(`🥁 ${padName}`, window.TOAST_TYPES.SUCCESS, 800);
-    }
+    // Toast removed - too many notifications when playing
     
     // Grabar en loop si está activo
     if (isRecording) {
