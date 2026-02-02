@@ -1068,25 +1068,11 @@ body:not(.mono-mode) .pad.tremolo-active {
 
 /* Professional Pad Layout */
 .pad-header {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    z-index: 10;
-    padding: 5px;
-    min-height: 60px;
+    display: none; /* Oculto - no necesitamos el número aquí */
 }
 
 .pad-number {
-    font-size: 0.75em;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.5);
-    font-family: var(--font-mono);
-    letter-spacing: 0.5px;
-    padding: 5px 8px;
+    display: none; /* Oculto - número no necesario */
 }
 
 .pad-upload-btn {
@@ -1186,12 +1172,10 @@ body:not(.mono-mode) .pad.tremolo-active {
 
 /* Pad Filter Indicator */
 .pad-filter-indicator {
-    position: absolute !important;
-    bottom: 3px !important;
-    left: 50% !important;
-    transform: translateX(-50%);
-    min-width: 80%;
-    padding: 3px 6px;
+    position: relative !important;
+    margin-top: 8px;
+    min-width: 70%;
+    padding: 2px 6px;
     background: linear-gradient(145deg, rgba(120, 60, 220, 0.97), rgba(80, 30, 180, 0.97));
     border: 1px solid rgba(180, 140, 255, 0.9);
     border-radius: 6px;
@@ -1199,13 +1183,13 @@ body:not(.mono-mode) .pad.tremolo-active {
     flex-direction: row;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 3px;
     font-size: 0.55em;
     font-weight: 700;
     font-family: var(--font-mono);
     letter-spacing: 0.5px;
     color: rgba(255, 255, 255, 0.95);
-    z-index: 100 !important;
+    z-index: 2;
     pointer-events: none;
     box-shadow: 0 2px 8px rgba(120, 60, 220, 0.7), inset 0 1px 2px rgba(255, 255, 255, 0.3);
     animation: filterIndicatorPulse 2s ease-in-out infinite;
@@ -3430,11 +3414,14 @@ body.mono-mode .info-item {
     box-shadow: 0 0 10px rgba(138, 43, 226, 0.5);
     z-index: 10;
     pointer-events: none;
+    letter-spacing: 0.5px;
+    font-family: var(--font-mono);
 }
 
-.track-filter-badge .badge-freq {
-    font-size: 0.9em;
-    color: rgba(255, 255, 255, 0.9);
+.track-filter-badge .badge-initials {
+    font-size: 0.95em;
+    color: rgba(255, 255, 255, 0.95);
+    font-weight: 700;
 }
 
 .active-filter-badge .filter-target {

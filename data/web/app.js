@@ -243,12 +243,12 @@ function handleWebSocketMessage(data) {
                     
                     // Only create badge if filter type is NOT 0 (NONE) and is valid
                     if (data.filterType > 0 && data.filterType < 10) {
-                        // Create new badge
+                        // Create new badge with icon + initials
                         const badge = document.createElement('div');
                         badge.className = 'track-filter-badge';
                         const filterIcons = ['⭕', '🔽', '🔼', '🎯', '🚫', '📊', '📈', '⛰️', '🌀', '💫'];
-                        const cutoff = data.cutoff || '?';
-                        badge.innerHTML = `${filterIcons[data.filterType]} <span class="badge-freq">${cutoff}Hz</span>`;
+                        const filterInitials = ['', 'LP', 'HP', 'BP', 'NT', 'LS', 'HS', 'PK', 'AP', 'RS'];
+                        badge.innerHTML = `${filterIcons[data.filterType]} <span class="badge-initials">${filterInitials[data.filterType]}</span>`;
                         trackLabel.appendChild(badge);
                     }
                 }
@@ -407,15 +407,12 @@ function createPads() {
         pad.dataset.pad = i;
         
         pad.innerHTML = `
-            <div class="pad-header">
-                <span class="pad-number">${(i + 1).toString().padStart(2, '0')}</span>
-            </div>
             <button class="pad-upload-btn" data-pad="${i}" title="Load Sample">+</button>
             <button class="pad-filter-btn" data-pad="${i}" title="Filter">F</button>
-            <span class="pad-filter-indicator" data-pad="${i}" style="display:none;"></span>
             <div class="pad-content">
                 <div class="pad-name">${padNames[i]}</div>
                 <div class="pad-sample-info" id="sampleInfo-${i}"><span class="sample-file">...</span><span class="sample-quality">44.1k•16b•M</span></div>
+                <span class="pad-filter-indicator" data-pad="${i}" style="display:none;"></span>
             </div>
             <div class="pad-corona" aria-hidden="true"></div>
         `;
@@ -2274,11 +2271,12 @@ function applyFilterPreset(filterType, cutoffFreq) {
             
             // Only create badge if filter type is NOT 0 (NONE) and is valid
             if (filterType > 0 && filterType < 10) {
-                // Create new badge
+                // Create new badge with icon + initials
                 const badge = document.createElement('div');
                 badge.className = 'track-filter-badge';
                 const filterIcons = ['⭕', '🔽', '🔼', '🎯', '🚫', '📊', '📈', '⛰️', '🌀', '💫'];
-                badge.innerHTML = `${filterIcons[filterType]} <span class="badge-freq">${cutoffFreq}Hz</span>`;
+                const filterInitials = ['', 'LP', 'HP', 'BP', 'NT', 'LS', 'HS', 'PK', 'AP', 'RS'];
+                badge.innerHTML = `${filterIcons[filterType]} <span class="badge-initials">${filterInitials[filterType]}</span>`;
                 trackLabel.appendChild(badge);
             }
         }
