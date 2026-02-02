@@ -65,12 +65,19 @@ private:
   void handleMIDIData(const uint8_t* data, size_t length);
   void processMIDIMessage(uint8_t status, uint8_t data1, uint8_t data2);
   void notifyDeviceChange(bool connected);
+  bool openMidiDevice(uint8_t deviceAddress);
+  void closeMidiDevice();
+  void readMidiData();
 
   // USB Host variables
   usb_host_client_handle_t clientHandle;
   TaskHandle_t hostTaskHandle;
   bool initialized;
   bool hostInitialized;
+  usb_device_handle_t deviceHandle;
+  usb_transfer_t* midiTransfer;
+  uint8_t midiEndpointAddress;
+  uint16_t midiMaxPacketSize;
 
   // Device state
   MIDIDeviceInfo deviceInfo;

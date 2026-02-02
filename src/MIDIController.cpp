@@ -3,11 +3,21 @@
 // Static callback wrapper
 static MIDIController* s_midiInstance = nullptr;
 
+// Transfer callback (requerido por USB Host)
+static void transferCallback(usb_transfer_t* transfer) {
+  // Este callback se llama cuando se completa el transfer
+  // No hacemos nada aquí porque procesamos los datos en el main loop
+}
+
 MIDIController::MIDIController() 
   : clientHandle(nullptr)
   , hostTaskHandle(nullptr)
   , initialized(false)
   , hostInitialized(false)
+  , deviceHandle(nullptr)
+  , midiTransfer(nullptr)
+  , midiEndpointAddress(0)
+  , midiMaxPacketSize(0)
   , historyIndex(0)
   , historyCount(0)
   , totalMessages(0)
@@ -27,6 +37,8 @@ MIDIController::MIDIController()
 }
 
 MIDIController::~MIDIController() {
+  closeMidiDevice();
+  
   if (hostTaskHandle) {
     vTaskDelete(hostTaskHandle);
   }
@@ -107,12 +119,28 @@ void MIDIController::usbHostTask(void* arg) {
   MIDIController* controller = static_cast<MIDIController*>(arg);
   
   Serial.println("[MIDI Task] ✓ USB Host task started on Core 0");
-  Serial.println("[MIDI Task] Monitoring USB OTG port for connections...\n");
+  Serial.println("[MIDI Task] Monitoring USB OTG port for connections...");
+  Serial.println("[DEBUG] Polling USB host events every 10ms");
+  Serial.println("[DEBUG] Conecta/desconecta el dispositivo ahora...\n");
+  
+  uint32_t lastDebugTime = 0;
+  uint32_t pollCount = 0;
   
   while (true) {
     // Handle USB host events
     usb_host_client_handle_events(controller->clientHandle, pdMS_TO_TICKS(10));
     usb_host_lib_handle_events(pdMS_TO_TICKS(10), nullptr);
+    
+    pollCount++;
+    
+    // Debug output every 5 seconds to show the task is alive
+    if (millis() - lastDebugTime > 5000) {
+      Serial.printf("[MIDI Task] Alive - polled %d times in 5s | Device: %s\n", 
+                    pollCount, controller->deviceInfo.connected ? "CONNECTED" : "waiting...");
+      pollCount = 0;
+      lastDebugTime = millis();
+    }
+    
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
@@ -120,21 +148,25 @@ void MIDIController::usbHostTask(void* arg) {
 void MIDIController::clientEventCallback(const usb_host_client_event_msg_t* eventMsg, void* arg) {
   MIDIController* controller = static_cast<MIDIController*>(arg);
   
+  Serial.printf("\n[DEBUG] USB Event received! Type: %d\n", eventMsg->event);
+  
   if (eventMsg->event == USB_HOST_CLIENT_EVENT_NEW_DEV) {
     Serial.println("\n╔═══════════════════════════════════════════════╗");
-    Serial.println("║   🎹 DISPOSITIVO MIDI USB DETECTADO 🎹      ║");
+    Serial.println("║   🎹 DISPOSITIVO USB DETECTADO 🎹           ║");
     Serial.println("╚═══════════════════════════════════════════════╝");
     Serial.printf("[MIDI] Device address: %d\n", eventMsg->new_dev.address);
-    Serial.println("[MIDI] Tipo: USB MIDI Controller");
+    Serial.println("[MIDI] Intentando abrir y enumerar dispositivo...");
     Serial.println("[MIDI] Puerto: USB OTG (GPIO 19/20)");
-    Serial.println("[INFO] Puedes ver los mensajes MIDI en la web\n");
     
-    // Update device info
-    controller->deviceInfo.connected = true;
-    controller->deviceInfo.deviceName = "USB MIDI Device";
-    controller->deviceInfo.connectTime = millis();
-    
-    controller->notifyDeviceChange(true);
+    // Open MIDI device and start reading
+    if (controller->openMidiDevice(eventMsg->new_dev.address)) {
+      controller->deviceInfo.connected = true;
+      controller->deviceInfo.deviceName = "USB MIDI Device";
+      controller->deviceInfo.connectTime = millis();
+      controller->notifyDeviceChange(true);
+    } else {
+      Serial.println("[MIDI] ❌ Failed to open MIDI device");
+    }
     
   } else if (eventMsg->event == USB_HOST_CLIENT_EVENT_DEV_GONE) {
     Serial.println("\n╔═══════════════════════════════════════════════╗");
@@ -143,6 +175,7 @@ void MIDIController::clientEventCallback(const usb_host_client_event_msg_t* even
     Serial.println("[MIDI] Device removed from USB OTG");
     Serial.println("[MIDI] Esperando nueva conexión...\n");
     
+    controller->closeMidiDevice();
     controller->deviceInfo.connected = false;
     controller->notifyDeviceChange(false);
   }
@@ -159,9 +192,10 @@ void MIDIController::update() {
     lastSecondTime = now;
   }
   
-  // TODO: Poll MIDI data from USB device
-  // This would require USB MIDI class driver implementation
-  // For now, we support basic USB host detection
+  // Read MIDI data from USB device
+  if (deviceHandle && midiTransfer) {
+    readMidiData();
+  }
 }
 
 void MIDIController::handleMIDIData(const uint8_t* data, size_t length) {
@@ -265,5 +299,243 @@ void MIDIController::notifyDeviceChange(bool connected) {
   } else {
     Serial.println("[WebInterface] Broadcasting MIDI disconnection to web clients");
     Serial.println("[MIDI] ❌ Device disconnected\n");
+  }
+}
+
+bool MIDIController::openMidiDevice(uint8_t deviceAddress) {
+  Serial.println("[MIDI] Opening MIDI device...");
+  
+  // Open the device
+  esp_err_t err = usb_host_device_open(clientHandle, deviceAddress, &deviceHandle);
+  if (err != ESP_OK) {
+    Serial.printf("[MIDI] ❌ Failed to open device: %s\n", esp_err_to_name(err));
+    return false;
+  }
+  Serial.println("[MIDI] ✓ Device opened");
+  
+  // Get device descriptor
+  const usb_device_desc_t* deviceDesc;
+  err = usb_host_get_device_descriptor(deviceHandle, &deviceDesc);
+  if (err != ESP_OK) {
+    Serial.printf("[MIDI] ❌ Failed to get device descriptor: %s\n", esp_err_to_name(err));
+    usb_host_device_close(clientHandle, deviceHandle);
+    deviceHandle = nullptr;
+    return false;
+  }
+  
+  Serial.printf("[MIDI] Device VID:PID = %04X:%04X\n", deviceDesc->idVendor, deviceDesc->idProduct);
+  deviceInfo.vendorId = deviceDesc->idVendor;
+  deviceInfo.productId = deviceDesc->idProduct;
+  
+  // Get configuration descriptor
+  Serial.println("[MIDI] Getting configuration descriptor...");
+  const usb_config_desc_t* configDesc;
+  err = usb_host_get_active_config_descriptor(deviceHandle, &configDesc);
+  if (err != ESP_OK) {
+    Serial.printf("[MIDI] ❌ Failed to get config descriptor: %s\n", esp_err_to_name(err));
+    usb_host_device_close(clientHandle, deviceHandle);
+    deviceHandle = nullptr;
+    return false;
+  }
+  Serial.printf("[MIDI] ✓ Config descriptor OK (length: %d bytes)\n", configDesc->wTotalLength);
+  
+  // Listar TODAS las interfaces para debug
+  Serial.println("[MIDI] === Listing all interfaces ===");
+  const usb_standard_desc_t* desc = (const usb_standard_desc_t*)configDesc;
+  uint16_t totalLength = configDesc->wTotalLength;
+  uint16_t offset = 0;
+  
+  while (offset < totalLength) {
+    desc = (const usb_standard_desc_t*)((uint8_t*)configDesc + offset);
+    
+    if (desc->bDescriptorType == USB_B_DESCRIPTOR_TYPE_INTERFACE) {
+      const usb_intf_desc_t* intfDesc = (const usb_intf_desc_t*)desc;
+      Serial.printf("[MIDI]   Interface #%d: Class=0x%02X, SubClass=0x%02X, Protocol=0x%02X\n",
+                    intfDesc->bInterfaceNumber,
+                    intfDesc->bInterfaceClass,
+                    intfDesc->bInterfaceSubClass,
+                    intfDesc->bInterfaceProtocol);
+    }
+    
+    offset += desc->bLength;
+  }
+  Serial.println("[MIDI] === End interface list ===");
+  
+  // Buscar interfaz compatible (versión que funcionaba)
+  int interfaceNum = -1;
+  offset = 0;
+  
+  while (offset < totalLength) {
+    desc = (const usb_standard_desc_t*)((uint8_t*)configDesc + offset);
+    
+    if (desc->bDescriptorType == USB_B_DESCRIPTOR_TYPE_INTERFACE) {
+      const usb_intf_desc_t* intfDesc = (const usb_intf_desc_t*)desc;
+      
+      // CDC Data: Class=0x0A
+      if (intfDesc->bInterfaceClass == 0x0A) {
+        interfaceNum = intfDesc->bInterfaceNumber;
+        Serial.printf("[MIDI] ✓ Found CDC Data interface: %d\n", interfaceNum);
+        break;
+      }
+      
+      // Vendor Specific: Class=0xFF (lo que está enviando ahora el device)
+      if (intfDesc->bInterfaceClass == 0xFF) {
+        interfaceNum = intfDesc->bInterfaceNumber;
+        Serial.printf("[MIDI] ✓ Found Vendor Specific interface: %d\n", interfaceNum);
+        break;
+      }
+    }
+    
+    offset += desc->bLength;
+  }
+  
+  // Si no encontramos nada, usar la interfaz 0 como fallback
+  if (interfaceNum < 0) {
+    Serial.println("[MIDI] ⚠️  No standard interface, using interface 0");
+    interfaceNum = 0;
+  }
+  
+  if (interfaceNum < 0) {
+    Serial.println("[MIDI] ❌ No compatible interface found");
+    usb_host_device_close(clientHandle, deviceHandle);
+    deviceHandle = nullptr;
+    return false;
+  }
+  
+  // Claim the interface
+  err = usb_host_interface_claim(clientHandle, deviceHandle, interfaceNum, 0);
+  if (err != ESP_OK) {
+    Serial.printf("[MIDI] ❌ Failed to claim interface: %s\n", esp_err_to_name(err));
+    usb_host_device_close(clientHandle, deviceHandle);
+    deviceHandle = nullptr;
+    return false;
+  }
+  Serial.printf("[MIDI] ✓ Interface %d claimed\n", interfaceNum);
+  
+  // Find BULK IN endpoint for data (prefer BULK over INTERRUPT)
+  offset = 0;
+  midiEndpointAddress = 0;
+  midiMaxPacketSize = 64;
+  uint8_t fallbackEndpoint = 0;
+  
+  Serial.println("[MIDI] Scanning endpoints...");
+  
+  while (offset < totalLength) {
+    desc = (const usb_standard_desc_t*)((uint8_t*)configDesc + offset);
+    
+    if (desc->bDescriptorType == USB_B_DESCRIPTOR_TYPE_ENDPOINT) {
+      const usb_ep_desc_t* epDesc = (const usb_ep_desc_t*)desc;
+      
+      uint8_t epType = epDesc->bmAttributes & 0x03;
+      bool isIN = (epDesc->bEndpointAddress & 0x80);
+      
+      if (isIN) {
+        const char* typeStr = (epType == 0x02) ? "BULK" : 
+                             (epType == 0x03) ? "INTERRUPT" : "OTHER";
+        Serial.printf("[MIDI]   EP 0x%02X: %s, maxPacket=%d\n", 
+                      epDesc->bEndpointAddress, typeStr, epDesc->wMaxPacketSize);
+        
+        // Preferir BULK (0x02) para datos
+        if (epType == 0x02) {
+          midiEndpointAddress = epDesc->bEndpointAddress;
+          midiMaxPacketSize = epDesc->wMaxPacketSize;
+        } else if (epType == 0x03 && midiEndpointAddress == 0) {
+          // Usar INTERRUPT solo si no hay BULK
+          fallbackEndpoint = epDesc->bEndpointAddress;
+          midiMaxPacketSize = epDesc->wMaxPacketSize;
+        }
+      }
+    }
+    
+    offset += desc->bLength;
+  }
+  
+  // Si no encontramos BULK, usar INTERRUPT
+  if (midiEndpointAddress == 0 && fallbackEndpoint != 0) {
+    midiEndpointAddress = fallbackEndpoint;
+    Serial.printf("[MIDI] ✓ Using INTERRUPT endpoint: 0x%02X\n", midiEndpointAddress);
+  } else if (midiEndpointAddress != 0) {
+    Serial.printf("[MIDI] ✓ Using BULK endpoint: 0x%02X\n", midiEndpointAddress);
+  }
+  
+  if (midiEndpointAddress == 0) {
+    Serial.println("[MIDI] ❌ No IN endpoint found");
+    usb_host_interface_release(clientHandle, deviceHandle, interfaceNum);
+    usb_host_device_close(clientHandle, deviceHandle);
+    deviceHandle = nullptr;
+    return false;
+  }
+  
+  // Allocate transfer for reading data
+  err = usb_host_transfer_alloc(midiMaxPacketSize, 0, &midiTransfer);
+  if (err != ESP_OK) {
+    Serial.printf("[MIDI] ❌ Failed to allocate transfer: %s\n", esp_err_to_name(err));
+    usb_host_interface_release(clientHandle, deviceHandle, interfaceNum);
+    usb_host_device_close(clientHandle, deviceHandle);
+    deviceHandle = nullptr;
+    return false;
+  }
+  
+  Serial.println("[MIDI] ✓ Transfer allocated");
+  Serial.println("[MIDI] ✓ Ready to read MIDI data!");
+  return true;
+}
+
+void MIDIController::closeMidiDevice() {
+  if (midiTransfer) {
+    usb_host_transfer_free(midiTransfer);
+    midiTransfer = nullptr;
+  }
+  
+  if (deviceHandle) {
+    usb_host_device_close(clientHandle, deviceHandle);
+    deviceHandle = nullptr;
+  }
+  
+  midiEndpointAddress = 0;
+  midiMaxPacketSize = 0;
+}
+
+void MIDIController::readMidiData() {
+  if (!midiTransfer || !deviceHandle) return;
+  
+  // Setup transfer
+  midiTransfer->device_handle = deviceHandle;
+  midiTransfer->bEndpointAddress = midiEndpointAddress;
+  midiTransfer->callback = transferCallback; // Ahora con callback
+  midiTransfer->context = this;
+  midiTransfer->num_bytes = midiMaxPacketSize;
+  midiTransfer->timeout_ms = 10;
+  
+  // Submit transfer
+  esp_err_t err = usb_host_transfer_submit(midiTransfer);
+  if (err != ESP_OK) {
+    return; // No data available or error
+  }
+  
+  // Wait for completion (synchronous mode)
+  vTaskDelay(pdMS_TO_TICKS(1)); // Small delay for transfer to complete
+  
+  // Check if transfer completed
+  if (midiTransfer->status == USB_TRANSFER_STATUS_COMPLETED && 
+      midiTransfer->actual_num_bytes > 0) {
+    
+    uint8_t* data = midiTransfer->data_buffer;
+    size_t numBytes = midiTransfer->actual_num_bytes;
+    
+    // Debug: mostrar datos raw recibidos
+    static uint32_t lastDebugPrint = 0;
+    if (millis() - lastDebugPrint > 500) {
+      Serial.printf("[MIDI] Received %d bytes: ", numBytes);
+      for (size_t i = 0; i < min(numBytes, (size_t)16); i++) {
+        Serial.printf("%02X ", data[i]);
+      }
+      Serial.println();
+      lastDebugPrint = millis();
+    }
+    
+    // Procesar como MIDI raw (3 bytes por mensaje)
+    // El device envía: [status byte] [data1] [data2]
+    handleMIDIData(data, numBytes);
   }
 }
