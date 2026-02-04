@@ -1195,16 +1195,43 @@ function initCircularSequencer() {
     if (circularCanvas) return; // Already initialized
     
     circularCanvas = document.getElementById('circularCanvas');
+    if (!circularCanvas) {
+        console.error('circularCanvas not found');
+        return;
+    }
+    
     circularCtx = circularCanvas.getContext('2d');
     
-    // Set canvas size
+    // Set canvas size with proper handling for iOS
     const container = document.getElementById('circularSequencer');
-    const size = Math.min(container.clientWidth, container.clientHeight, 600);
-    circularCanvas.width = size;
-    circularCanvas.height = size;
+    const containerWidth = container.clientWidth || container.offsetWidth;
+    const containerHeight = container.clientHeight || container.offsetHeight;
+    const size = Math.min(containerWidth, containerHeight, 600);
     
-    // Handle canvas clicks
+    // Ensure minimum size for visibility
+    const finalSize = Math.max(size, 300);
+    
+    circularCanvas.width = finalSize;
+    circularCanvas.height = finalSize;
+    
+    // Set explicit CSS size for iOS
+    circularCanvas.style.width = finalSize + 'px';
+    circularCanvas.style.height = finalSize + 'px';
+    
+    console.log('Canvas initialized:', finalSize + 'x' + finalSize);
+    
+    // Handle canvas clicks and touch events
     circularCanvas.addEventListener('click', handleCircularClick);
+    circularCanvas.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        const touch = e.changedTouches[0];
+        const rect = circularCanvas.getBoundingClientRect();
+        const event = {
+            clientX: touch.clientX,
+            clientY: touch.clientY
+        };
+        handleCircularClick(event);
+    }, { passive: false });
     
     // Create track labels
     const trackLabelsContainer = document.getElementById('circularTrackLabels');

@@ -58,6 +58,11 @@ private:
   WiFiUDP udp;  // Servidor UDP
   bool initialized;
   
+  // Rate limiting para múltiples clientes
+  unsigned long lastTriggerTime;
+  unsigned long lastStepChangeTime;
+  unsigned long lastBroadcastTime;
+  
   // MIDI Controller reference
   MIDIController* midiController;
   

@@ -1086,7 +1086,7 @@ body:not(.mono-mode) .pad.tremolo-active {
     transition: all 0.2s;
     font-weight: 300;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    z-index: 100 !important;
+    z-index: 10000 !important;
     position: absolute !important;
     bottom: 6px !important;
     left: 6px !important;
@@ -1141,7 +1141,7 @@ body:not(.mono-mode) .pad.tremolo-active {
     cursor: pointer;
     transition: all 0.2s;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15);
-    z-index: 100 !important;
+    z-index: 10000 !important;
     position: absolute !important;
     bottom: 6px !important;
     left: 32px !important;
@@ -1739,15 +1739,16 @@ body:not(.mono-mode) .pad.tremolo-active {
 }
 
 .volume-slider {
-    -webkit-appearance: slider-vertical;
     width: 8px;
     height: 120px;
-    writing-mode: bt-lr; /* IE */
-    -webkit-appearance: slider-vertical; /* WebKit */
+    writing-mode: vertical-lr;
+    direction: rtl;
     background: rgba(255, 255, 255, 0.1);
     border-radius: 4px;
     outline: none;
     cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
 }
 
 .volume-slider::-webkit-slider-thumb {
@@ -2007,20 +2008,27 @@ body.mono-mode .seq-step.active {
     position: relative;
     width: 100%;
     max-width: 600px;
-    aspect-ratio: 1;
+    height: auto;
+    aspect-ratio: 1 / 1;
     display: flex;
     align-items: center;
     justify-content: center;
+    min-height: 300px;
 }
 
 #circularCanvas {
     width: 100%;
     height: 100%;
+    max-width: 600px;
+    max-height: 600px;
     cursor: pointer;
     border-radius: 50%;
     box-shadow: 0 0 40px rgba(255, 0, 0, 0.3), 
                 0 0 80px rgba(255, 0, 0, 0.2),
                 inset 0 0 60px rgba(0, 0, 0, 0.5);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    display: block;
 }
 
 .circular-center-display {
@@ -2916,29 +2924,49 @@ body.mono-mode .info-item {
     /* Circular sequencer responsive */
     .sequencer-circular-wrapper {
         padding: 10px;
-        min-height: 400px;
+        min-height: 500px;
+        padding-bottom: 80px;
+        display: flex !important;
     }
     
     .circular-sequencer {
-        max-width: 90vw;
+        width: min(90vw, 400px);
+        height: min(90vw, 400px);
+        max-width: 400px;
+        max-height: 400px;
+        min-height: 300px;
+        min-width: 300px;
+    }
+    
+    #circularCanvas {
+        width: 100% !important;
+        height: 100% !important;
+        max-width: 400px !important;
+        max-height: 400px !important;
+    }
+    
+    .circular-center-display {
+        width: 80px;
     }
     
     .circular-step-number {
-        font-size: 36px;
+        font-size: 32px;
     }
     
     .circular-pattern-name {
-        font-size: 11px;
+        font-size: 10px;
+        letter-spacing: 1px;
     }
     
     .circular-track-labels {
-        bottom: -50px;
-        gap: 8px;
+        bottom: -70px;
+        gap: 6px;
+        max-width: 90vw;
     }
     
     .circular-track-label {
-        padding: 6px 12px;
-        font-size: 11px;
+        padding: 5px 10px;
+        font-size: 10px;
     }
 }
 

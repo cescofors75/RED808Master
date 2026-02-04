@@ -208,6 +208,11 @@ WebInterface::WebInterface() {
   ws = nullptr;
   initialized = false;
   midiController = nullptr;
+  
+  // Inicializar variables de rate limiting
+  lastTriggerTime = 0;
+  lastStepChangeTime = 0;
+  lastBroadcastTime = 0;
 }
 
 WebInterface::~WebInterface() {
@@ -469,7 +474,10 @@ bool WebInterface::begin(const char* ssid, const char* password) {
 void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, 
                                      AwsEventType type, void *arg, uint8_t *data, size_t len) {
   if (type == WS_EVT_CONNECT) {
-    Serial.printf("WebSocket client #%u connected\n", client->id());
+    Serial.printf("WebSocket client #%u connected (total: %u)\n", client->id(), ws->count());
+    
+    // Yield para dar tiempo al sistema
+    yield();
     
     // OPTIMIZED: Send only basic state on connect (512 bytes)
     // Full data will be sent via 'init' command from client
@@ -483,13 +491,24 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
     
     String output;
     serializeJson(basicState, output);
+    
+    // Delay si hay múltiples clientes para evitar sobrecarga
+    if (ws->count() > 1) {
+      delay(100);
+      yield();
+    }
+    
     client->text(output);
     Serial.printf("[WebSocket] Client #%u connected - basic state sent (wait for init)\n", client->id());
+    
+    // Yield final
+    yield();
     
     // NO enviar automáticamente - el cliente lo pedirá con comando "getSampleCounts"
     Serial.println("[WebSocket] Client connected, waiting for explicit requests");
   } else if (type == WS_EVT_DISCONNECT) {
-    Serial.printf("WebSocket client #%u disconnected\n", client->id());
+    Serial.printf("WebSocket client #%u disconnected (remaining: %u)\n", client->id(), ws->count() - 1);
+    yield();
   } else if (type == WS_EVT_DATA) {
     AwsFrameInfo *info = (AwsFrameInfo*)arg;
     if (info->final && info->index == 0 && info->len == len) {
@@ -554,10 +573,20 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             // Cliente solicita inicialización completa (se llama después de conectar)
             Serial.printf("[init] Client %u requesting full initialization\n", client->id());
             
+            // Yield antes de operación pesada
+            yield();
+            
+            // Delay mayor si hay múltiples clientes
+            if (ws->count() > 1) {
+              delay(150);
+              yield();
+            }
+            
             // 1. Enviar solo estado del sequencer (sin patrón)
             yield(); // Give time to other tasks
             sendSequencerStateToClient(client);
-            delay(50); // Aumentado delay para estabilidad
+            delay(100); // Aumentado delay para estabilidad con múltiples clientes
+            yield();
             
             // 2. Cliente solicitará patrón con getPattern cuando esté listo
             // NO enviamos patrón automáticamente para evitar overflow
@@ -667,26 +696,51 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
 
 void WebInterface::broadcastSequencerState() {
   if (!initialized || !ws) return;
+  
+  // Protección contra sobrecarga con múltiples clientes
+  if (ws->count() > 2) {
+    static unsigned long lastBroadcast = 0;
+    if (millis() - lastBroadcast < 100) {
+      return; // Limitar a 10 broadcasts/segundo con múltiples clientes
+    }
+    lastBroadcast = millis();
+  }
+  
+  yield(); // Dar tiempo al watchdog
+  
   StaticJsonDocument<6144> doc;
   populateStateDocument(doc);
   String output;
   serializeJson(doc, output);
   ws->textAll(output);
+  
+  yield(); // Dar tiempo después del broadcast
 }
 
 void WebInterface::sendSequencerStateToClient(AsyncWebSocketClient* client) {
   if (!initialized || !ws || !isClientReady(client)) {
     return;
   }
+  
+  yield(); // Dar tiempo antes de operación pesada
+  
   StaticJsonDocument<6144> doc;
   populateStateDocument(doc);
   String output;
   serializeJson(doc, output);
   client->text(output);
+  
+  yield(); // Dar tiempo después del envío
 }
 
 void WebInterface::broadcastPadTrigger(int pad) {
   if (!initialized || !ws) return;
+  
+  // No broadcast si hay múltiples clientes para reducir tráfico
+  if (ws->count() > 2) {
+    return;
+  }
+  
   StaticJsonDocument<128> doc;
   doc["type"] = "pad";
   doc["pad"] = pad;
@@ -769,42 +823,90 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   String cmd = doc["cmd"];
   
   if (cmd == "trigger") {
+    // Rate limiting: máximo 20 triggers/segundo con múltiples clientes
+    unsigned long now = millis();
+    if (ws && ws->count() > 1) {
+      if (now - lastTriggerTime < 50) {
+        return; // Ignorar trigger si es demasiado frecuente
+      }
+      lastTriggerTime = now;
+    }
+    
     int pad = doc["pad"];
     if (pad < 0 || pad >= 8) {
       Serial.printf("[WS] Invalid pad %d (must be 0-7)\n", pad);
       return;
     }
     int velocity = doc.containsKey("vel") ? doc["vel"].as<int>() : 127;
+    
+    // Yield para evitar watchdog reset cuando sequencer está corriendo
+    yield();
+    
     triggerPadWithLED(pad, velocity);
     broadcastPadTrigger(pad);
+    
+    // Yield adicional para dar tiempo al sistema
+    yield();
   }
   else if (cmd == "setStep") {
+    // Rate limiting: máximo 30 cambios/segundo con múltiples clientes
+    unsigned long now = millis();
+    if (ws && ws->count() > 1) {
+      if (now - lastStepChangeTime < 33) {
+        return; // Ignorar si es demasiado frecuente
+      }
+      lastStepChangeTime = now;
+    }
+    
     int track = doc["track"];
     int step = doc["step"];
     if (track < 0 || track >= 8 || step < 0 || step >= 16) {
       Serial.printf("[WS] Invalid track %d or step %d\n", track, step);
       return;
     }
+    
+    yield(); // Yield antes de modificar sequencer
+    
     bool active = doc["active"];
     sequencer.setStep(track, step, active);
+    
+    yield(); // Yield después de modificar
   }
   else if (cmd == "start") {
+    yield();
     sequencer.start();
+    yield();
   }
   else if (cmd == "stop") {
+    yield();
     sequencer.stop();
+    yield();
   }
   else if (cmd == "tempo") {
+    yield();
     float tempo = doc["value"];
     sequencer.setTempo(tempo);
+    yield();
   }
   else if (cmd == "selectPattern") {
+    yield();
+    
     int pattern = doc["index"];
     sequencer.selectPattern(pattern);
-    delay(50);
+    
+    // Delay mayor con múltiples clientes
+    if (ws && ws->count() > 1) {
+      delay(100);
+    } else {
+      delay(50);
+    }
+    
+    yield();
     
     // Enviar estado actualizado
     broadcastSequencerState();
+    
+    yield();
     
     // Enviar datos del patrón (matriz de steps) - Solo 8 tracks activos
     StaticJsonDocument<3072> patternDoc;
@@ -818,6 +920,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       }
     }
     
+    yield(); // Yield entre operaciones pesadas
+    
     JsonObject velocitiesObj = patternDoc.createNestedObject("velocities");
     for (int track = 0; track < 8; track++) {
       JsonArray trackVels = velocitiesObj.createNestedArray(String(track));
@@ -829,8 +933,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     String patternOutput;
     serializeJson(patternDoc, patternOutput);
     ws->textAll(patternOutput);
+    
+    yield();
   }
   else if (cmd == "loadSample") {
+    yield(); // Yield antes de operación pesada
+    
     const char* family = doc["family"];
     const char* filename = doc["filename"];
     int padIndex = doc["pad"];
@@ -842,7 +950,11 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     String fullPath = String("/") + String(family) + String("/") + String(filename);
     Serial.printf("[loadSample] Loading %s to pad %d\n", fullPath.c_str(), padIndex);
     
+    yield(); // Yield antes de cargar sample
+    
     if (sampleManager.loadSample(fullPath.c_str(), padIndex)) {
+      yield(); // Yield después de cargar
+      
       StaticJsonDocument<256> responseDoc;
       responseDoc["type"] = "sampleLoaded";
       responseDoc["pad"] = padIndex;
@@ -855,6 +967,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       if (ws) ws->textAll(output);
       
       Serial.printf("[loadSample] Success! Size: %d bytes\n", sampleManager.getSampleLength(padIndex) * 2);
+      
+      yield(); // Yield final
     }
   }
   else if (cmd == "mute") {
@@ -863,8 +977,10 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       Serial.printf("[WS] Invalid track %d (must be 0-7)\n", track);
       return;
     }
+    yield();
     bool muted = doc["value"];
     sequencer.muteTrack(track, muted);
+    yield();
   }
   else if (cmd == "toggleLoop") {
     int track = doc["track"];
@@ -872,6 +988,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       Serial.printf("[WS] Invalid track %d (must be 0-7)\n", track);
       return;
     }
+    yield();
     sequencer.toggleLoop(track);
     
     StaticJsonDocument<128> responseDoc;
@@ -883,6 +1000,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     String output;
     serializeJson(responseDoc, output);
     if (ws) ws->textAll(output);
+    yield();
   }
   else if (cmd == "pauseLoop") {
     int track = doc["track"];
