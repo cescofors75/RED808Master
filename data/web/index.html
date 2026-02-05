@@ -44,11 +44,11 @@
                         <span id="meterLiveVolumeBar"></span>
                     </div>
                 </div>
-                <div class="meter meter-filter" id="meter-filter">
-                    <span class="meter-label">FILTER</span>
-                    <div class="meter-value" id="meterFilterValue">OFF</div>
+                <div class="meter meter-sequencer" id="meter-sequencer">
+                    <span class="meter-label">SQNCR</span>
+                    <div class="meter-value" id="meterSequencerStatus">STOP</div>
                     <div class="meter-bar">
-                        <span id="meterFilterBar"></span>
+                        <span id="meterSequencerStatusBar"></span>
                     </div>
                 </div>
             </div>
@@ -59,6 +59,7 @@
             <button class="tab-btn active" data-tab="performance">🎹 LIVE</button>
             <button class="tab-btn" data-tab="sequencer">🎵 SEQUENCER</button>
             <button class="tab-btn" data-tab="controls">🎛️ CONTROLES</button>
+            <button class="tab-btn" data-tab="volumes">🎚️ VOLUMENES</button>
             <button class="tab-btn" data-tab="fx">🔊 FX</button>
             <button class="tab-btn" data-tab="midi">🎹 MIDI</button>
             <button class="tab-btn" data-tab="info">📊 INFO</button>
@@ -185,6 +186,141 @@
             </section>
 
 
+        </div>
+
+        <!-- TAB: Volumes -->
+        <div id="tab-volumes" class="tab-content">
+            <!-- Volumes Section -->
+            <section id="section-volumes" class="volumes-section" data-section="volumes" data-title="Controles de Volumen">
+                <div class="volumes-header">
+                    <h2>🎚️ CONTROLES DE VOLUMEN</h2>
+                    <p class="volumes-description">Control individual de volúmenes en tiempo real</p>
+                </div>
+
+                <!-- Master Volumes -->
+                <div class="master-volumes">
+                    <div class="volume-card sequencer-volume">
+                        <div class="volume-card-header">
+                            <span class="volume-icon">🎵</span>
+                            <h3>VOLUMEN SEQUENCER</h3>
+                        </div>
+                        <div class="volume-display">
+                            <div class="volume-value-display" id="displaySequencerVolume">100%</div>
+                            <div class="volume-bar-container">
+                                <div class="volume-bar sequencer" id="barSequencerVolume" style="width: 100%;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="volume-card pads-volume">
+                        <div class="volume-card-header">
+                            <span class="volume-icon">🎹</span>
+                            <h3>VOLUMEN PADS</h3>
+                        </div>
+                        <div class="volume-display">
+                            <div class="volume-value-display" id="displayPadsVolume">100%</div>
+                            <div class="volume-bar-container">
+                                <div class="volume-bar pads" id="barPadsVolume" style="width: 100%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Track Volumes -->
+                <div class="track-volumes">
+                    <h3 class="track-volumes-title">VOLUMENES DE TRACKS</h3>
+                    <div class="track-volumes-grid" id="trackVolumesGrid">
+                        <!-- Track 0: BD -->
+                        <div class="track-volume-card" data-track="0">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">BD</span>
+                                <span class="track-volume-value" id="trackVolumeValue0">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator0"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar0" data-track="0" style="width: 100%;"></div>
+                            </div>
+                        </div>
+                        <!-- Track 1: SD -->
+                        <div class="track-volume-card" data-track="1">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">SD</span>
+                                <span class="track-volume-value" id="trackVolumeValue1">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator1"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar1" data-track="1" style="width: 100%;"></div>
+                            </div>
+                        </div>
+                        <!-- Track 2: CH -->
+                        <div class="track-volume-card" data-track="2">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">CH</span>
+                                <span class="track-volume-value" id="trackVolumeValue2">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator2"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar2" data-track="2" style="width: 100%;"></div>
+                            </div>
+                        </div>
+                        <!-- Track 3: OH -->
+                        <div class="track-volume-card" data-track="3">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">OH</span>
+                                <span class="track-volume-value" id="trackVolumeValue3">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator3"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar3" data-track="3" style="width: 100%;"></div>
+                            </div>
+                        </div>
+                        <!-- Track 4: CP -->
+                        <div class="track-volume-card" data-track="4">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">CP</span>
+                                <span class="track-volume-value" id="trackVolumeValue4">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator4"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar4" data-track="4" style="width: 100%;"></div>
+                            </div>
+                        </div>
+                        <!-- Track 5: RS -->
+                        <div class="track-volume-card" data-track="5">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">RS</span>
+                                <span class="track-volume-value" id="trackVolumeValue5">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator5"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar5" data-track="5" style="width: 100%;"></div>
+                            </div>
+                        </div>
+                        <!-- Track 6: CL -->
+                        <div class="track-volume-card" data-track="6">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">CL</span>
+                                <span class="track-volume-value" id="trackVolumeValue6">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator6"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar6" data-track="6" style="width: 100%;"></div>
+                            </div>
+                        </div>
+                        <!-- Track 7: CY -->
+                        <div class="track-volume-card" data-track="7">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">CY</span>
+                                <span class="track-volume-value" id="trackVolumeValue7">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator7"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar7" data-track="7" style="width: 100%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
         </div>
 
         <!-- TAB: FX -->

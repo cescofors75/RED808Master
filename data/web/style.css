@@ -176,8 +176,8 @@ body {
     transition: width 0.25s ease;
 }
 
-.meter-filter .meter-bar span {
-    background: linear-gradient(90deg, #ffe259 0%, #ffa751 50%, #ff006e 100%);
+.meter-sequencer .meter-bar span {
+    background: linear-gradient(90deg, #00ff88 0%, #00ccff 50%, #0099ff 100%);
 }
 
 .meter-bar:not(.active) span {
@@ -431,6 +431,8 @@ h2 {
 .pad-container {
     position: relative;
     aspect-ratio: 1;
+    z-index: 1;
+    isolation: isolate;
 }
 
 .pad {
@@ -803,33 +805,43 @@ body.mono-mode .pad.triggered {
 .loop-btn {
     position: absolute;
     top: 5px;
-    right: 5px;
+    left: 5px;
     width: 32px;
     height: 32px;
-    background: rgba(0,0,0,0.6);
-    border: 2px solid var(--gray-light);
+    min-width: 44px;
+    min-height: 44px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 2px solid rgba(180, 180, 180, 0.4);
     border-radius: 6px;
-    color: #888;
-    font-size: 16px;
+    color: rgba(180, 180, 180, 0.7);
+    font-size: 14px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.2s;
-    z-index: 10;
+    z-index: 100;
+    pointer-events: auto;
+    touch-action: manipulation;
+    isolation: isolate;
+    opacity: 0.7;
 }
 
 .loop-btn:hover {
-    background: rgba(0,0,0,0.8);
-    border-color: var(--red-primary);
+    background: rgba(0, 0, 0, 0.85);
+    border-color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.9);
+    transform: scale(1.1);
+    opacity: 1;
 }
 
 .loop-btn.active {
-    background: var(--red-primary);
-    border-color: #fff;
+    background: linear-gradient(145deg, rgba(255, 100, 0, 0.9), rgba(255, 50, 0, 1));
+    border-color: rgba(255, 150, 50, 0.9);
     color: #fff;
-    box-shadow: 0 0 15px var(--red-glow);
+    box-shadow: 0 0 15px rgba(255, 100, 0, 0.7), inset 0 1px 2px rgba(255, 255, 255, 0.3);
     animation: loopBtnPulse 1s infinite;
+    opacity: 1;
 }
 
 .loop-btn.paused {
@@ -838,13 +850,19 @@ body.mono-mode .pad.triggered {
 }
 
 @keyframes loopBtnPulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.1); }
+    0%, 100% { 
+        transform: scale(1);
+        box-shadow: 0 0 15px rgba(255, 100, 0, 0.7);
+    }
+    50% { 
+        transform: scale(1.05);
+        box-shadow: 0 0 25px rgba(255, 100, 0, 0.9), 0 0 40px rgba(255, 100, 0, 0.5);
+    }
 }
 
 @keyframes loopBtnBlink {
     0%, 100% { opacity: 0.3; }
-    50% { opacity: 0.8; }
+    50% { opacity: 0.7; }
 }
 
 /* Loop states */
@@ -1086,20 +1104,24 @@ body:not(.mono-mode) .pad.tremolo-active {
     transition: all 0.2s;
     font-weight: 300;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    z-index: 10000 !important;
+    z-index: 100 !important;
     position: absolute !important;
     bottom: 6px !important;
     left: 6px !important;
     top: auto !important;
     right: auto !important;
     pointer-events: auto !important;
+    touch-action: manipulation !important;
     width: 22px;
     height: 22px;
+    min-width: 44px;
+    min-height: 44px;
     display: flex !important;
     align-items: center;
     justify-content: center;
     opacity: 0.65;
     line-height: 1;
+    isolation: isolate;
 }
 
 .pad-upload-btn:hover {
@@ -1141,20 +1163,24 @@ body:not(.mono-mode) .pad.tremolo-active {
     cursor: pointer;
     transition: all 0.2s;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15);
-    z-index: 10000 !important;
+    z-index: 100 !important;
     position: absolute !important;
     bottom: 6px !important;
-    left: 32px !important;
+    left: 60px !important;
     top: auto !important;
     right: auto !important;
     pointer-events: auto !important;
+    touch-action: manipulation !important;
     width: 22px;
     height: 22px;
+    min-width: 44px;
+    min-height: 44px;
     display: flex !important;
     align-items: center;
     justify-content: center;
     opacity: 0.75;
     line-height: 1;
+    isolation: isolate;
 }
 
 .pad-filter-btn:hover {
@@ -2812,6 +2838,23 @@ body.mono-mode .info-item {
         max-width: 700px;
     }
     
+    /* Ensure touch targets are adequate on tablets */
+    .pad-upload-btn,
+    .pad-filter-btn,
+    .pad-select-btn,
+    .loop-btn {
+        min-width: 38px !important;
+        min-height: 38px !important;
+        z-index: 150 !important;
+        pointer-events: auto !important;
+        touch-action: manipulation !important;
+    }
+    
+    .loop-btn {
+        top: 4px !important;
+        left: 4px !important;
+    }
+    
     .pad {
         font-size: 0.9em;
     }
@@ -2855,6 +2898,46 @@ body.mono-mode .info-item {
     .pads-grid {
         grid-template-columns: repeat(2, 1fr);
         gap: 10px;
+    }
+    
+    /* Ensure touch targets are large enough on mobile */
+    .pad-upload-btn,
+    .pad-filter-btn,
+    .pad-select-btn,
+    .loop-btn {
+        min-width: 40px !important;
+        min-height: 40px !important;
+        width: 40px !important;
+        height: 40px !important;
+        z-index: 150 !important;
+        pointer-events: auto !important;
+        touch-action: manipulation !important;
+    }
+    
+    .loop-btn {
+        top: 4px !important;
+        left: 4px !important;
+        font-size: 16px !important;
+    }
+    
+    .pad-upload-btn {
+        bottom: 4px !important;
+        left: 4px !important;
+    }
+    
+    .pad-filter-btn {
+        bottom: 4px !important;
+        left: 56px !important;
+    }
+    
+    .pad-select-btn {
+        top: 4px !important;
+        right: 4px !important;
+    }
+    
+    /* Ensure corona doesn't block button touches */
+    .pad-corona {
+        pointer-events: none !important;
     }
     
     .sequencer-grid {
@@ -3374,6 +3457,8 @@ body.mono-mode .info-item {
     right: 4px;
     width: 28px;
     height: 28px;
+    min-width: 44px;
+    min-height: 44px;
     background: rgba(0, 0, 0, 0.85);
     border: 2px solid var(--red-primary);
     border-radius: 6px;
@@ -3383,8 +3468,11 @@ body.mono-mode .info-item {
     align-items: center;
     justify-content: center;
     transition: all 0.2s;
-    z-index: 5;
+    z-index: 100;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    pointer-events: auto;
+    touch-action: manipulation;
+    isolation: isolate;
 }
 
 
@@ -4357,5 +4445,367 @@ body.mono-mode .info-item {
 .midi-message-time {
     color: rgba(255, 255, 255, 0.5);
     font-size: 0.75em;
+}
+
+/* ============================================== */
+/* VOLUMES SECTION - Professional Volume Meters  */
+/* ============================================== */
+
+.volumes-section {
+    padding: 20px;
+    background: rgba(10, 10, 10, 0.4);
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+.volumes-header {
+    text-align: center;
+    margin-bottom: 30px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid rgba(255, 0, 0, 0.3);
+}
+
+.volumes-header h2 {
+    font-size: 1.8em;
+    margin-bottom: 8px;
+    color: var(--red-primary);
+    text-shadow: 0 0 20px rgba(255, 0, 0, 0.6);
+}
+
+.volumes-description {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.9em;
+}
+
+/* Master Volumes (Sequencer & Pads) */
+.master-volumes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    margin-bottom: 40px;
+}
+
+.volume-card {
+    background: linear-gradient(145deg, rgba(26, 26, 26, 0.9), rgba(10, 10, 10, 0.9));
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 0 20px rgba(255, 0, 0, 0.05);
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.volume-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, var(--red-primary), transparent);
+    opacity: 0.5;
+}
+
+.volume-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6), inset 0 0 30px rgba(255, 0, 0, 0.1);
+    border-color: rgba(255, 0, 0, 0.3);
+}
+
+.volume-card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.volume-icon {
+    font-size: 1.8em;
+    filter: drop-shadow(0 0 8px rgba(255, 0, 0, 0.6));
+}
+
+.volume-card-header h3 {
+    font-size: 1.1em;
+    letter-spacing: 1px;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.volume-display {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.volume-value-display {
+    font-size: 2.5em;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--red-primary);
+    text-shadow: 0 0 15px rgba(255, 0, 0, 0.8), 0 0 30px rgba(255, 0, 0, 0.4);
+    text-align: center;
+    animation: volumePulse 3s ease-in-out infinite;
+}
+
+@keyframes volumePulse {
+    0%, 100% { opacity: 0.9; }
+    50% { opacity: 1; }
+}
+
+.volume-bar-container {
+    height: 40px;
+    background: linear-gradient(145deg, rgba(0, 0, 0, 0.6), rgba(20, 20, 20, 0.8));
+    border-radius: 20px;
+    overflow: hidden;
+    position: relative;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.8), inset 0 -2px 4px rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.volume-bar {
+    height: 100%;
+    border-radius: 20px;
+    position: relative;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 20px rgba(255, 0, 0, 0.6), inset 0 0 15px rgba(255, 255, 255, 0.3);
+}
+
+.volume-bar::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50%;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), transparent);
+    border-radius: 20px 20px 0 0;
+}
+
+.volume-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 40%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2));
+    border-radius: 20px;
+    animation: volumeShimmer 2s ease-in-out infinite;
+}
+
+@keyframes volumeShimmer {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 0.6; }
+}
+
+.volume-bar.sequencer {
+    background: linear-gradient(90deg, 
+        rgba(255, 0, 0, 0.6), 
+        rgba(255, 100, 100, 0.85), 
+        rgba(255, 0, 0, 0.95));
+}
+
+.volume-bar.pads {
+    background: linear-gradient(90deg, 
+        rgba(0, 255, 136, 0.6), 
+        rgba(0, 255, 136, 0.85), 
+        rgba(0, 255, 136, 0.95));
+}
+
+/* Track Volumes Grid */
+.track-volumes {
+    background: rgba(15, 15, 15, 0.5);
+    padding: 24px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.track-volumes-title {
+    font-size: 1.3em;
+    margin-bottom: 20px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.9);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+
+.track-volumes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+.track-volume-card {
+    background: linear-gradient(145deg, rgba(20, 20, 20, 0.9), rgba(10, 10, 10, 0.9));
+    border: 2px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 16px;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.track-volume-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.track-volume-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.track-volume-label {
+    font-size: 1.2em;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    letter-spacing: 1px;
+}
+
+.track-volume-value {
+    font-size: 1.1em;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.track-volume-mute-indicator {
+    font-size: 0.9em;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.track-volume-card.muted .track-volume-mute-indicator {
+    opacity: 1;
+}
+
+.track-volume-card.muted .track-volume-mute-indicator::after {
+    content: '🔇';
+    font-size: 1.2em;
+}
+
+.track-volume-bar-container {
+    height: 32px;
+    background: linear-gradient(145deg, rgba(0, 0, 0, 0.7), rgba(15, 15, 15, 0.8));
+    border-radius: 16px;
+    overflow: hidden;
+    position: relative;
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.9), inset 0 -1px 2px rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.track-volume-bar {
+    height: 100%;
+    border-radius: 16px;
+    position: relative;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s ease;
+    box-shadow: 0 0 15px currentColor, inset 0 0 10px rgba(255, 255, 255, 0.25);
+}
+
+.track-volume-bar::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50%;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.25), transparent);
+    border-radius: 16px 16px 0 0;
+}
+
+.track-volume-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 30%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2));
+    border-radius: 16px;
+}
+
+/* Track Colors - Same as pads */
+.track-volume-card[data-track="0"] .track-volume-label { color: rgb(200, 255, 0); }
+.track-volume-card[data-track="0"] .track-volume-bar {
+    background: radial-gradient(circle at 30% 50%, rgba(200, 255, 0, 0.95), rgba(200, 255, 0, 0.6));
+    color: rgba(200, 255, 0, 0.8);
+}
+
+.track-volume-card[data-track="1"] .track-volume-label { color: rgb(255, 255, 0); }
+.track-volume-card[data-track="1"] .track-volume-bar {
+    background: radial-gradient(circle at 30% 50%, rgba(255, 255, 0, 0.95), rgba(255, 255, 0, 0.6));
+    color: rgba(255, 255, 0, 0.8);
+}
+
+.track-volume-card[data-track="2"] .track-volume-label { color: rgb(0, 229, 255); }
+.track-volume-card[data-track="2"] .track-volume-bar {
+    background: radial-gradient(circle at 30% 50%, rgba(0, 229, 255, 0.95), rgba(0, 229, 255, 0.6));
+    color: rgba(0, 229, 255, 0.8);
+}
+
+.track-volume-card[data-track="3"] .track-volume-label { color: rgb(0, 255, 204); }
+.track-volume-card[data-track="3"] .track-volume-bar {
+    background: radial-gradient(circle at 30% 50%, rgba(0, 255, 204, 0.95), rgba(0, 255, 204, 0.6));
+    color: rgba(0, 255, 204, 0.8);
+}
+
+.track-volume-card[data-track="4"] .track-volume-label { color: rgb(255, 170, 102); }
+.track-volume-card[data-track="4"] .track-volume-bar {
+    background: radial-gradient(circle at 30% 50%, rgba(255, 170, 102, 0.95), rgba(255, 170, 102, 0.6));
+    color: rgba(255, 170, 102, 0.8);
+}
+
+.track-volume-card[data-track="5"] .track-volume-label { color: rgb(170, 85, 255); }
+.track-volume-card[data-track="5"] .track-volume-bar {
+    background: radial-gradient(circle at 30% 50%, rgba(170, 85, 255, 0.95), rgba(170, 85, 255, 0.6));
+    color: rgba(170, 85, 255, 0.8);
+}
+
+.track-volume-card[data-track="6"] .track-volume-label { color: rgb(255, 0, 136); }
+.track-volume-card[data-track="6"] .track-volume-bar {
+    background: radial-gradient(circle at 30% 50%, rgba(255, 0, 136, 0.95), rgba(255, 0, 136, 0.6));
+    color: rgba(255, 0, 136, 0.8);
+}
+
+.track-volume-card[data-track="7"] .track-volume-label { color: rgb(255, 170, 204); }
+.track-volume-card[data-track="7"] .track-volume-bar {
+    background: radial-gradient(circle at 30% 50%, rgba(255, 170, 204, 0.95), rgba(255, 170, 204, 0.6));
+    color: rgba(255, 170, 204, 0.8);
+}
+
+/* Muted State - Gray bars */
+.track-volume-card.muted .track-volume-bar {
+    background: linear-gradient(90deg, rgba(100, 100, 100, 0.4), rgba(120, 120, 120, 0.3)) !important;
+    color: rgba(100, 100, 100, 0.5) !important;
+    box-shadow: 0 0 8px rgba(100, 100, 100, 0.3) !important;
+}
+
+.track-volume-card.muted .track-volume-label {
+    color: rgba(150, 150, 150, 0.6) !important;
+}
+
+.track-volume-card.muted .track-volume-value {
+    color: rgba(150, 150, 150, 0.5) !important;
+}
+
+.track-volume-card.muted {
+    opacity: 0.6;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .master-volumes {
+        grid-template-columns: 1fr;
+    }
+    
+    .track-volumes-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .volume-value-display {
+        font-size: 2em;
+    }
 }
 

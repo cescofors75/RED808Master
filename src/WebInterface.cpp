@@ -1051,10 +1051,28 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "setSequencerVolume") {
     int volume = doc["value"];
     audioEngine.setSequencerVolume(volume);
+    
+    // Broadcast volume change to all clients
+    StaticJsonDocument<128> responseDoc;
+    responseDoc["type"] = "state";
+    responseDoc["sequencerVolume"] = volume;
+    
+    String output;
+    serializeJson(responseDoc, output);
+    if (ws) ws->textAll(output);
   }
   else if (cmd == "setLiveVolume") {
     int volume = doc["value"];
     audioEngine.setLiveVolume(volume);
+    
+    // Broadcast volume change to all clients
+    StaticJsonDocument<128> responseDoc;
+    responseDoc["type"] = "state";
+    responseDoc["liveVolume"] = volume;
+    
+    String output;
+    serializeJson(responseDoc, output);
+    if (ws) ws->textAll(output);
   }
   else if (cmd == "setVolume") {
     int volume = doc["value"];

@@ -113,6 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
     createSequencer();
     setupControls();
     initHeaderMeters();
+    initVolumesSection(); // Initialize volumes section
     initVisualizers();
     
     // Initialize keyboard system from keyboard-controls.js first
@@ -430,6 +431,38 @@ function updateStatus(connected) {
     }
 }
 
+// Loop button functions (defined before createPads)
+function togglePadLoop(padIndex) {
+    if (!isConnected) {
+        console.log('[Loop] Not connected to server');
+        return;
+    }
+    
+    sendWebSocket({
+        cmd: 'toggleLoop',
+        track: padIndex
+    });
+    
+    console.log(`[Loop] Toggle loop for pad ${padIndex}`);
+}
+
+function updateLoopButtonState(padIndex) {
+    const loopBtn = document.querySelector(`.loop-btn[data-pad="${padIndex}"]`);
+    if (!loopBtn) return;
+    
+    const state = padLoopState[padIndex];
+    if (state && state.active) {
+        loopBtn.classList.add('active');
+        if (state.paused) {
+            loopBtn.classList.add('paused');
+        } else {
+            loopBtn.classList.remove('paused');
+        }
+    } else {
+        loopBtn.classList.remove('active', 'paused');
+    }
+}
+
 // Create Pads
 function createPads() {
     const grid = document.getElementById('padsGrid');
@@ -447,6 +480,7 @@ function createPads() {
         pad.innerHTML = `
             <button class="pad-upload-btn" data-pad="${i}" title="Load Sample">+</button>
             <button class="pad-filter-btn" data-pad="${i}" title="Filter">F</button>
+            <button class="loop-btn" data-pad="${i}" title="Toggle Loop">🔁</button>
             <div class="pad-content">
                 <div class="pad-name">${padNames[i]}</div>
                 <div class="pad-sample-info" id="sampleInfo-${i}"><span class="sample-file">...</span><span class="sample-quality">44.1k•16b•M</span></div>
@@ -489,6 +523,10 @@ function createPads() {
         // Event listener para botón de upload
         const uploadBtn = pad.querySelector('.pad-upload-btn');
         if (uploadBtn) {
+            uploadBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
             uploadBtn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -499,10 +537,37 @@ function createPads() {
         // Event listener para botón F de filtro
         const filterBtn = pad.querySelector('.pad-filter-btn');
         if (filterBtn) {
+            filterBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
             filterBtn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 showPadFilterSelector(i, pad);
+            });
+        }
+        
+        // Event listener para botón de loop
+        const loopBtn = pad.querySelector('.loop-btn');
+        if (loopBtn) {
+            loopBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+            loopBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log(`[Loop Button] Clicked pad ${i}`);
+                togglePadLoop(i);
+            });
+            
+            // También prevenir eventos touch
+            loopBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log(`[Loop Button] Touch pad ${i}`);
+                togglePadLoop(i);
             });
         }
         
@@ -943,6 +1008,9 @@ function updatePadLoopVisual(padIndex) {
     } else {
         pad.classList.remove('looping', 'loop-paused');
     }
+    
+    // Actualizar el botón de loop
+    updateLoopButtonState(padIndex);
 
     updateTrackLoopVisual(padIndex);
 }
@@ -961,6 +1029,11 @@ function setTrackMuted(track, isMuted, sendCommand) {
     document.querySelectorAll(`.seq-step[data-track="${track}"]`).forEach(step => {
         step.classList.toggle('track-muted', isMuted);
     });
+    
+    // Update volume muted state in volumes section
+    if (window.updateVolumeMutedState) {
+        window.updateVolumeMutedState(track, isMuted);
+    }
 
     if (sendCommand) {
         sendWebSocket({
@@ -1454,10 +1527,12 @@ function setupControls() {
     // Play/Stop
     document.getElementById('playBtn').addEventListener('click', () => {
         sendWebSocket({ cmd: 'start' });
+        updateSequencerStatusMeter();
     });
     
     document.getElementById('stopBtn').addEventListener('click', () => {
         sendWebSocket({ cmd: 'stop' });
+        updateSequencerStatusMeter();
     });
     
     document.getElementById('clearBtn').addEventListener('click', () => {
@@ -1733,7 +1808,7 @@ function initHeaderMeters() {
     if (liveVolumeSlider) {
         updateLiveVolumeMeter(parseInt(liveVolumeSlider.value, 10));
     }
-    updateFilterMeter();
+    updateSequencerStatusMeter();
 }
 
 function getNormalizedPercentage(value, min, max) {
@@ -1795,31 +1870,25 @@ function updateLiveVolumeMeter(value) {
     }
 }
 
-function updateFilterMeter() {
-    const meterValue = document.getElementById('meterFilterValue');
-    const meterBar = document.getElementById('meterFilterBar');
-    const filterType = document.getElementById('filterType');
-    const filterCutoff = document.getElementById('filterCutoff');
-    const filterResonance = document.getElementById('filterResonance');
-    if (!meterValue || !meterBar || !filterType || !filterCutoff) return;
-    const typeValue = parseInt(filterType.value, 10) || 0;
+function updateSequencerStatusMeter() {
+    const meterValue = document.getElementById('meterSequencerStatus');
+    const meterBar = document.getElementById('meterSequencerStatusBar');
+    if (!meterValue || !meterBar) return;
+    
     const barWrapper = meterBar.parentElement;
-    if (typeValue === 0) {
-        meterValue.textContent = 'OFF';
+    
+    if (isPlaying) {
+        meterValue.textContent = '▶ PLAY';
+        meterBar.style.width = '100%';
+        if (barWrapper) {
+            barWrapper.classList.add('active');
+        }
+    } else {
+        meterValue.textContent = '⬛ STOP';
         meterBar.style.width = '0%';
         if (barWrapper) {
             barWrapper.classList.remove('active');
         }
-        return;
-    }
-    const cutoffVal = parseInt(filterCutoff.value, 10);
-    const resonanceVal = filterResonance ? parseFloat(filterResonance.value) : 1.0;
-    const min = parseInt(filterCutoff.min, 10) || 100;
-    const max = parseInt(filterCutoff.max, 10) || 16000;
-    meterValue.textContent = `${filterTypeLabels[typeValue] || 'FILTER'} • ${cutoffVal}Hz • Q${resonanceVal.toFixed(1)}`;
-    meterBar.style.width = `${getNormalizedPercentage(cutoffVal, min, max).toFixed(1)}%`;
-    if (barWrapper) {
-        barWrapper.classList.add('active');
     }
 }
 
@@ -1866,6 +1935,15 @@ function updateSequencerState(data) {
                 liveVolumeValue.textContent = liveVolumeString;
                 updateLiveVolumeMeter(parseInt(data.liveVolume, 10));
             }
+        }
+    }
+    
+    // Update master volume displays in volumes section
+    if (data.sequencerVolume !== undefined || data.liveVolume !== undefined) {
+        const seqVol = data.sequencerVolume !== undefined ? data.sequencerVolume : 100;
+        const liveVol = data.liveVolume !== undefined ? data.liveVolume : 100;
+        if (window.updateMasterVolumeDisplays) {
+            window.updateMasterVolumeDisplays(seqVol, liveVol);
         }
     }
     const loopTracksToUpdate = new Set();
@@ -1918,6 +1996,9 @@ function updateSequencerState(data) {
     
     // Update playing state
     isPlaying = data.playing || false;
+    
+    // Update sequencer status meter
+    updateSequencerStatusMeter();
     
     // Update pattern button
     if (data.pattern !== undefined) {
@@ -2079,6 +2160,7 @@ function togglePlayPause() {
         isPlaying = true;
         console.log('Playing');
     }
+    updateSequencerStatusMeter();
     return isPlaying;
 }
 
@@ -3405,6 +3487,11 @@ function updateTrackVolume(track, volume) {
         if (trackLabel) {
             updateTrackLabelBackground(trackLabel, track, volume);
         }
+        
+        // Update volume bar in volumes section
+        if (window.updateVolumeBar) {
+            window.updateVolumeBar(track, volume);
+        }
     }
 }
 
@@ -3426,3 +3513,83 @@ function updateTrackLabelBackground(label, track, volume) {
 
 window.showVolumeMenu = showVolumeMenu;
 window.updateTrackVolume = updateTrackVolume;
+
+// ============================================
+// VOLUMES SECTION - Initialization & Updates
+// ============================================
+
+function initVolumesSection() {
+    console.log('[Volumes] Initializing volumes section...');
+    
+    // Initialize all track volumes to default
+    for (let track = 0; track < 8; track++) {
+        updateVolumeBar(track, trackVolumes[track]);
+        updateVolumeMutedState(track, trackMutedState[track]);
+    }
+    
+    console.log('[Volumes] Section initialized');
+}
+
+function updateVolumeBar(track, volume) {
+    if (track < 0 || track >= 8) return;
+    
+    const volumeBar = document.getElementById(`trackVolumeBar${track}`);
+    const volumeValue = document.getElementById(`trackVolumeValue${track}`);
+    
+    if (volumeBar) {
+        const percentage = Math.min(Math.max(volume, 0), 150);
+        volumeBar.style.width = `${percentage}%`;
+    }
+    
+    if (volumeValue) {
+        volumeValue.textContent = `${volume}%`;
+    }
+}
+
+function updateVolumeMutedState(track, isMuted) {
+    if (track < 0 || track >= 8) return;
+    
+    const volumeCard = document.querySelector(`.track-volume-card[data-track="${track}"]`);
+    
+    if (volumeCard) {
+        if (isMuted) {
+            volumeCard.classList.add('muted');
+        } else {
+            volumeCard.classList.remove('muted');
+        }
+    }
+}
+
+function updateMasterVolumeDisplays(sequencerVolume, padsVolume) {
+    // Update Sequencer Volume
+    const displaySequencerVolume = document.getElementById('displaySequencerVolume');
+    const barSequencerVolume = document.getElementById('barSequencerVolume');
+    
+    if (displaySequencerVolume) {
+        displaySequencerVolume.textContent = `${sequencerVolume}%`;
+    }
+    
+    if (barSequencerVolume) {
+        const percentage = Math.min(Math.max(sequencerVolume, 0), 150);
+        barSequencerVolume.style.width = `${percentage}%`;
+    }
+    
+    // Update Pads Volume
+    const displayPadsVolume = document.getElementById('displayPadsVolume');
+    const barPadsVolume = document.getElementById('barPadsVolume');
+    
+    if (displayPadsVolume) {
+        displayPadsVolume.textContent = `${padsVolume}%`;
+    }
+    
+    if (barPadsVolume) {
+        const percentage = Math.min(Math.max(padsVolume, 0), 150);
+        barPadsVolume.style.width = `${percentage}%`;
+    }
+}
+
+// Export functions
+window.initVolumesSection = initVolumesSection;
+window.updateVolumeBar = updateVolumeBar;
+window.updateVolumeMutedState = updateVolumeMutedState;
+window.updateMasterVolumeDisplays = updateMasterVolumeDisplays;
