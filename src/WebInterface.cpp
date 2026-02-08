@@ -9,6 +9,7 @@
 #include "KitManager.h"
 #include "SampleManager.h"
 #include <map>
+#include <esp_wifi.h>
 
 // Timeout para clientes UDP (30 segundos sin actividad)
 #define UDP_CLIENT_TIMEOUT 30000
@@ -242,8 +243,8 @@ bool WebInterface::begin(const char* ssid, const char* password) {
   WiFi.mode(WIFI_AP);
   delay(100);
   
-  // Potencia TX moderada - 19.5dBm puede causar inestabilidad por consumo
-  WiFi.setTxPower(WIFI_POWER_17dBm);
+  // Potencia TX máxima estable para mínima latencia
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
   delay(50);
   
   // IP fija
@@ -252,9 +253,18 @@ bool WebInterface::begin(const char* ssid, const char* password) {
   IPAddress subnet(255, 255, 255, 0);
   WiFi.softAPConfig(local_IP, gateway, subnet);
   
-  // Canal 6, SSID visible, max 4 conexiones
-  WiFi.softAP(ssid, password, 6, 0, 4);
+  // Canal 1 (menos congestionado), SSID visible, max 4 conexiones
+  WiFi.softAP(ssid, password, 1, 0, 4);
   delay(500);  // Más tiempo para estabilizar AP
+  
+  // Forzar protocolo 802.11n para mínima latencia
+  esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+  
+  // Configurar beacon interval más corto para conexión más rápida
+  wifi_config_t conf;
+  esp_wifi_get_config(WIFI_IF_AP, &conf);
+  conf.ap.beacon_interval = 50;  // 50ms beacon (default 100ms)
+  esp_wifi_set_config(WIFI_IF_AP, &conf);
   
   IPAddress IP = WiFi.softAPIP();
   Serial.print("RED808 AP IP: ");
@@ -812,6 +822,11 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "stop") {
     sequencer.stop();
   }
+  else if (cmd == "clearPattern") {
+    int pattern = doc.containsKey("pattern") ? doc["pattern"].as<int>() : sequencer.getCurrentPattern();
+    sequencer.clearPattern(pattern);
+    Serial.printf("[WS] Pattern %d cleared\n", pattern);
+  }
   else if (cmd == "tempo") {
     float tempo = doc["value"];
     sequencer.setTempo(tempo);
@@ -1289,15 +1304,15 @@ void WebInterface::setMIDIController(MIDIController* controller) {
 void WebInterface::broadcastMIDIMessage(const MIDIMessage& msg) {
   if (!initialized || !ws) return;
   
-  // Throttling: solo broadcast cada 250ms para evitar sobrecarga
+  // Throttling: solo broadcast cada 100ms para baja latencia
   static uint32_t lastBroadcastTime = 0;
   static uint32_t messageCount = 0;
   uint32_t now = millis();
   
   messageCount++;
   
-  // Solo enviar actualizaciones cada 250ms (máximo 4 por segundo)
-  if (now - lastBroadcastTime < 250) {
+  // Solo enviar actualizaciones cada 100ms (máximo 10 por segundo)
+  if (now - lastBroadcastTime < 100) {
     return; // Skip este broadcast
   }
   

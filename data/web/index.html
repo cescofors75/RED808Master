@@ -107,6 +107,11 @@
                             <span class="seq-btn-icon">⭘</span>
                             <span class="seq-btn-label">CIRCULAR</span>
                         </button>
+                        <button id="midiImportBtn" class="seq-btn seq-btn-midi-import" title="Importar archivo MIDI" onclick="showMidiImportDialog()">
+                            <span class="seq-btn-bg"></span>
+                            <span class="seq-btn-icon">📂</span>
+                            <span class="seq-btn-label">MIDI</span>
+                        </button>
                         <div class="pattern-display">
                             <span class="pattern-label">PATTERN</span>
                             <span id="currentPatternName" class="pattern-name">HIP HOP</span>
@@ -617,45 +622,45 @@
                                         <span class="pad-target">BD</span>
                                         <div class="velocity-bar"><div class="velocity-fill"></div></div>
                                     </div>
-                                    <div class="mapping-item" data-pad="1" data-note="37">
-                                        <span class="note-badge editable" contenteditable="false">37</span>
-                                        <span class="note-name">C#1</span>
+                                    <div class="mapping-item" data-pad="1" data-note="38">
+                                        <span class="note-badge editable" contenteditable="false">38</span>
+                                        <span class="note-name">D1</span>
                                         <span class="pad-target">SD</span>
                                         <div class="velocity-bar"><div class="velocity-fill"></div></div>
                                     </div>
-                                    <div class="mapping-item" data-pad="2" data-note="38">
-                                        <span class="note-badge editable" contenteditable="false">38</span>
-                                        <span class="note-name">D1</span>
+                                    <div class="mapping-item" data-pad="2" data-note="42">
+                                        <span class="note-badge editable" contenteditable="false">42</span>
+                                        <span class="note-name">F#1</span>
                                         <span class="pad-target">CH</span>
                                         <div class="velocity-bar"><div class="velocity-fill"></div></div>
                                     </div>
-                                    <div class="mapping-item" data-pad="3" data-note="39">
-                                        <span class="note-badge editable" contenteditable="false">39</span>
-                                        <span class="note-name">D#1</span>
+                                    <div class="mapping-item" data-pad="3" data-note="46">
+                                        <span class="note-badge editable" contenteditable="false">46</span>
+                                        <span class="note-name">A#1</span>
                                         <span class="pad-target">OH</span>
                                         <div class="velocity-bar"><div class="velocity-fill"></div></div>
                                     </div>
-                                    <div class="mapping-item" data-pad="4" data-note="40">
-                                        <span class="note-badge editable" contenteditable="false">40</span>
-                                        <span class="note-name">E1</span>
+                                    <div class="mapping-item" data-pad="4" data-note="39">
+                                        <span class="note-badge editable" contenteditable="false">39</span>
+                                        <span class="note-name">D#1</span>
                                         <span class="pad-target">CP</span>
                                         <div class="velocity-bar"><div class="velocity-fill"></div></div>
                                     </div>
-                                    <div class="mapping-item" data-pad="5" data-note="41">
-                                        <span class="note-badge editable" contenteditable="false">41</span>
-                                        <span class="note-name">F1</span>
+                                    <div class="mapping-item" data-pad="5" data-note="37">
+                                        <span class="note-badge editable" contenteditable="false">37</span>
+                                        <span class="note-name">C#1</span>
                                         <span class="pad-target">RS</span>
                                         <div class="velocity-bar"><div class="velocity-fill"></div></div>
                                     </div>
-                                    <div class="mapping-item" data-pad="6" data-note="42">
-                                        <span class="note-badge editable" contenteditable="false">42</span>
-                                        <span class="note-name">F#1</span>
+                                    <div class="mapping-item" data-pad="6" data-note="75">
+                                        <span class="note-badge editable" contenteditable="false">75</span>
+                                        <span class="note-name">D#4</span>
                                         <span class="pad-target">CL</span>
                                         <div class="velocity-bar"><div class="velocity-fill"></div></div>
                                     </div>
-                                    <div class="mapping-item" data-pad="7" data-note="43">
-                                        <span class="note-badge editable" contenteditable="false">43</span>
-                                        <span class="note-name">G1</span>
+                                    <div class="mapping-item" data-pad="7" data-note="49">
+                                        <span class="note-badge editable" contenteditable="false">49</span>
+                                        <span class="note-name">C#2</span>
                                         <span class="pad-target">CY</span>
                                         <div class="velocity-bar"><div class="velocity-fill"></div></div>
                                     </div>
@@ -981,6 +986,7 @@
         </footer>
     </div>
 
+    <script src="midi-import.js" defer></script>
     <script src="app.js" defer></script>
     <script src="keyboard-controls.js" defer></script>
 </body>

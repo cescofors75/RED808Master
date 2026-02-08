@@ -600,16 +600,44 @@ void MIDIController::clearMapping(uint8_t note) {
 void MIDIController::resetToDefaultMapping() {
   mappingCount = 0;
   
-  // Mapeo por defecto: notas 36-43 → pads 0-7
-  // 36=BD, 37=SD, 38=CH, 39=OH, 40=CP, 41=RS, 42=CL, 43=CY
+  // Mapeo General MIDI Drum Map (estándar GM)
+  // Pad 0: BD = Note 36 (C1)  Bass Drum 1
+  // Pad 1: SD = Note 38 (D1)  Acoustic Snare
+  // Pad 2: CH = Note 42 (F#1) Closed Hi-Hat
+  // Pad 3: OH = Note 46 (A#1) Open Hi-Hat
+  // Pad 4: CP = Note 39 (D#1) Hand Clap
+  // Pad 5: RS = Note 37 (C#1) Side Stick
+  // Pad 6: CL = Note 75 (D#4) Claves
+  // Pad 7: CY = Note 49 (C#2) Crash Cymbal 1
+  const uint8_t gmDrumNotes[] = {36, 38, 42, 46, 39, 37, 75, 49};
+  
   for (int i = 0; i < 8; i++) {
-    noteMappings[i].note = 36 + i;
+    noteMappings[i].note = gmDrumNotes[i];
     noteMappings[i].pad = i;
     noteMappings[i].enabled = true;
   }
   mappingCount = 8;
   
-  Serial.println("[MIDI Mapping] Reset to default (36-43 → pads 0-7)");
+  // Mapeos adicionales GM (notas alternativas al mismo pad)
+  // Note 35 (B0) = Acoustic Bass Drum → BD
+  noteMappings[mappingCount++] = {35, 0, true};
+  // Note 40 (E1) = Electric Snare → SD
+  noteMappings[mappingCount++] = {40, 1, true};
+  // Note 44 (G#1) = Pedal Hi-Hat → CH
+  noteMappings[mappingCount++] = {44, 2, true};
+  // Note 51 (D#2) = Ride Cymbal 1 → CY
+  noteMappings[mappingCount++] = {51, 7, true};
+  // Note 57 (A2) = Crash Cymbal 2 → CY
+  noteMappings[mappingCount++] = {57, 7, true};
+  // Note 56 (G#2) = Cowbell → RS (similar percussion)
+  noteMappings[mappingCount++] = {56, 5, true};
+  // Note 41 (F1) = Low Floor Tom → CL (mapped to available)
+  noteMappings[mappingCount++] = {41, 6, true};
+  // Note 43 (G1) = High Floor Tom → CL 
+  noteMappings[mappingCount++] = {43, 6, true};
+  
+  Serial.println("[MIDI Mapping] Reset to GM Drum Map standard");
+  Serial.println("  36=BD, 38=SD, 42=CH, 46=OH, 39=CP, 37=RS, 75=CL, 49=CY");
 }
 
 const MIDINoteMapping* MIDIController::getAllMappings(int& count) const {

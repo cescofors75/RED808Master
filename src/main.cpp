@@ -131,7 +131,7 @@ void systemTask(void *pvParameters) {
             }
         }
         
-        vTaskDelay(pdMS_TO_TICKS(8)); // 125Hz system loop - da más tiempo al WiFi stack
+        vTaskDelay(pdMS_TO_TICKS(2)); // 500Hz system loop - mínima latencia WiFi
     }
 }
 
