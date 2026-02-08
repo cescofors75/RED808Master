@@ -33,6 +33,10 @@ let trackMutedState = new Array(16).fill(false);
 
 // Pad filter state (stores active filter type for each pad)
 let padFilterState = new Array(16).fill(0); // 0 = FILTER_NONE
+let trackFilterState = new Array(16).fill(0); // 0 = FILTER_NONE
+
+// Pad <-> Sequencer sync state
+let padSeqSyncEnabled = true;
 
 // 16 instrumentos principales (4x4 grid)
 const padNames = ['BD', 'SD', 'CH', 'OH', 'CY', 'CP', 'RS', 'CB', 'LT', 'MT', 'HT', 'MA', 'CL', 'HC', 'MC', 'LC'];
@@ -639,55 +643,84 @@ function stopKeyboardTremolo(padIndex, padElement) {
 
 // Show filter selector overlay for pad
 function showPadFilterSelector(padIndex, padElement) {
-    // Remove any existing overlay
-    const existingOverlay = document.querySelector('.pad-filter-overlay');
-    if (existingOverlay) {
-        existingOverlay.remove();
-    }
+    // Remove any existing modal
+    closePadFilterModal();
     
-    // Create overlay
-    const overlay = document.createElement('div');
-    overlay.className = 'pad-filter-overlay';
+    // Create backdrop
+    const backdrop = document.createElement('div');
+    backdrop.className = 'pfe-backdrop';
+    backdrop.id = 'pfeBackdrop';
+    backdrop.addEventListener('click', closePadFilterModal);
     
-    // Create filter grid (10 filters in 3x4 grid)
+    // Create centered modal
+    const modal = document.createElement('div');
+    modal.className = 'pfe-modal';
+    modal.id = 'pfeModal';
+    modal.dataset.padIndex = padIndex;
+    
+    // Header
+    const header = document.createElement('div');
+    header.className = 'pfe-header';
+    header.innerHTML = `
+        <span class="pfe-pad-name">🎛️ ${padNames[padIndex]}</span>
+        <span class="pfe-title">SELECT FILTER</span>
+        <button class="pfe-close" title="Cerrar">✕</button>
+    `;
+    header.querySelector('.pfe-close').addEventListener('click', (e) => {
+        e.stopPropagation();
+        closePadFilterModal();
+    });
+    
+    // Filter grid
     const filterGrid = document.createElement('div');
-    filterGrid.className = 'pad-filter-grid';
+    filterGrid.className = 'pfe-filter-grid';
     
     FILTER_TYPES.forEach((filter, index) => {
         const filterBtn = document.createElement('button');
-        filterBtn.className = 'pad-filter-option';
+        filterBtn.className = 'pfe-filter-btn';
         filterBtn.dataset.filterType = index;
         if (index === padFilterState[padIndex]) {
             filterBtn.classList.add('active');
         }
-        
         filterBtn.innerHTML = `
-            <span class="filter-icon">${filter.icon}</span>
-            <span class="filter-name">${filter.name}</span>
+            <span class="pfe-icon">${filter.icon}</span>
+            <span class="pfe-name">${filter.name}</span>
         `;
-        
         filterBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             setPadFilter(padIndex, index);
-            overlay.remove();
+            closePadFilterModal();
         });
-        
         filterGrid.appendChild(filterBtn);
     });
     
-    overlay.appendChild(filterGrid);
+    modal.appendChild(header);
+    modal.appendChild(filterGrid);
     
-    // Close overlay when clicking outside
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) {
-            overlay.remove();
-        }
+    document.body.appendChild(backdrop);
+    document.body.appendChild(modal);
+    
+    // Animate in
+    requestAnimationFrame(() => {
+        backdrop.classList.add('visible');
+        modal.classList.add('visible');
     });
-    
-    // Position overlay over the pad
-    const padContainer = padElement.closest('.pad-container');
-    padContainer.style.position = 'relative';
-    padContainer.appendChild(overlay);
+}
+
+function closePadFilterModal() {
+    const backdrop = document.getElementById('pfeBackdrop');
+    const modal = document.getElementById('pfeModal');
+    if (modal) {
+        modal.classList.remove('visible');
+        modal.classList.add('closing');
+    }
+    if (backdrop) {
+        backdrop.classList.remove('visible');
+    }
+    setTimeout(() => {
+        if (backdrop) backdrop.remove();
+        if (modal) modal.remove();
+    }, 300);
 }
 
 // Set filter for a specific pad
@@ -706,7 +739,79 @@ function setPadFilter(padIndex, filterType) {
         };
         ws.send(JSON.stringify(msg));
     }
+    
+    // Sync: also apply to track if sync enabled
+    if (padSeqSyncEnabled && padIndex < 16) {
+        trackFilterState[padIndex] = filterType;
+        syncFilterToTrack(padIndex, filterType);
+    }
 }
+
+// Sync filter from pad to corresponding track
+function syncFilterToTrack(trackIndex, filterType) {
+    const filterShortcuts = {
+        0: { type: 0, name: 'Clear Filter' },
+        1: { type: 1, cutoff: 1000, resonance: 1, name: 'Low Pass' },
+        2: { type: 2, cutoff: 1000, resonance: 1, name: 'High Pass' },
+        3: { type: 3, cutoff: 1000, resonance: 2, name: 'Band Pass' },
+        4: { type: 4, cutoff: 1000, resonance: 2, name: 'Notch' },
+        5: { type: 5, cutoff: 1000, resonance: 1, name: 'All Pass' },
+        6: { type: 6, cutoff: 1000, resonance: 2, gain: 6, name: 'Peaking' },
+        7: { type: 7, cutoff: 500, resonance: 1, gain: 6, name: 'Low Shelf' },
+        8: { type: 8, cutoff: 4000, resonance: 1, gain: 6, name: 'High Shelf' },
+        9: { type: 9, cutoff: 1000, resonance: 10, name: 'Resonant' }
+    };
+    
+    const filter = filterShortcuts[filterType];
+    if (!filter) return;
+    
+    const cmd = {
+        cmd: filter.type === 0 ? 'clearTrackFilter' : 'setTrackFilter',
+        track: trackIndex
+    };
+    if (filter.type !== 0) {
+        cmd.filterType = filter.type;
+        cmd.cutoff = filter.cutoff;
+        cmd.resonance = filter.resonance;
+        if (filter.gain !== undefined) cmd.gain = filter.gain;
+    }
+    sendWebSocket(cmd);
+}
+
+// Setup sync toggles between Pads and Sequencer
+function setupSyncToggles() {
+    const padSync = document.getElementById('padSeqSync');
+    const seqSync = document.getElementById('seqPadSync');
+    
+    function updateSyncState(checked) {
+        padSeqSyncEnabled = checked;
+        window.padSeqSyncEnabled = checked;
+        if (padSync) padSync.checked = checked;
+        if (seqSync) seqSync.checked = checked;
+    }
+    
+    if (padSync) {
+        padSync.addEventListener('change', (e) => updateSyncState(e.target.checked));
+    }
+    if (seqSync) {
+        seqSync.addEventListener('change', (e) => updateSyncState(e.target.checked));
+    }
+}
+
+// Expose syncFilterToPad for keyboard-controls to use
+// Use _internal name to avoid infinite recursion (global scope resolves bare name to window.)
+window.syncFilterToPad = function(padIndex, filterType) {
+    if (!padSeqSyncEnabled) return;
+    padFilterState[padIndex] = filterType;
+    updatePadFilterIndicator(padIndex);
+    if (isConnected) {
+        ws.send(JSON.stringify({
+            cmd: 'setPadFilter',
+            pad: padIndex,
+            filterType: filterType
+        }));
+    }
+};
 
 // Clear filter for a specific pad
 function clearPadFilter(padIndex) {
@@ -1682,77 +1787,161 @@ function setupControls() {
         });
     }
     
-    // FX Controls - deprecated, now using preset system
-    // setupFXControls();
+    // Master FX Controls
+    setupFXControls();
 }
 
 function setupFXControls() {
     // Filter Type
     const filterType = document.getElementById('filterType');
-    filterType.addEventListener('change', (e) => {
-        sendWebSocket({
-            cmd: 'setFilter',
-            type: parseInt(e.target.value)
+    if (filterType) {
+        filterType.addEventListener('change', (e) => {
+            sendWebSocket({
+                cmd: 'setFilter',
+                type: parseInt(e.target.value)
+            });
+            updateFilterMeter();
         });
-        updateFilterMeter();
-    });
+    }
     
     // Filter Cutoff
     const filterCutoff = document.getElementById('filterCutoff');
     const filterCutoffValue = document.getElementById('filterCutoffValue');
-    filterCutoff.addEventListener('input', (e) => {
-        filterCutoffValue.textContent = e.target.value;
-        sendWebSocket({
-            cmd: 'setFilterCutoff',
-            value: parseFloat(e.target.value)
+    if (filterCutoff) {
+        filterCutoff.addEventListener('input', (e) => {
+            if (filterCutoffValue) filterCutoffValue.textContent = e.target.value;
+            sendWebSocket({
+                cmd: 'setFilterCutoff',
+                value: parseFloat(e.target.value)
+            });
+            updateFilterMeter();
         });
-        updateFilterMeter();
-    });
+    }
     
     // Filter Resonance
     const filterResonance = document.getElementById('filterResonance');
     const filterResonanceValue = document.getElementById('filterResonanceValue');
-    filterResonance.addEventListener('input', (e) => {
-        filterResonanceValue.textContent = parseFloat(e.target.value).toFixed(1);
-        sendWebSocket({
-            cmd: 'setFilterResonance',
-            value: parseFloat(e.target.value)
+    if (filterResonance) {
+        filterResonance.addEventListener('input', (e) => {
+            if (filterResonanceValue) filterResonanceValue.textContent = parseFloat(e.target.value).toFixed(1);
+            sendWebSocket({
+                cmd: 'setFilterResonance',
+                value: parseFloat(e.target.value)
+            });
+            updateFilterMeter();
         });
-        updateFilterMeter();
-    });
+    }
     
-    // Bit Crush
-    const bitCrush = document.getElementById('bitCrush');
-    const bitCrushValue = document.getElementById('bitCrushValue');
-    bitCrush.addEventListener('input', (e) => {
-        bitCrushValue.textContent = e.target.value;
-        sendWebSocket({
-            cmd: 'setBitCrush',
-            value: parseInt(e.target.value)
+    // ============= Distortion (improved with modes) =============
+    const distortionMode = document.getElementById('distortionMode');
+    if (distortionMode) {
+        distortionMode.addEventListener('change', (e) => {
+            sendWebSocket({ cmd: 'setDistortionMode', value: parseInt(e.target.value) });
         });
-    });
+    }
     
-    // Distortion
     const distortion = document.getElementById('distortion');
     const distortionValue = document.getElementById('distortionValue');
-    distortion.addEventListener('input', (e) => {
-        distortionValue.textContent = e.target.value;
-        sendWebSocket({
-            cmd: 'setDistortion',
-            value: parseFloat(e.target.value)
+    if (distortion) {
+        distortion.addEventListener('input', (e) => {
+            if (distortionValue) distortionValue.textContent = e.target.value;
+            sendWebSocket({ cmd: 'setDistortion', value: parseFloat(e.target.value) });
         });
-    });
+    }
     
-    // Sample Rate Reducer
+    // ============= Lo-Fi Controls =============
+    const bitCrush = document.getElementById('bitCrush');
+    const bitCrushValue = document.getElementById('bitCrushValue');
+    if (bitCrush) {
+        bitCrush.addEventListener('input', (e) => {
+            if (bitCrushValue) bitCrushValue.textContent = e.target.value;
+            sendWebSocket({ cmd: 'setBitCrush', value: parseInt(e.target.value) });
+        });
+    }
+    
     const sampleRate = document.getElementById('sampleRate');
     const sampleRateValue = document.getElementById('sampleRateValue');
-    sampleRate.addEventListener('input', (e) => {
-        sampleRateValue.textContent = e.target.value;
-        sendWebSocket({
-            cmd: 'setSampleRate',
-            value: parseInt(e.target.value)
+    if (sampleRate) {
+        sampleRate.addEventListener('input', (e) => {
+            if (sampleRateValue) sampleRateValue.textContent = e.target.value;
+            sendWebSocket({ cmd: 'setSampleRate', value: parseInt(e.target.value) });
         });
+    }
+    
+    // ============= NEW: Delay/Echo =============
+    const delayActive = document.getElementById('delayActive');
+    if (delayActive) {
+        delayActive.addEventListener('change', (e) => {
+            sendWebSocket({ cmd: 'setDelayActive', value: e.target.checked });
+            toggleFxCard(e.target, e.target.checked);
+        });
+    }
+    
+    setupFxSlider('delayTime', 'delayTimeValue', 'setDelayTime', '', true);
+    setupFxSlider('delayFeedback', 'delayFeedbackValue', 'setDelayFeedback', '%', true);
+    setupFxSlider('delayMix', 'delayMixValue', 'setDelayMix', '', true);
+    
+    // ============= NEW: Phaser =============
+    const phaserActive = document.getElementById('phaserActive');
+    if (phaserActive) {
+        phaserActive.addEventListener('change', (e) => {
+            sendWebSocket({ cmd: 'setPhaserActive', value: e.target.checked });
+            toggleFxCard(e.target, e.target.checked);
+        });
+    }
+    
+    setupFxSlider('phaserRate', 'phaserRateValue', 'setPhaserRate', '', true);
+    setupFxSlider('phaserDepth', 'phaserDepthValue', 'setPhaserDepth', '%', true);
+    setupFxSlider('phaserFeedback', 'phaserFeedbackValue', 'setPhaserFeedback', '%', true);
+    
+    // ============= NEW: Flanger =============
+    const flangerActive = document.getElementById('flangerActive');
+    if (flangerActive) {
+        flangerActive.addEventListener('change', (e) => {
+            sendWebSocket({ cmd: 'setFlangerActive', value: e.target.checked });
+            toggleFxCard(e.target, e.target.checked);
+        });
+    }
+    
+    setupFxSlider('flangerRate', 'flangerRateValue', 'setFlangerRate', '', true);
+    setupFxSlider('flangerDepth', 'flangerDepthValue', 'setFlangerDepth', '%', true);
+    setupFxSlider('flangerFeedback', 'flangerFeedbackValue', 'setFlangerFeedback', '%', true);
+    setupFxSlider('flangerMix', 'flangerMixValue', 'setFlangerMix', '%', true);
+    
+    // ============= NEW: Compressor =============
+    const compressorActive = document.getElementById('compressorActive');
+    if (compressorActive) {
+        compressorActive.addEventListener('change', (e) => {
+            sendWebSocket({ cmd: 'setCompressorActive', value: e.target.checked });
+            toggleFxCard(e.target, e.target.checked);
+        });
+    }
+    
+    setupFxSlider('compressorThreshold', 'compressorThresholdValue', 'setCompressorThreshold', 'dB', false);
+    setupFxSlider('compressorRatio', 'compressorRatioValue', 'setCompressorRatio', '', false);
+    setupFxSlider('compressorAttack', 'compressorAttackValue', 'setCompressorAttack', 'ms', false);
+    setupFxSlider('compressorRelease', 'compressorReleaseValue', 'setCompressorRelease', 'ms', false);
+    setupFxSlider('compressorMakeup', 'compressorMakeupValue', 'setCompressorMakeupGain', 'dB', false);
+}
+
+// Helper: setup a slider -> WebSocket binding
+function setupFxSlider(sliderId, valueId, wsCmd, suffix, isInt) {
+    const slider = document.getElementById(sliderId);
+    const valueEl = document.getElementById(valueId);
+    if (!slider) return;
+    slider.addEventListener('input', (e) => {
+        const val = isInt ? parseInt(e.target.value) : parseFloat(e.target.value);
+        if (valueEl) valueEl.textContent = val;
+        sendWebSocket({ cmd: wsCmd, value: val });
     });
+}
+
+// Helper: visual toggle for FX card active state
+function toggleFxCard(checkbox, active) {
+    const card = checkbox.closest('.fx-card');
+    if (card) {
+        card.classList.toggle('fx-card-active', active);
+    }
 }
 
 function initHeaderMeters() {
@@ -2168,9 +2357,14 @@ function setupKeyboardControls() {
     
     // Export pad filter functions and state
     window.padFilterState = padFilterState;
+    window.trackFilterState = trackFilterState;
+    window.padSeqSyncEnabled = padSeqSyncEnabled;
     window.updatePadFilterIndicator = updatePadFilterIndicator;
     window.setPadFilter = setPadFilter;
     window.clearPadFilter = clearPadFilter;
+    
+    // Sync toggle event handlers
+    setupSyncToggles();
 }
 
 function changePattern(delta) {
@@ -2702,6 +2896,60 @@ function updatePadInfo(data) {
 }
 
 // ============= FILTER PRESET SYSTEM =============
+
+// Recommended demo pads for each filter type - 2 instruments that best showcase each filter
+// [filterType]: [{pad, label, cutoff, resonance, gain}, ...]
+const FILTER_DEMO_PADS = {
+    1: [{pad:0, label:'BD', cutoff:800, q:3.0},     {pad:4, label:'CY', cutoff:600, q:3.0}],     // LOW PASS: kick gets muffled, cymbal loses sizzle
+    2: [{pad:0, label:'BD', cutoff:800, q:3.0},     {pad:1, label:'SD', cutoff:500, q:3.0}],     // HIGH PASS: kick loses body, snare gets thin
+    3: [{pad:1, label:'SD', cutoff:1500, q:5.0},    {pad:4, label:'CY', cutoff:2000, q:4.0}],    // BAND PASS: telephone effect
+    4: [{pad:3, label:'OH', cutoff:1200, q:5.0},    {pad:4, label:'CY', cutoff:1200, q:5.0}],    // NOTCH: phaser-like on metals
+    5: [{pad:0, label:'BD', cutoff:80, q:1.5, g:10},{pad:8, label:'LT', cutoff:200, q:1.0, g:8}],// BASS BOOST: sub on kick/tom
+    6: [{pad:2, label:'CH', cutoff:3000, q:1.0, g:9},{pad:1, label:'SD', cutoff:6000, q:1.0, g:7}],// TREBLE BOOST: sizzle
+    7: [{pad:0, label:'BD', cutoff:100, q:3.0, g:10},{pad:1, label:'SD', cutoff:2500, q:4.0, g:9}],// PEAK BOOST: punch
+    8: [{pad:3, label:'OH', cutoff:300, q:5.0},     {pad:4, label:'CY', cutoff:1500, q:3.0}],    // PHASE: swirl on metals
+    9: [{pad:0, label:'BD', cutoff:300, q:15.0},    {pad:1, label:'SD', cutoff:1000, q:12.0}]    // RESONANT: acid
+};
+window.FILTER_DEMO_PADS = FILTER_DEMO_PADS;
+
+// Preview a filter on a specific pad: apply filter, trigger sound, auto-clear after delay
+function previewFilterOnPad(filterType, padIndex, cutoff, resonance, gain) {
+    const filterNames = ['OFF', 'LOW PASS', 'HIGH PASS', 'BAND PASS', 'NOTCH CUT', 
+                        'BASS BOOST', 'TREBLE BOOST', 'PEAK BOOST', 'PHASE', 'RESONANT'];
+    const filterIcons = ['🚫', '🔥', '✨', '📞', '🕳️', '🔊', '🌟', '⛰️', '🌀', '⚡'];
+
+    // Apply filter to track
+    sendWebSocket({
+        cmd: 'setTrackFilter',
+        track: padIndex,
+        type: filterType,
+        cutoff: cutoff,
+        resonance: resonance || 2.0,
+        gain: gain || 0
+    });
+
+    // Trigger pad after short delay for filter to be applied
+    setTimeout(() => triggerPad(padIndex), 60);
+
+    // Show toast
+    if (window.showToast) {
+        const freqStr = cutoff >= 1000 ? (cutoff/1000).toFixed(1)+'kHz' : cutoff+'Hz';
+        window.showToast(
+            `${filterIcons[filterType]} Preview: ${padNames[padIndex]} + ${filterNames[filterType]} @ ${freqStr}`,
+            window.TOAST_TYPES?.SUCCESS || 'success',
+            2000
+        );
+    }
+
+    // Auto-clear filter after 2.5 seconds
+    setTimeout(() => {
+        sendWebSocket({
+            cmd: 'clearTrackFilter',
+            track: padIndex
+        });
+    }, 2500);
+}
+window.previewFilterOnPad = previewFilterOnPad;
 
 // Apply filter preset from FX library
 // Now accepts optional resonance and gain for more impactful presets

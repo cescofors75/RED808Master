@@ -1,13 +1,26 @@
 /*
  * AudioEngine.cpp
  * Implementació del motor d'àudio
+ * Master effects inspired by torvalds/AudioNoise (GPL-2.0)
+ * - Soft clipping: limit_value pattern from util.h
+ * - Delay/Echo: circular buffer pattern from echo.h
+ * - Phaser: cascaded allpass from phaser.h
+ * - Flanger: modulated delay from flanger.h
+ * - LFO: phase accumulator + sine LUT from lfo.h
  */
 
 #include "AudioEngine.h"
 
+// Static member initialization
+float AudioEngine::lfoSineTable[LFO_TABLE_SIZE] = {0};
+bool AudioEngine::lfoTableInitialized = false;
+
 AudioEngine::AudioEngine() : i2sPort(I2S_NUM_0),
                              processCount(0), lastCpuCheck(0), cpuLoad(0.0f),
-                             voiceAge(0) {
+                             voiceAge(0), delayBuffer(nullptr) {
+  // Initialize LFO sine lookup table (once, shared across instances)
+  initLFOTable();
+  
   // Initialize voices
   for (int i = 0; i < MAX_VOICES; i++) {
     resetVoice(i);
@@ -19,7 +32,7 @@ AudioEngine::AudioEngine() : i2sPort(I2S_NUM_0),
     sampleLengths[i] = 0;
   }
   
-  // Initialize FX
+  // Initialize FX (existing global filter/lofi chain)
   fx.filterType = FILTER_NONE;
   fx.cutoff = 8000.0f;
   fx.resonance = 1.0f;
@@ -31,6 +44,7 @@ AudioEngine::AudioEngine() : i2sPort(I2S_NUM_0),
   fx.state.y1 = fx.state.y2 = 0.0f;
   fx.srHold = 0;
   fx.srCounter = 0;
+  distortionMode = DIST_SOFT;
   calculateBiquadCoeffs();
   
   // Initialize per-track and per-pad filters
@@ -59,12 +73,116 @@ AudioEngine::AudioEngine() : i2sPort(I2S_NUM_0),
   sequencerVolume = 10;
   liveVolume = 80;
   
+  // ============= Initialize NEW Master Effects =============
+  
+  // Delay/Echo - allocate buffer in PSRAM
+  delayBuffer = (float*)ps_malloc(DELAY_BUFFER_SIZE * sizeof(float));
+  if (delayBuffer) {
+    memset(delayBuffer, 0, DELAY_BUFFER_SIZE * sizeof(float));
+    Serial.printf("[AudioEngine] Delay buffer allocated: %d bytes in PSRAM\n", 
+                  DELAY_BUFFER_SIZE * (int)sizeof(float));
+  } else {
+    Serial.println("[AudioEngine] WARNING: Failed to allocate delay buffer in PSRAM!");
+  }
+  delayParams.active = false;
+  delayParams.time = 250.0f;
+  delayParams.feedback = 0.3f;
+  delayParams.mix = 0.3f;
+  delayParams.delaySamples = (uint32_t)(250.0f * SAMPLE_RATE / 1000.0f);
+  delayParams.writePos = 0;
+  
+  // Phaser
+  phaserParams.active = false;
+  phaserParams.rate = 0.5f;
+  phaserParams.depth = 0.7f;
+  phaserParams.feedback = 0.3f;
+  phaserParams.lastOutput = 0.0f;
+  for (int i = 0; i < PHASER_STAGES; i++) {
+    phaserParams.stages[i] = {0, 0, 0, 0};
+  }
+  phaserParams.lfo.phase = 0;
+  phaserParams.lfo.depth = 0.7f;
+  phaserParams.lfo.waveform = LFO_SINE;
+  updateLFOPhaseInc(phaserParams.lfo, 0.5f);
+  
+  // Flanger
+  memset(flangerBuffer, 0, sizeof(flangerBuffer));
+  flangerParams.active = false;
+  flangerParams.rate = 0.3f;
+  flangerParams.depth = 0.5f;
+  flangerParams.feedback = 0.4f;
+  flangerParams.mix = 0.5f;
+  flangerParams.writePos = 0;
+  flangerParams.lfo.phase = 0;
+  flangerParams.lfo.depth = 0.5f;
+  flangerParams.lfo.waveform = LFO_SINE;
+  updateLFOPhaseInc(flangerParams.lfo, 0.3f);
+  
+  // Compressor
+  compressorParams.active = false;
+  compressorParams.threshold = 0.5f;
+  compressorParams.ratio = 4.0f;
+  compressorParams.attackCoeff = expf(-1.0f / (SAMPLE_RATE * 0.010f));   // 10ms
+  compressorParams.releaseCoeff = expf(-1.0f / (SAMPLE_RATE * 0.100f));  // 100ms
+  compressorParams.makeupGain = 1.0f;
+  compressorParams.envelope = 0.0f;
+  
   // Clear mix accumulator
   memset(mixAcc, 0, sizeof(mixAcc));
 }
 
 AudioEngine::~AudioEngine() {
   i2s_driver_uninstall(i2sPort);
+  if (delayBuffer) {
+    free(delayBuffer);
+    delayBuffer = nullptr;
+  }
+}
+
+// ============= LFO Initialization =============
+
+void AudioEngine::initLFOTable() {
+  if (lfoTableInitialized) return;
+  // Full sine table (256 entries) - inspired by torvalds/AudioNoise lfo.h quarter-sine approach
+  for (int i = 0; i < LFO_TABLE_SIZE; i++) {
+    lfoSineTable[i] = sinf(2.0f * PI * (float)i / (float)LFO_TABLE_SIZE);
+  }
+  lfoTableInitialized = true;
+  Serial.println("[AudioEngine] LFO sine table initialized");
+}
+
+void AudioEngine::updateLFOPhaseInc(LFOState& lfo, float rateHz) {
+  // Phase increment per sample: rate * 2^32 / SAMPLE_RATE
+  // Using 64-bit intermediate to avoid overflow
+  lfo.phaseInc = (uint32_t)((double)rateHz * 4294967296.0 / (double)SAMPLE_RATE);
+}
+
+// LFO tick - returns value in range [-depth, +depth]
+// Inspired by torvalds/AudioNoise lfo.h phase accumulator pattern
+float AudioEngine::lfoTick(LFOState& lfo) {
+  lfo.phase += lfo.phaseInc;
+  
+  // Extract table index from top 8 bits of 32-bit phase
+  uint8_t idx = lfo.phase >> 24;
+  
+  switch (lfo.waveform) {
+    case LFO_SINE:
+      return lfoSineTable[idx] * lfo.depth;
+      
+    case LFO_TRIANGLE: {
+      float t = (float)(lfo.phase >> 16) / 65536.0f;  // 0.0 - 1.0
+      float tri = (t < 0.5f) ? (4.0f * t - 1.0f) : (3.0f - 4.0f * t);
+      return tri * lfo.depth;
+    }
+    
+    case LFO_SAWTOOTH: {
+      float saw = 2.0f * (float)(lfo.phase >> 16) / 65536.0f - 1.0f;
+      return saw * lfo.depth;
+    }
+    
+    default:
+      return 0.0f;
+  }
 }
 
 bool AudioEngine::begin(int bckPin, int wsPin, int dataPin) {
@@ -239,7 +357,6 @@ void IRAM_ATTR AudioEngine::fillBuffer(int16_t* buffer, size_t samples) {
       int16_t filtered = (int16_t)constrain(scaled, -32768, 32767);
       if (voice.padIndex >= 0 && voice.padIndex < MAX_PADS) {
         if (voice.isLivePad && padFilterActive[voice.padIndex]) {
-          // Use voice's own filter state with pad filter coefficients
           float x = (float)filtered;
           float y = padFilters[voice.padIndex].coeffs.b0 * x + voice.filterState.x1;
           voice.filterState.x1 = padFilters[voice.padIndex].coeffs.b1 * x - padFilters[voice.padIndex].coeffs.a1 * y + voice.filterState.x2;
@@ -258,7 +375,7 @@ void IRAM_ATTR AudioEngine::fillBuffer(int16_t* buffer, size_t samples) {
         }
       }
       
-      // Mix to accumulator (stereo)
+      // Mix to accumulator (stereo - mono source)
       mixAcc[i * 2] += filtered;
       mixAcc[i * 2 + 1] += filtered;
       
@@ -266,19 +383,58 @@ void IRAM_ATTR AudioEngine::fillBuffer(int16_t* buffer, size_t samples) {
     }
   }
   
-  // Apply master volume, soft clip, and FX chain
-  const bool hasFX = (fx.distortion > 0.1f) || (fx.filterType != FILTER_NONE) || 
-                     (fx.sampleRate < SAMPLE_RATE) || (fx.bitDepth < 16);
+  // Check which FX chains are active
+  const bool hasOldFX = (fx.distortion > 0.1f) || (fx.filterType != FILTER_NONE) || 
+                        (fx.sampleRate < SAMPLE_RATE) || (fx.bitDepth < 16);
+  const bool hasNewFX = delayParams.active || phaserParams.active || 
+                        flangerParams.active || compressorParams.active;
   
-  for (size_t i = 0; i < samples * 2; i++) {
-    int32_t val = (mixAcc[i] * masterVolume) / 100;
+  // Process mono signal with master volume, soft clipping, and FX chains
+  for (size_t i = 0; i < samples; i++) {
+    // Mono from accumulator (L=R for drum samples)
+    int32_t val = (mixAcc[i * 2] * masterVolume) / 100;
     
-    // Soft clipping
-    if (val > 32767) val = 32767;
-    else if (val < -32768) val = -32768;
+    // Normalize to float [-1.0, 1.0] range for processing
+    float fval = (float)val / 32768.0f;
     
-    // Apply FX chain only if active (avoid function call overhead)
-    buffer[i] = hasFX ? processFX((int16_t)val) : (int16_t)val;
+    // Soft clipping with knee (replaces old hard clamp)
+    // Inspired by torvalds/AudioNoise limit_value: x / (1 + |x|)
+    fval = softClipKnee(fval);
+    
+    // Convert back to int16 for legacy FX chain
+    int16_t sample = (int16_t)(fval * 32767.0f);
+    
+    // Apply legacy FX chain (distortion, filter, SR reduction, bitcrush)
+    if (hasOldFX) {
+      sample = processFX(sample);
+    }
+    
+    // Apply NEW master effects chain (in float domain for precision)
+    if (hasNewFX) {
+      float fs = (float)sample / 32768.0f;
+      
+      // Phaser (4-stage cascaded allpass with LFO)
+      if (phaserParams.active) fs = processPhaser(fs);
+      
+      // Flanger (short modulated delay)
+      if (flangerParams.active) fs = processFlanger(fs);
+      
+      // Delay/Echo (longer delay with feedback)
+      if (delayParams.active) fs = processDelay(fs);
+      
+      // Compressor/Limiter (dynamics control - last in chain)
+      if (compressorParams.active) fs = processCompressor(fs);
+      
+      // Final safety limiter (Torvalds limit_value)
+      fs = fs / (1.0f + fabsf(fs));
+      fs *= 2.0f;  // Compensate limit_value gain loss
+      
+      sample = (int16_t)constrain((int32_t)(fs * 32767.0f), -32768, 32767);
+    }
+    
+    // Write stereo output (mono source)
+    buffer[i * 2] = sample;
+    buffer[i * 2 + 1] = sample;
   }
 }
 
@@ -340,6 +496,11 @@ void AudioEngine::setBitDepth(uint8_t bits) {
 
 void AudioEngine::setDistortion(float amount) {
   fx.distortion = constrain(amount, 0.0f, 100.0f);
+}
+
+void AudioEngine::setDistortionMode(DistortionMode mode) {
+  distortionMode = mode;
+  Serial.printf("[AudioEngine] Distortion mode: %d\n", mode);
 }
 
 void AudioEngine::setSampleRateReduction(uint32_t rate) {
@@ -452,20 +613,50 @@ inline int16_t AudioEngine::applyBitCrush(int16_t input) {
   return (input >> shift) << shift;
 }
 
-// Distortion (soft clipping with tanh-like approximation)
+// Distortion with multiple modes (inspired by torvalds/AudioNoise distortion.h)
 inline int16_t AudioEngine::applyDistortion(int16_t input) {
   if (fx.distortion < 0.1f) return input;
   
-  // Fast distortion using soft clipping
   float x = (float)input / 32768.0f;
   float amount = fx.distortion / 100.0f;
   
-  // Gain boost
+  // Drive boost
   x *= (1.0f + amount * 3.0f);
   
-  // Fast soft clip approximation (faster than tanh)
-  if (x > 0.9f) x = 0.9f + (x - 0.9f) * 0.1f;
-  else if (x < -0.9f) x = -0.9f + (x + 0.9f) * 0.1f;
+  switch (distortionMode) {
+    case DIST_SOFT:
+      // Torvalds limit_value: x / (1 + |x|) - smooth analog saturation
+      x = x / (1.0f + fabsf(x));
+      break;
+      
+    case DIST_HARD:
+      // Hard clip at threshold
+      if (x > 1.0f) x = 1.0f;
+      else if (x < -1.0f) x = -1.0f;
+      break;
+      
+    case DIST_TUBE: {
+      // Asymmetric exponential saturation (torvalds/AudioNoise tube.h inspired)
+      // Positive half: soft compression, negative half: harder clip
+      if (x >= 0.0f) {
+        x = 1.0f - expf(-x);           // Exponential saturation
+      } else {
+        x = -(1.0f - expf(x * 1.2f));  // Slightly harder on negative half
+      }
+      break;
+    }
+    
+    case DIST_FUZZ:
+      // Extreme: double soft clip for heavy saturation
+      x = x / (1.0f + fabsf(x));
+      x *= 2.0f;
+      x = x / (1.0f + fabsf(x));
+      break;
+      
+    default:
+      x = x / (1.0f + fabsf(x));
+      break;
+  }
   
   return (int16_t)(x * 32768.0f);
 }
@@ -512,6 +703,257 @@ int AudioEngine::getActiveVoices() {
 
 float AudioEngine::getCpuLoad() {
   return cpuLoad * 100.0f;
+}
+
+// ============= NEW: Soft Clip with Knee =============
+// Linear below ±0.9, smooth Torvalds-style limiting above
+// Preserves dynamics for normal signals, only clips peaks
+inline float AudioEngine::softClipKnee(float x) {
+  const float knee = 0.9f;
+  if (x > knee) {
+    float excess = x - knee;
+    return knee + (1.0f - knee) * excess / (1.0f + excess * 10.0f);
+  } else if (x < -knee) {
+    float excess = -x - knee;
+    return -(knee + (1.0f - knee) * excess / (1.0f + excess * 10.0f));
+  }
+  return x;
+}
+
+// ============= NEW: Delay/Echo Processing =============
+// Inspired by torvalds/AudioNoise echo.h circular buffer pattern
+
+inline float AudioEngine::processDelay(float input) {
+  if (!delayBuffer) return input;
+  
+  // Read from delay buffer (circular)
+  uint32_t readPos = (delayParams.writePos + DELAY_BUFFER_SIZE - delayParams.delaySamples) 
+                     % DELAY_BUFFER_SIZE;
+  float delayed = delayBuffer[readPos];
+  
+  // Write input + feedback to delay buffer
+  float writeVal = input + delayed * delayParams.feedback;
+  // Prevent feedback runaway with Torvalds limit_value
+  writeVal = writeVal / (1.0f + fabsf(writeVal));
+  delayBuffer[delayParams.writePos] = writeVal;
+  delayParams.writePos = (delayParams.writePos + 1) % DELAY_BUFFER_SIZE;
+  
+  // Mix dry and wet
+  return input * (1.0f - delayParams.mix) + delayed * delayParams.mix;
+}
+
+// ============= NEW: Phaser Processing =============
+// 4-stage cascaded allpass, LFO-modulated
+// Inspired by torvalds/AudioNoise phaser.h
+
+inline float AudioEngine::processPhaser(float input) {
+  // Get LFO value (0.0 to 1.0 range for frequency sweep)
+  float lfoVal = (lfoTick(phaserParams.lfo) + 1.0f) * 0.5f;
+  
+  // Map LFO to allpass coefficient
+  // Sweep center frequency from ~200Hz to ~4000Hz
+  float minFreq = 200.0f;
+  float maxFreq = 4000.0f;
+  float freq = minFreq + (maxFreq - minFreq) * lfoVal * phaserParams.depth;
+  
+  // 1st-order allpass coefficient from frequency
+  // coeff = (1 - tan(pi*f/sr)) / (1 + tan(pi*f/sr))
+  float omega = PI * freq / SAMPLE_RATE;
+  // Fast tan approximation for small angles: tan(x) ≈ x + x³/3
+  float tn = omega + (omega * omega * omega) * 0.333333f;
+  float coeff = (1.0f - tn) / (1.0f + tn);
+  
+  // Mix feedback into input
+  float x = input + phaserParams.lastOutput * phaserParams.feedback;
+  
+  // Cascade through 4 allpass stages
+  // Each stage: y = coeff * x + x1 - coeff * y1 (1st-order allpass)
+  for (int s = 0; s < PHASER_STAGES; s++) {
+    float y = coeff * x + phaserParams.stages[s].x1 - coeff * phaserParams.stages[s].y1;
+    phaserParams.stages[s].x1 = x;
+    phaserParams.stages[s].y1 = y;
+    x = y;
+  }
+  
+  phaserParams.lastOutput = x;
+  
+  // Mix original and phased signal (50/50 for classic phaser)
+  return (input + x) * 0.5f;
+}
+
+// ============= NEW: Flanger Processing =============
+// Short LFO-modulated delay with feedback
+// Inspired by torvalds/AudioNoise flanger.h
+
+inline float AudioEngine::processFlanger(float input) {
+  // Write to flanger buffer
+  flangerBuffer[flangerParams.writePos] = input;
+  
+  // Get LFO-modulated delay in samples (0 to ~4ms = 0 to ~176 samples)
+  float lfoVal = (lfoTick(flangerParams.lfo) + 1.0f) * 0.5f;  // 0.0 - 1.0
+  float delaySamplesF = lfoVal * flangerParams.depth * 176.0f + 1.0f;  // 1 to 177
+  
+  // Interpolated read from flanger buffer (linear interpolation)
+  uint32_t delayInt = (uint32_t)delaySamplesF;
+  float frac = delaySamplesF - (float)delayInt;
+  
+  uint32_t readPos1 = (flangerParams.writePos + FLANGER_BUFFER_SIZE - delayInt) 
+                      % FLANGER_BUFFER_SIZE;
+  uint32_t readPos2 = (readPos1 + FLANGER_BUFFER_SIZE - 1) % FLANGER_BUFFER_SIZE;
+  
+  float delayed = flangerBuffer[readPos1] * (1.0f - frac) + flangerBuffer[readPos2] * frac;
+  
+  // Add feedback to the written sample
+  flangerBuffer[flangerParams.writePos] += delayed * flangerParams.feedback;
+  
+  // Advance write position
+  flangerParams.writePos = (flangerParams.writePos + 1) % FLANGER_BUFFER_SIZE;
+  
+  // Mix dry and wet
+  return input * (1.0f - flangerParams.mix) + delayed * flangerParams.mix;
+}
+
+// ============= NEW: Compressor/Limiter Processing =============
+
+inline float AudioEngine::processCompressor(float input) {
+  // Envelope follower (peak detection)
+  float absInput = fabsf(input);
+  if (absInput > compressorParams.envelope) {
+    compressorParams.envelope = compressorParams.attackCoeff * compressorParams.envelope 
+                               + (1.0f - compressorParams.attackCoeff) * absInput;
+  } else {
+    compressorParams.envelope = compressorParams.releaseCoeff * compressorParams.envelope 
+                               + (1.0f - compressorParams.releaseCoeff) * absInput;
+  }
+  
+  // Calculate gain reduction
+  float gain = 1.0f;
+  if (compressorParams.envelope > compressorParams.threshold) {
+    // Ratio compression
+    float excess = compressorParams.envelope / compressorParams.threshold;
+    float targetGain = compressorParams.threshold * powf(excess, 1.0f / compressorParams.ratio - 1.0f);
+    gain = targetGain;
+  }
+  
+  return input * gain * compressorParams.makeupGain;
+}
+
+// ============= NEW: Master Effects Setters =============
+
+// --- Delay/Echo ---
+void AudioEngine::setDelayActive(bool active) {
+  delayParams.active = active;
+  if (active && delayBuffer) {
+    memset(delayBuffer, 0, DELAY_BUFFER_SIZE * sizeof(float));
+    delayParams.writePos = 0;
+  }
+  Serial.printf("[AudioEngine] Delay: %s\n", active ? "ON" : "OFF");
+}
+
+void AudioEngine::setDelayTime(float ms) {
+  delayParams.time = constrain(ms, 10.0f, 750.0f);
+  delayParams.delaySamples = (uint32_t)(delayParams.time * SAMPLE_RATE / 1000.0f);
+  if (delayParams.delaySamples >= DELAY_BUFFER_SIZE) {
+    delayParams.delaySamples = DELAY_BUFFER_SIZE - 1;
+  }
+  Serial.printf("[AudioEngine] Delay time: %.0f ms (%d samples)\n", delayParams.time, delayParams.delaySamples);
+}
+
+void AudioEngine::setDelayFeedback(float feedback) {
+  delayParams.feedback = constrain(feedback, 0.0f, 0.95f);
+}
+
+void AudioEngine::setDelayMix(float mix) {
+  delayParams.mix = constrain(mix, 0.0f, 1.0f);
+}
+
+// --- Phaser ---
+void AudioEngine::setPhaserActive(bool active) {
+  phaserParams.active = active;
+  if (active) {
+    phaserParams.lastOutput = 0.0f;
+    for (int i = 0; i < PHASER_STAGES; i++) {
+      phaserParams.stages[i] = {0, 0, 0, 0};
+    }
+  }
+  Serial.printf("[AudioEngine] Phaser: %s\n", active ? "ON" : "OFF");
+}
+
+void AudioEngine::setPhaserRate(float hz) {
+  phaserParams.rate = constrain(hz, 0.05f, 5.0f);
+  phaserParams.lfo.depth = phaserParams.depth;
+  updateLFOPhaseInc(phaserParams.lfo, phaserParams.rate);
+}
+
+void AudioEngine::setPhaserDepth(float depth) {
+  phaserParams.depth = constrain(depth, 0.0f, 1.0f);
+  phaserParams.lfo.depth = phaserParams.depth;
+}
+
+void AudioEngine::setPhaserFeedback(float feedback) {
+  phaserParams.feedback = constrain(feedback, -0.9f, 0.9f);
+}
+
+// --- Flanger ---
+void AudioEngine::setFlangerActive(bool active) {
+  flangerParams.active = active;
+  if (active) {
+    memset(flangerBuffer, 0, sizeof(flangerBuffer));
+    flangerParams.writePos = 0;
+  }
+  Serial.printf("[AudioEngine] Flanger: %s\n", active ? "ON" : "OFF");
+}
+
+void AudioEngine::setFlangerRate(float hz) {
+  flangerParams.rate = constrain(hz, 0.05f, 5.0f);
+  updateLFOPhaseInc(flangerParams.lfo, flangerParams.rate);
+}
+
+void AudioEngine::setFlangerDepth(float depth) {
+  flangerParams.depth = constrain(depth, 0.0f, 1.0f);
+  flangerParams.lfo.depth = flangerParams.depth;
+}
+
+void AudioEngine::setFlangerFeedback(float feedback) {
+  flangerParams.feedback = constrain(feedback, -0.9f, 0.9f);
+}
+
+void AudioEngine::setFlangerMix(float mix) {
+  flangerParams.mix = constrain(mix, 0.0f, 1.0f);
+}
+
+// --- Compressor ---
+void AudioEngine::setCompressorActive(bool active) {
+  compressorParams.active = active;
+  if (active) {
+    compressorParams.envelope = 0.0f;
+  }
+  Serial.printf("[AudioEngine] Compressor: %s\n", active ? "ON" : "OFF");
+}
+
+void AudioEngine::setCompressorThreshold(float threshold) {
+  // Input in dB (-60 to 0), convert to linear
+  float db = constrain(threshold, -60.0f, 0.0f);
+  compressorParams.threshold = powf(10.0f, db / 20.0f);
+}
+
+void AudioEngine::setCompressorRatio(float ratio) {
+  compressorParams.ratio = constrain(ratio, 1.0f, 20.0f);
+}
+
+void AudioEngine::setCompressorAttack(float ms) {
+  float t = constrain(ms, 0.1f, 100.0f);
+  compressorParams.attackCoeff = expf(-1.0f / (SAMPLE_RATE * t / 1000.0f));
+}
+
+void AudioEngine::setCompressorRelease(float ms) {
+  float t = constrain(ms, 10.0f, 1000.0f);
+  compressorParams.releaseCoeff = expf(-1.0f / (SAMPLE_RATE * t / 1000.0f));
+}
+
+void AudioEngine::setCompressorMakeupGain(float db) {
+  float d = constrain(db, 0.0f, 24.0f);
+  compressorParams.makeupGain = powf(10.0f, d / 20.0f);
 }
 
 // ============= PER-TRACK FILTER MANAGEMENT =============
@@ -567,7 +1009,7 @@ int AudioEngine::getActiveTrackFiltersCount() {
 // ============= PER-PAD FILTER MANAGEMENT =============
 
 bool AudioEngine::setPadFilter(int pad, FilterType type, float cutoff, float resonance, float gain) {
-  if (pad < 0 || pad >= 8) return false;
+  if (pad < 0 || pad >= MAX_PADS) return false;
   
   // Check if enabling a new filter would exceed the limit of 8
   if (type != FILTER_NONE && !padFilterActive[pad]) {
@@ -594,20 +1036,20 @@ bool AudioEngine::setPadFilter(int pad, FilterType type, float cutoff, float res
 }
 
 void AudioEngine::clearPadFilter(int pad) {
-  if (pad < 0 || pad >= 8) return;
+  if (pad < 0 || pad >= MAX_PADS) return;
   padFilters[pad].filterType = FILTER_NONE;
   padFilterActive[pad] = false;
   Serial.printf("[AudioEngine] Pad %d filter cleared\n", pad);
 }
 
 FilterType AudioEngine::getPadFilter(int pad) {
-  if (pad < 0 || pad >= 8) return FILTER_NONE;
+  if (pad < 0 || pad >= MAX_PADS) return FILTER_NONE;
   return padFilters[pad].filterType;
 }
 
 int AudioEngine::getActivePadFiltersCount() {
   int count = 0;
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < MAX_PADS; i++) {
     if (padFilterActive[i]) count++;
   }
   return count;

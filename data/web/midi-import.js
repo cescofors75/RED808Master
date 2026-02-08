@@ -515,6 +515,10 @@ function showMidiImportDialog() {
                             <button class="bar-nav-btn" onclick="changeImportBar(1)">▶</button>
                         </div>
                     </div>
+                    <div id="barMapRow" class="import-option-row" style="display:none">
+                        <label>Compases con datos:</label>
+                        <div id="barMap" class="bar-map"></div>
+                    </div>
                     <div id="songInfoRow" class="import-option-row song-info-row">
                         <label>📋 Song Mode:</label>
                         <span id="songModeInfo" class="song-mode-info">Se importarán X compases → Patterns 1-X</span>
@@ -699,6 +703,7 @@ function showMidiFileInfo(file, midiData) {
         document.getElementById('barDisplay').textContent = `${currentImportBar + 1} / ${totalBars}`;
         console.log(`[MIDI Import] Channel changed to ${currentImportChannel + 1}, jumping to bar ${fb + 1}`);
         updateMidiPreview();
+        updateBarMap(midiData);
     });
 
     // File info with per-channel detail
@@ -731,6 +736,62 @@ function showMidiFileInfo(file, midiData) {
 
     // Hide dropzone
     document.getElementById('midiDropzone').style.display = 'none';
+
+    // Build bar map showing which bars have drum data
+    updateBarMap(midiData);
+}
+
+// Show a visual map of which bars contain drum notes
+function updateBarMap(midiData) {
+    if (!midiData) return;
+    const totalBars = getMidiTotalBars(midiData);
+    const barMapEl = document.getElementById('barMap');
+    const barMapRow = document.getElementById('barMapRow');
+    if (!barMapEl || !barMapRow) return;
+
+    const ticksPerBar = midiData.ticksPerBeat * 4;
+    const channel = currentImportChannel;
+    const drumMap = GM_DRUM_TO_PAD;
+
+    // Count mappable notes per bar
+    const barNoteCounts = new Array(totalBars).fill(0);
+    for (const track of midiData.tracks) {
+        for (const event of track) {
+            if (event.type !== 'noteOn') continue;
+            if (channel >= 0 && event.channel !== channel) continue;
+            if (drumMap[event.note] === undefined) continue;
+            const bar = Math.floor(event.tick / ticksPerBar);
+            if (bar >= 0 && bar < totalBars) barNoteCounts[bar]++;
+        }
+    }
+
+    const maxNotes = Math.max(...barNoteCounts, 1);
+    const barsWithData = barNoteCounts.filter(n => n > 0).length;
+
+    // Build compact bar map (clickable squares)
+    let html = '';
+    const maxDisplay = Math.min(totalBars, 32); // Show max 32 bars
+    for (let b = 0; b < maxDisplay; b++) {
+        const hasData = barNoteCounts[b] > 0;
+        const isCurrent = b === currentImportBar;
+        const intensity = hasData ? Math.max(0.3, barNoteCounts[b] / maxNotes) : 0;
+        const cls = `bar-map-cell${hasData ? ' has-data' : ''}${isCurrent ? ' current' : ''}`;
+        html += `<span class="${cls}" onclick="jumpToBar(${b})" title="Compás ${b + 1}: ${barNoteCounts[b]} notas" style="${hasData ? `opacity:${intensity}` : ''}">${b + 1}</span>`;
+    }
+    if (totalBars > 32) html += `<span class="bar-map-more">+${totalBars - 32}</span>`;
+    html += `<div class="bar-map-summary">${barsWithData} de ${totalBars} compases con datos drum</div>`;
+
+    barMapEl.innerHTML = html;
+    barMapRow.style.display = 'flex';
+}
+
+// Jump to a specific bar from bar map click
+function jumpToBar(bar) {
+    currentImportBar = bar;
+    const totalBars = getMidiTotalBars(parsedMidiData);
+    document.getElementById('barDisplay').textContent = `${bar + 1} / ${totalBars}`;
+    updateMidiPreview();
+    updateBarMap(parsedMidiData);
 }
 
 function changeImportBar(delta) {
@@ -739,6 +800,7 @@ function changeImportBar(delta) {
     currentImportBar = Math.max(0, Math.min(totalBars - 1, currentImportBar + delta));
     document.getElementById('barDisplay').textContent = `${currentImportBar + 1} / ${totalBars}`;
     updateMidiPreview();
+    updateBarMap(parsedMidiData);
 }
 
 function updateMidiPreview() {
@@ -916,6 +978,10 @@ function confirmMidiImport() {
             tempoSlider.value = parsedMidiData.tempo;
             const tempoVal = document.getElementById('tempoValue');
             if (tempoVal) tempoVal.textContent = parsedMidiData.tempo;
+            // Update BPM meter display
+            if (typeof window.updateBpmMeter === 'function') {
+                window.updateBpmMeter(parsedMidiData.tempo);
+            }
         }
     }
 
@@ -1028,21 +1094,28 @@ function confirmMidiImport() {
             quantize: true
         });
 
-        // Clear current pattern first
-        sendWebSocket({ cmd: 'clearPattern' });
+        console.log(`[MIDI Import] Single bar: bar ${currentImportBar + 1}, ${result.totalNotes} notes found, ${result.mappedNotes} mapped`);
 
-        // Set each step
+        if (result.mappedNotes === 0) {
+            alert(`No hay notas mapeables en el compás ${currentImportBar + 1}. Usa las flechas ◀ ▶ para encontrar un compás con datos.`);
+            return;
+        }
+
+        // Build command queue (same batching approach as song mode)
+        let cmdQueue = [];
+        cmdQueue.push({ cmd: 'clearPattern' });
+
         for (let track = 0; track < 16; track++) {
             for (let step = 0; step < 16; step++) {
                 if (result.pattern[track][step]) {
-                    sendWebSocket({
+                    cmdQueue.push({
                         cmd: 'setStep',
                         track: track,
                         step: step,
                         active: true
                     });
                     if (result.velocities[track][step] !== 127) {
-                        sendWebSocket({
+                        cmdQueue.push({
                             cmd: 'setStepVelocity',
                             track: track,
                             step: step,
@@ -1053,15 +1126,32 @@ function confirmMidiImport() {
             }
         }
 
-        // Request pattern refresh
-        setTimeout(() => {
-            sendWebSocket({ cmd: 'getPattern' });
-        }, 200);
+        // Send in batches with delays to avoid flooding ESP32
+        const BATCH_SIZE = 8;
+        let batchIndex = 0;
 
-        console.log(`[MIDI Import] Single bar imported: bar ${currentImportBar + 1}, ${result.mappedNotes} notes mapped`);
+        function sendSingleBarBatch() {
+            const end = Math.min(batchIndex + BATCH_SIZE, cmdQueue.length);
+            for (let i = batchIndex; i < end; i++) {
+                sendWebSocket(cmdQueue[i]);
+            }
+            batchIndex = end;
+
+            if (batchIndex < cmdQueue.length) {
+                setTimeout(sendSingleBarBatch, 100);
+            } else {
+                // All sent - refresh pattern display after delay
+                setTimeout(() => {
+                    sendWebSocket({ cmd: 'getPattern' });
+                }, 400);
+                console.log(`[MIDI Import] Single bar imported: bar ${currentImportBar + 1}, ${result.mappedNotes} notes, ${cmdQueue.length} commands sent`);
+            }
+        }
+
+        // Close dialog FIRST (saves parsedMidiData reference before nulling)
+        closeMidiImportDialog();
+        sendSingleBarBatch();
     }
-
-    closeMidiImportDialog();
 }
 
 // Export functions
@@ -1071,3 +1161,4 @@ window.changeImportBar = changeImportBar;
 window.confirmMidiImport = confirmMidiImport;
 window.setImportMode = setImportMode;
 window.updateMidiPreview = updateMidiPreview;
+window.jumpToBar = jumpToBar;

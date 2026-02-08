@@ -600,29 +600,50 @@ function showTrackFilterPanel(track) {
   // Always set selectedTrack when panel is shown
   selectedTrack = track;
   
+  // Remove existing backdrop
+  const existingBackdrop = document.querySelector('.track-filter-backdrop');
+  if (existingBackdrop) existingBackdrop.remove();
+  
   let panel = document.getElementById('track-filter-panel');
   if (!panel) {
     panel = createTrackFilterPanel();
   }
   
-  const trackNames = ['BD', 'SD', 'CH', 'OH', 'CP', 'RS', 'CL', 'CY'];
-  panel.querySelector('#track-filter-title').textContent = `Filtro Track ${track + 1} (${trackNames[track] || '?'})`;
-  panel.style.display = 'block';
+  const trackNames = ['BD', 'SD', 'CH', 'OH', 'CP', 'RS', 'CL', 'CY',
+                       'T9', 'T10', 'T11', 'T12', 'T13', 'T14', 'T15', 'T16'];
+  panel.querySelector('#track-filter-title').textContent = `🎛️ Track ${track + 1} — ${trackNames[track] || '?'}`;
   
-  // Position near track label
-  const trackLabel = document.querySelector(`.track-label[data-track="${track}"]`);
-  if (trackLabel) {
-    const rect = trackLabel.getBoundingClientRect();
-    panel.style.left = `${rect.right + 10}px`;
-    panel.style.top = `${rect.top}px`;
-  }
+  // Mark active filter
+  const currentFilter = (window.trackFilterState && window.trackFilterState[track]) || 0;
+  panel.querySelectorAll('.filter-btn').forEach((btn, idx) => {
+    btn.classList.toggle('active-filter', idx === currentFilter);
+  });
+  
+  // Create backdrop
+  const backdrop = document.createElement('div');
+  backdrop.className = 'track-filter-backdrop';
+  backdrop.addEventListener('click', () => hideTrackFilterPanel());
+  document.body.appendChild(backdrop);
+  
+  // Show panel centered (CSS handles positioning)
+  panel.style.display = 'block';
+  panel.style.left = '';
+  panel.style.top = '';
+  
+  // Trigger animation
+  requestAnimationFrame(() => {
+    panel.classList.add('visible');
+  });
 }
 
 function hideTrackFilterPanel() {
   const panel = document.getElementById('track-filter-panel');
   if (panel) {
-    panel.style.display = 'none';
+    panel.classList.remove('visible');
+    setTimeout(() => { panel.style.display = 'none'; }, 250);
   }
+  const backdrop = document.querySelector('.track-filter-backdrop');
+  if (backdrop) backdrop.remove();
   selectedTrack = null;
 }
 
@@ -679,6 +700,16 @@ function applyTrackFilterFromPanel(filterType) {
     const filter = filterShortcuts[filterType];
     if (filter) {
       applyTrackFilter(selectedTrack, filter);
+      
+      // Update trackFilterState
+      if (window.trackFilterState) {
+        window.trackFilterState[selectedTrack] = filterType;
+      }
+      
+      // Sync: also apply filter to corresponding pad if sync enabled
+      if (window.padSeqSyncEnabled && window.syncFilterToPad) {
+        window.syncFilterToPad(selectedTrack, filterType);
+      }
     }
     // Force close panel with slight delay to ensure it closes
     setTimeout(() => {

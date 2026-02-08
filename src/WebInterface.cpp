@@ -838,6 +838,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       }
     } else {
       sequencer.setStep(track, step, active);
+      yield(); // Prevent watchdog reset during bulk single-bar import
     }
   }
   else if (cmd == "start") {
@@ -989,9 +990,90 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     float amount = doc["value"];
     audioEngine.setDistortion(amount);
   }
+  else if (cmd == "setDistortionMode") {
+    int mode = doc["value"];
+    audioEngine.setDistortionMode((DistortionMode)mode);
+  }
   else if (cmd == "setSampleRate") {
     int rate = doc["value"];
     audioEngine.setSampleRateReduction(rate);
+  }
+  // ============= NEW: Master Effects Commands =============
+  else if (cmd == "setDelayActive") {
+    bool active = doc["value"];
+    audioEngine.setDelayActive(active);
+  }
+  else if (cmd == "setDelayTime") {
+    float ms = doc["value"];
+    audioEngine.setDelayTime(ms);
+  }
+  else if (cmd == "setDelayFeedback") {
+    float fb = doc["value"];
+    audioEngine.setDelayFeedback(fb / 100.0f);  // Convert from 0-100 to 0-1
+  }
+  else if (cmd == "setDelayMix") {
+    float mix = doc["value"];
+    audioEngine.setDelayMix(mix / 100.0f);  // Convert from 0-100 to 0-1
+  }
+  else if (cmd == "setPhaserActive") {
+    bool active = doc["value"];
+    audioEngine.setPhaserActive(active);
+  }
+  else if (cmd == "setPhaserRate") {
+    float rate = doc["value"];
+    audioEngine.setPhaserRate(rate / 100.0f);  // Convert from 5-500 to 0.05-5.0
+  }
+  else if (cmd == "setPhaserDepth") {
+    float depth = doc["value"];
+    audioEngine.setPhaserDepth(depth / 100.0f);
+  }
+  else if (cmd == "setPhaserFeedback") {
+    float fb = doc["value"];
+    audioEngine.setPhaserFeedback(fb / 100.0f);  // Convert from -90..90 to -0.9..0.9
+  }
+  else if (cmd == "setFlangerActive") {
+    bool active = doc["value"];
+    audioEngine.setFlangerActive(active);
+  }
+  else if (cmd == "setFlangerRate") {
+    float rate = doc["value"];
+    audioEngine.setFlangerRate(rate / 100.0f);
+  }
+  else if (cmd == "setFlangerDepth") {
+    float depth = doc["value"];
+    audioEngine.setFlangerDepth(depth / 100.0f);
+  }
+  else if (cmd == "setFlangerFeedback") {
+    float fb = doc["value"];
+    audioEngine.setFlangerFeedback(fb / 100.0f);
+  }
+  else if (cmd == "setFlangerMix") {
+    float mix = doc["value"];
+    audioEngine.setFlangerMix(mix / 100.0f);
+  }
+  else if (cmd == "setCompressorActive") {
+    bool active = doc["value"];
+    audioEngine.setCompressorActive(active);
+  }
+  else if (cmd == "setCompressorThreshold") {
+    float thresh = doc["value"];
+    audioEngine.setCompressorThreshold(thresh);  // Already in dB
+  }
+  else if (cmd == "setCompressorRatio") {
+    float ratio = doc["value"];
+    audioEngine.setCompressorRatio(ratio);
+  }
+  else if (cmd == "setCompressorAttack") {
+    float attack = doc["value"];
+    audioEngine.setCompressorAttack(attack);  // Already in ms
+  }
+  else if (cmd == "setCompressorRelease") {
+    float release = doc["value"];
+    audioEngine.setCompressorRelease(release);
+  }
+  else if (cmd == "setCompressorMakeupGain") {
+    float gain = doc["value"];
+    audioEngine.setCompressorMakeupGain(gain);  // Already in dB
   }
   else if (cmd == "setSequencerVolume") {
     int volume = doc["value"];
@@ -1154,6 +1236,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       return;
     } else {
       sequencer.setStepVelocity(track, step, velocity);
+      yield(); // Prevent watchdog reset during bulk single-bar import
     }
     
     // Broadcast to all clients (only for single-step changes, not bulk import)
