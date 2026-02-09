@@ -37,8 +37,8 @@ let trackMutedState = new Array(16).fill(false);
 let padFilterState = new Array(16).fill(0); // 0 = FILTER_NONE
 let trackFilterState = new Array(16).fill(0); // 0 = FILTER_NONE
 
-// Pad <-> Sequencer sync state
-let padSeqSyncEnabled = true;
+// Pad <-> Sequencer sync state (ALWAYS synced)
+const padSeqSyncEnabled = true;
 
 // 16 instrumentos principales (4x4 grid)
 const padNames = ['BD', 'SD', 'CH', 'OH', 'CY', 'CP', 'RS', 'CB', 'LT', 'MT', 'HT', 'MA', 'CL', 'HC', 'MC', 'LC'];
@@ -111,6 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupControls();
     initHeaderMeters();
     initVolumesSection();
+    initLivePadsX();
     
     // Initialize keyboard system from keyboard-controls.js first
     if (window.initKeyboardControls) {
@@ -203,6 +204,14 @@ function handleWebSocketMessage(data) {
                     if (padIndex < 16) {
                         padFilterState[padIndex] = filterType;
                         updatePadFilterIndicator(padIndex);
+                    }
+                });
+            }
+            // Load track filter states
+            if (Array.isArray(data.trackFilters)) {
+                data.trackFilters.forEach((filterType, trackIndex) => {
+                    if (trackIndex < 16) {
+                        trackFilterState[trackIndex] = filterType;
                     }
                 });
             }
@@ -899,24 +908,9 @@ function syncFilterToTrack(trackIndex, filterType) {
     sendWebSocket(cmd);
 }
 
-// Setup sync toggles between Pads and Sequencer
+// Sync toggles removed — always synced
 function setupSyncToggles() {
-    const padSync = document.getElementById('padSeqSync');
-    const seqSync = document.getElementById('seqPadSync');
-    
-    function updateSyncState(checked) {
-        padSeqSyncEnabled = checked;
-        window.padSeqSyncEnabled = checked;
-        if (padSync) padSync.checked = checked;
-        if (seqSync) seqSync.checked = checked;
-    }
-    
-    if (padSync) {
-        padSync.addEventListener('change', (e) => updateSyncState(e.target.checked));
-    }
-    if (seqSync) {
-        seqSync.addEventListener('change', (e) => updateSyncState(e.target.checked));
-    }
+    // No-op: pads and sequencer tracks are always synced
 }
 
 // Expose syncFilterToPad for keyboard-controls to use
@@ -1556,7 +1550,7 @@ function createSequencer() {
     stepColumns = Array.from({ length: 16 }, () => []);
     lastCurrentStep = null;
     
-    // 16 tracks x 16 steps (con labels)
+    // 16 tracks x (16 steps + FX column)
     for (let track = 0; track < 16; track++) {
         // Track label con botón volumen
         const label = document.createElement('div');
@@ -1575,36 +1569,6 @@ function createSequencer() {
             showVolumeMenu(track, e.target);
         });
         
-        const filterBtn = document.createElement('button');
-        filterBtn.className = 'track-filter-btn';
-        filterBtn.setAttribute('aria-label', 'Filter');
-        filterBtn.title = 'Aplicar filtro (F1-F10)';
-        filterBtn.textContent = 'F';
-        filterBtn.dataset.track = track;
-        filterBtn.style.borderColor = trackColors[track];
-        filterBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            // Set selected track globally so filter panel can use it
-            if (window.keyboard_controls_module) {
-                window.keyboard_controls_module.selectedTrack = track;
-            }
-            if (window.showTrackFilterPanel) {
-                window.showTrackFilterPanel(track);
-            }
-        });
-        
-        const trackFxBtn = document.createElement('button');
-        trackFxBtn.className = 'track-fx-btn';
-        trackFxBtn.setAttribute('aria-label', 'FX');
-        trackFxBtn.title = 'Distortion & BitCrush';
-        trackFxBtn.textContent = '🎸';
-        trackFxBtn.dataset.track = track;
-        trackFxBtn.style.borderColor = trackColors[track];
-        trackFxBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            showTrackFxPopup(track);
-        });
-        
         const name = document.createElement('span');
         name.textContent = trackNames[track];
         name.style.color = trackColors[track];
@@ -1614,8 +1578,6 @@ function createSequencer() {
         loopIndicator.textContent = 'LOOP';
         
         label.appendChild(volumeBtn);
-        label.appendChild(filterBtn);
-        label.appendChild(trackFxBtn);
         label.appendChild(name);
         label.appendChild(loopIndicator);
         label.style.borderColor = trackColors[track];
@@ -1625,7 +1587,7 @@ function createSequencer() {
         
         // Hacer click en label selecciona el track para filtros
         label.addEventListener('click', (e) => {
-            if (e.target !== muteBtn && window.selectTrack) {
+            if (window.selectTrack) {
                 window.selectTrack(track);
             }
         });
@@ -1651,6 +1613,39 @@ function createSequencer() {
             
             grid.appendChild(stepEl);
         }
+        
+        // FX column (after 16 steps)
+        const fxCell = document.createElement('div');
+        fxCell.className = 'seq-fx-cell';
+        fxCell.dataset.track = track;
+        fxCell.style.borderColor = trackColors[track];
+        
+        const filterBtn = document.createElement('button');
+        filterBtn.className = 'seq-fx-btn seq-filter-btn';
+        filterBtn.title = 'Filtro (F1-F10)';
+        filterBtn.textContent = 'F';
+        filterBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (window.keyboard_controls_module) {
+                window.keyboard_controls_module.selectedTrack = track;
+            }
+            if (window.showTrackFilterPanel) {
+                window.showTrackFilterPanel(track);
+            }
+        });
+        
+        const trackFxBtn = document.createElement('button');
+        trackFxBtn.className = 'seq-fx-btn seq-dist-btn';
+        trackFxBtn.title = 'Distortion & BitCrush';
+        trackFxBtn.textContent = '🎸';
+        trackFxBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showTrackFxPopup(track);
+        });
+        
+        fxCell.appendChild(filterBtn);
+        fxCell.appendChild(trackFxBtn);
+        grid.appendChild(fxCell);
     }
     
     // Step indicator dots
@@ -4217,6 +4212,180 @@ function updateTrackLabelBackground(label, track, volume) {
 
 window.showVolumeMenu = showVolumeMenu;
 window.updateTrackVolume = updateTrackVolume;
+
+// ============================================
+// LIVE PADS X - Independent / Free Pads
+// ============================================
+
+const xtraPads = []; // Array of { id, padIndex, family, filename, element }
+let xtraPadCounter = 0;
+const xtraTremoloIntervals = {};
+
+function initLivePadsX() {
+    const grid = document.getElementById('padsXtraGrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    renderXtraAddButton();
+}
+
+function renderXtraAddButton() {
+    const grid = document.getElementById('padsXtraGrid');
+    if (!grid) return;
+
+    // Remove existing add button if present
+    const existingAdd = grid.querySelector('.pad-xtra-add');
+    if (existingAdd) existingAdd.remove();
+
+    const addBtn = document.createElement('div');
+    addBtn.className = 'pad-xtra-add';
+    addBtn.innerHTML = '<span>+</span>';
+    addBtn.title = 'Add XTRA Pad';
+    addBtn.addEventListener('click', () => showXtraPadPicker());
+    grid.appendChild(addBtn);
+}
+
+function showXtraPadPicker() {
+    // Modal to pick which of the 16 instruments to map
+    const modal = document.createElement('div');
+    modal.className = 'sample-modal';
+    modal.innerHTML = `
+        <div class="sample-modal-content">
+            <h3>🎲 New XTRA Pad</h3>
+            <p style="color:#aaa;margin:0 0 12px;font-size:12px;">Pick an instrument to clone as an independent pad</p>
+            <div class="xtra-picker-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;"></div>
+            <button class="btn-close-modal">Cancel</button>
+        </div>
+    `;
+
+    const pickerGrid = modal.querySelector('.xtra-picker-grid');
+
+    for (let i = 0; i < 16; i++) {
+        const btn = document.createElement('button');
+        btn.style.cssText = 'padding:10px 4px;border:1px solid #555;border-radius:6px;background:#1a1a2e;color:#fff;cursor:pointer;font-size:13px;font-weight:bold;transition:all .15s;';
+        const sampleMeta = padSampleMetadata[i];
+        const label = padNames[i];
+        const sub = sampleMeta && sampleMeta.filename ? sampleMeta.filename : '...';
+        btn.innerHTML = `<div>${label}</div><div style="font-size:9px;color:#888;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${sub}</div>`;
+        btn.addEventListener('mouseenter', () => { btn.style.background = '#ff6600'; btn.style.color = '#000'; });
+        btn.addEventListener('mouseleave', () => { btn.style.background = '#1a1a2e'; btn.style.color = '#fff'; });
+        btn.addEventListener('click', () => {
+            createXtraPad(i, padNames[i]);
+            modal.remove();
+        });
+        pickerGrid.appendChild(btn);
+    }
+
+    modal.querySelector('.btn-close-modal').addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+    document.body.appendChild(modal);
+}
+
+function createXtraPad(padIndex, family) {
+    const grid = document.getElementById('padsXtraGrid');
+    if (!grid) return;
+
+    const id = ++xtraPadCounter;
+    const sampleMeta = padSampleMetadata[padIndex];
+    const filename = sampleMeta ? sampleMeta.filename : '...';
+
+    const padEl = document.createElement('div');
+    padEl.className = 'pad-xtra';
+    padEl.dataset.xtraId = id;
+    padEl.dataset.padIndex = padIndex;
+    padEl.innerHTML = `
+        <div class="pad-xtra-name">${family}</div>
+        <div class="pad-xtra-sample" title="${filename}">${filename}</div>
+        <div class="pad-xtra-controls">
+            <button class="pad-xtra-btn xtra-loop" title="Loop">🔁</button>
+            <button class="pad-xtra-btn xtra-filter" title="Filter">F</button>
+            <button class="pad-xtra-btn xtra-fx" title="FX">🎸</button>
+            <button class="pad-xtra-btn xtra-delete" title="Remove">🗑️</button>
+        </div>
+    `;
+
+    // ── Touch/Click → trigger + tremolo ──
+    padEl.addEventListener('touchstart', (e) => {
+        if (e.target.closest('.pad-xtra-controls')) return;
+        e.preventDefault();
+        startXtraTremolo(id, padIndex, padEl);
+    });
+    padEl.addEventListener('touchend', (e) => {
+        if (e.target.closest('.pad-xtra-controls')) return;
+        e.preventDefault();
+        stopXtraTremolo(id, padEl);
+    });
+    padEl.addEventListener('mousedown', (e) => {
+        if (e.target.closest('.pad-xtra-controls')) return;
+        startXtraTremolo(id, padIndex, padEl);
+    });
+    padEl.addEventListener('mouseup', (e) => {
+        if (e.target.closest('.pad-xtra-controls')) return;
+        stopXtraTremolo(id, padEl);
+    });
+    padEl.addEventListener('mouseleave', () => {
+        stopXtraTremolo(id, padEl);
+    });
+
+    // ── Controls ──
+    const loopBtn = padEl.querySelector('.xtra-loop');
+    loopBtn.addEventListener('click', (e) => { e.stopPropagation(); showLoopTypePopup(padIndex); });
+
+    const filterBtn = padEl.querySelector('.xtra-filter');
+    filterBtn.addEventListener('click', (e) => { e.stopPropagation(); showPadFilterSelector(padIndex, padEl); });
+
+    const fxBtn = padEl.querySelector('.xtra-fx');
+    fxBtn.addEventListener('click', (e) => { e.stopPropagation(); showPadFxPopup(padIndex, padEl); });
+
+    const deleteBtn = padEl.querySelector('.xtra-delete');
+    deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeXtraPad(id);
+    });
+
+    // Store reference
+    xtraPads.push({ id, padIndex, family, filename, element: padEl });
+
+    // Insert before "+" button
+    const addBtn = grid.querySelector('.pad-xtra-add');
+    grid.insertBefore(padEl, addBtn);
+}
+
+function removeXtraPad(id) {
+    const idx = xtraPads.findIndex(p => p.id === id);
+    if (idx === -1) return;
+    const pad = xtraPads[idx];
+    stopXtraTremolo(id, pad.element);
+    pad.element.remove();
+    xtraPads.splice(idx, 1);
+}
+
+function startXtraTremolo(id, padIndex, padEl) {
+    triggerPad(padIndex);
+    padEl.classList.add('active');
+    padEl.style.filter = 'brightness(1.4)';
+    setTimeout(() => { padEl.style.filter = ''; }, 120);
+
+    xtraTremoloIntervals[id] = setTimeout(() => {
+        padEl.classList.add('tremolo-active');
+        xtraTremoloIntervals[id] = setInterval(() => {
+            triggerPad(padIndex);
+            padEl.style.filter = 'brightness(1.35)';
+            setTimeout(() => { padEl.style.filter = 'brightness(1.1)'; }, 22);
+        }, 55);
+    }, 100);
+}
+
+function stopXtraTremolo(id, padEl) {
+    if (xtraTremoloIntervals[id]) {
+        clearTimeout(xtraTremoloIntervals[id]);
+        clearInterval(xtraTremoloIntervals[id]);
+        delete xtraTremoloIntervals[id];
+    }
+    padEl.classList.remove('active', 'tremolo-active');
+    padEl.style.filter = '';
+}
+
+window.initLivePadsX = initLivePadsX;
 
 // ============================================
 // VOLUMES SECTION - Initialization & Updates

@@ -71,19 +71,24 @@
             <section id="section-pads" class="pads-section" data-section="pads" data-title="Live Pads">
                 <div class="pads-header">
                     <h2>LIVE PADS</h2>
-                    <div class="sync-toggle-wrap">
-                        <label for="padSeqSync">🔗 SYNC</label>
-                        <div class="sync-switch">
-                            <input type="checkbox" id="padSeqSync" checked>
-                            <span class="sync-slider"></span>
-                        </div>
-                    </div>
+                    <span class="sync-badge">🔗 SYNCED</span>
                     <button id="loadSampleListsBtn" class="btn btn-load-samples" title="Recargar Samplers">
                         🔄
                     </button>
                 </div>
                 <div class="pads-grid" id="padsGrid">
                     <!-- Los pads se generarán dinámicamente -->
+                </div>
+            </section>
+            
+            <!-- LIVE PADS X (Independientes / Free) -->
+            <section class="pads-xtra-section" id="section-pads-xtra">
+                <div class="pads-xtra-header">
+                    <h2>LIVE PADS X</h2>
+                    <span class="free-badge">🎲 FREE</span>
+                </div>
+                <div class="pads-xtra-grid" id="padsXtraGrid">
+                    <!-- El primer pad "+" se genera en JS -->
                 </div>
             </section>
         </div>
@@ -119,13 +124,7 @@
                             <span class="seq-btn-icon">📂</span>
                             <span class="seq-btn-label">MIDI</span>
                         </button>
-                        <div class="sync-toggle-wrap">
-                            <label for="seqPadSync">🔗 SYNC</label>
-                            <div class="sync-switch">
-                                <input type="checkbox" id="seqPadSync" checked>
-                                <span class="sync-slider"></span>
-                            </div>
-                        </div>
+                        <span class="sync-badge">🔗 SYNCED</span>
                         <div class="pattern-display">
                             <span class="pattern-label">PATTERN</span>
                             <span id="currentPatternName" class="pattern-name">HIP HOP</span>

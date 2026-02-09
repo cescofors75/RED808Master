@@ -1739,7 +1739,7 @@ body:not(.mono-mode) .pad.tremolo-active {
 
 .sequencer-grid {
     display: grid;
-    grid-template-columns: 50px repeat(16, 1fr);
+    grid-template-columns: 50px repeat(16, 1fr) 42px;
     gap: 2px;
     position: relative;
     font-size: 10px;
@@ -2072,6 +2072,225 @@ body:not(.mono-mode) .pad.tremolo-active {
 }
 
 /* Colores por instrumento - Efecto LED */
+
+/* ===== SEQUENCER FX COLUMN ===== */
+.seq-fx-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    height: 22px;
+    background: rgba(30, 30, 40, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+    padding: 1px;
+}
+
+.seq-fx-btn {
+    width: 18px;
+    height: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.5);
+    color: #ccc;
+    font-size: 9px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: all 0.15s;
+}
+
+.seq-fx-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    transform: scale(1.1);
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.2);
+}
+
+.seq-fx-btn.fx-active {
+    background: rgba(255, 100, 0, 0.5);
+    border-color: #ff6400;
+    color: #fff;
+    box-shadow: 0 0 6px rgba(255, 100, 0, 0.4);
+}
+
+/* ===== SYNC BADGE ===== */
+.sync-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #4caf50;
+    background: rgba(76, 175, 80, 0.12);
+    border: 1px solid rgba(76, 175, 80, 0.35);
+    border-radius: 20px;
+    text-transform: uppercase;
+}
+
+/* ===== LIVE PADS X (EXTRA / INDEPENDENT) ===== */
+.pads-xtra-section {
+    margin-top: 16px;
+    padding: 12px;
+    background: rgba(20, 20, 30, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+}
+
+.pads-xtra-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.pads-xtra-header h2 {
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    color: #e0e0e0;
+    margin: 0;
+}
+
+.pads-xtra-header .free-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #ff9800;
+    background: rgba(255, 152, 0, 0.12);
+    border: 1px solid rgba(255, 152, 0, 0.35);
+    border-radius: 20px;
+    text-transform: uppercase;
+}
+
+.pads-xtra-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    gap: 8px;
+}
+
+/* Pad Add Button (grey +) */
+.pad-xtra-add {
+    width: 100%;
+    aspect-ratio: 1;
+    min-height: 80px;
+    max-height: 120px;
+    border: 2px dashed rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+    background: rgba(60, 60, 70, 0.35);
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 36px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.pad-xtra-add:hover {
+    border-color: rgba(255, 152, 0, 0.5);
+    background: rgba(255, 152, 0, 0.08);
+    color: rgba(255, 152, 0, 0.7);
+    box-shadow: 0 0 15px rgba(255, 152, 0, 0.1);
+}
+
+/* Active xtra pad */
+.pad-xtra {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    min-height: 80px;
+    max-height: 120px;
+    border: 2px solid rgba(255, 152, 0, 0.5);
+    border-radius: 12px;
+    background: linear-gradient(145deg, rgba(255, 152, 0, 0.12) 0%, rgba(30, 30, 40, 0.8) 100%);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 6px;
+    transition: all 0.15s;
+    overflow: hidden;
+}
+
+.pad-xtra:active {
+    transform: scale(0.94);
+    background: linear-gradient(145deg, rgba(255, 152, 0, 0.3) 0%, rgba(50, 50, 60, 0.9) 100%);
+    box-shadow: 0 0 18px rgba(255, 152, 0, 0.3), inset 0 0 12px rgba(255, 152, 0, 0.15);
+}
+
+.pad-xtra .pad-xtra-name {
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+.pad-xtra .pad-xtra-sample {
+    font-size: 8px;
+    color: rgba(255, 255, 255, 0.5);
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+.pad-xtra-controls {
+    display: flex;
+    gap: 2px;
+    position: absolute;
+    bottom: 3px;
+    left: 3px;
+    right: 3px;
+    justify-content: center;
+}
+
+.pad-xtra-btn {
+    width: 22px;
+    height: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.5);
+    color: #ccc;
+    font-size: 9px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: all 0.15s;
+}
+
+.pad-xtra-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+}
+
+.pad-xtra-btn.xtra-delete {
+    color: #ff4444;
+}
+
+.pad-xtra-btn.xtra-delete:hover {
+    background: rgba(255, 0, 0, 0.2);
+    color: #ff6666;
+}
+
 .seq-step {
     box-shadow: inset 0 0 5px rgba(0,0,0,0.5);
 }
@@ -2927,10 +3146,10 @@ body.mono-mode .info-item {
     }
     
     .sequencer-grid {
-        grid-template-columns: 45px repeat(16, 1fr);
+        grid-template-columns: 45px repeat(16, 1fr) 38px;
         gap: 1.5px;
         font-size: 9px;
-        min-width: 680px;
+        min-width: 720px;
     }
     
     .sequencer-grid-wrapper .step-indicator {
@@ -3003,10 +3222,10 @@ body.mono-mode .info-item {
     }
     
     .sequencer-grid {
-        grid-template-columns: 35px repeat(16, 1fr);
+        grid-template-columns: 35px repeat(16, 1fr) 34px;
         gap: 1px;
         font-size: 7px;
-        min-width: 620px;
+        min-width: 660px;
     }
     
     .sequencer-grid-wrapper {
@@ -5304,10 +5523,10 @@ body.mono-mode .info-item {
     }
     
     .sequencer-grid {
-        grid-template-columns: 40px repeat(16, 1fr);
+        grid-template-columns: 40px repeat(16, 1fr) 36px;
         gap: 1.5px;
         font-size: 8px;
-        min-width: 600px;
+        min-width: 640px;
     }
     
     .sequencer-grid-wrapper .step-indicator {

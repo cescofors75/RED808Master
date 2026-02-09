@@ -117,6 +117,13 @@ static void populateStateDocument(DynamicJsonDocument& doc) {
     padFilters.add((int)filterType);
   }
   
+  // Send track filter states (for sequencer tracks)
+  JsonArray trackFilters = doc.createNestedArray("trackFilters");
+  for (int track = 0; track < 16; track++) {
+    FilterType filterType = audioEngine.getTrackFilter(track);
+    trackFilters.add((int)filterType);
+  }
+  
   yield(); // Yield final
 }
 

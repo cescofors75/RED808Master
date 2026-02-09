@@ -568,6 +568,16 @@ function applyTrackFilter(track, filter) {
     window.sendWebSocket(cmd);
   }
   
+  // Update track filter state
+  if (window.trackFilterState) {
+    window.trackFilterState[track] = filter.type;
+  }
+  
+  // Sync: also apply to pad if sync enabled
+  if (window.padSeqSyncEnabled && window.syncFilterToPad) {
+    window.syncFilterToPad(track, filter.type);
+  }
+  
   // Show toast notification
   const filterName = filter.name || (filter.type === 0 ? 'Filter cleared' : 'Filter applied');
   showToast(`Track ${track + 1}: ${filterName}`, filter.type === 0 ? TOAST_TYPES.INFO : TOAST_TYPES.SUCCESS, 2500);
@@ -598,6 +608,22 @@ function applyPadFilter(pad, filter) {
   }
   if (window.updatePadFilterIndicator) {
     window.updatePadFilterIndicator(pad);
+  }
+  
+  // Sync: also apply to track if sync enabled (skip pad-only special filters)
+  if (window.padSeqSyncEnabled && filter.type <= 9) {
+    if (window.trackFilterState) window.trackFilterState[pad] = filter.type;
+    const trackCmd = {
+      cmd: filter.type === 0 ? 'clearTrackFilter' : 'setTrackFilter',
+      track: pad
+    };
+    if (filter.type !== 0) {
+      trackCmd.filterType = filter.type;
+      trackCmd.cutoff = filter.cutoff;
+      trackCmd.resonance = filter.resonance;
+      if (filter.gain !== undefined) trackCmd.gain = filter.gain;
+    }
+    if (window.sendWebSocket) window.sendWebSocket(trackCmd);
   }
   
   // Show toast notification for filter changes
