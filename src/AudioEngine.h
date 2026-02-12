@@ -27,6 +27,10 @@ static constexpr int MAX_PADS = 24;  // 16 sequencer + 8 XTRA pads
 #define LFO_TABLE_SIZE 256         // Quarter-sine lookup table
 #define PHASER_STAGES 4            // Cascaded allpass stages
 
+// Per-track live FX (SLAVE controller)
+#define TRACK_ECHO_SIZE 8820       // 200ms per-track echo at 44100Hz
+#define TRACK_FLANGER_BUF 256      // ~5.8ms per-track flanger
+
 // Filter types (10 classic types)
 enum FilterType {
   FILTER_NONE = 0,
@@ -148,6 +152,36 @@ struct CompressorParams {
   float releaseCoeff;     // Pre-calculated envelope coefficient
   float makeupGain;       // Linear gain multiplier
   float envelope;         // Current envelope level (state)
+};
+
+// Per-track Echo/Delay state (for SLAVE controller)
+struct TrackEchoState {
+    bool active;
+    float time;           // ms (10-200)
+    float feedback;       // 0.0-0.9
+    float mix;            // 0.0-1.0
+    uint32_t delaySamples;
+    uint32_t writePos;
+};
+
+// Per-track Flanger state (for SLAVE controller)
+struct TrackFlangerState {
+    bool active;
+    float rate;           // Hz (0.1-5.0)
+    float depth;          // 0.0-1.0
+    float feedback;       // -0.9 to 0.9
+    uint32_t writePos;
+    LFOState lfo;
+};
+
+// Per-track Compressor state (for SLAVE controller)
+struct TrackCompressorState {
+    bool active;
+    float threshold;      // 0.0-1.0 normalized
+    float ratio;          // 1.0-20.0
+    float attackCoeff;
+    float releaseCoeff;
+    float envelope;
 };
 
 // Scratch effect state (per-pad, vinyl scratch simulation)
@@ -279,6 +313,15 @@ public:
   void setTrackBitCrush(int track, uint8_t bits);
   void clearTrackFX(int track);
   
+  // Per-track live FX (SLAVE controller - echo, flanger, compressor)
+  void setTrackEcho(int track, bool active, float time = 100.0f, float feedback = 40.0f, float mix = 50.0f);
+  void setTrackFlanger(int track, bool active, float rate = 50.0f, float depth = 50.0f, float feedback = 30.0f);
+  void setTrackCompressor(int track, bool active, float threshold = -20.0f, float ratio = 4.0f);
+  void clearTrackLiveFX(int track);
+  bool getTrackEchoActive(int track) const;
+  bool getTrackFlangerActive(int track) const;
+  bool getTrackCompressorActive(int track) const;
+  
   // Filter Presets
   static const FilterPreset* getFilterPreset(FilterType type);
   static const char* getFilterName(FilterType type);
@@ -364,6 +407,14 @@ private:
   FlangerParams flangerParams;
   CompressorParams compressorParams;
   
+  // Per-track live FX state (SLAVE controller)
+  TrackEchoState trackEcho[MAX_AUDIO_TRACKS];
+  TrackFlangerState trackFlanger[MAX_AUDIO_TRACKS];
+  TrackCompressorState trackComp[MAX_AUDIO_TRACKS];
+  float* trackEchoBuffer[MAX_AUDIO_TRACKS];    // PSRAM per-track echo buffers (lazy alloc)
+  float* trackFlangerBuffers;                   // PSRAM: 16 × TRACK_FLANGER_BUF
+  float* trackFxInputBuf;                       // PSRAM: 16 × DMA_BUF_LEN
+  
   static float lfoSineTable[LFO_TABLE_SIZE];    // Shared sine lookup
   static bool lfoTableInitialized;
   
@@ -389,6 +440,11 @@ private:
   inline float processPhaser(float input);    // 4-stage allpass phaser
   inline float processFlanger(float input);   // Modulated short delay
   inline float processCompressor(float input);// Dynamics compressor
+  
+  // Per-track live FX processing
+  inline float processTrackEcho(int track, float input);
+  inline float processTrackFlanger(int track, float input);
+  inline float processTrackCompressor(int track, float input);
 };
 
 #endif // AUDIOENGINE_H

@@ -1013,6 +1013,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     if (pad < 0 || pad >= 24) return;  // 16 sequencer + 8 XTRA
     int velocity = doc.containsKey("vel") ? doc["vel"].as<int>() : 127;
     triggerPadWithLED(pad, velocity);
+    broadcastPadTrigger(pad);
   }
   else if (cmd == "setStep") {
     int track = doc["track"];
@@ -1031,20 +1032,43 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       }
     } else {
       sequencer.setStep(track, step, active);
-      yield(); // Prevent watchdog reset during bulk single-bar import
+      // Notify all WS clients
+      StaticJsonDocument<128> resp;
+      resp["type"] = "stepSet";
+      resp["track"] = track;
+      resp["step"] = step;
+      resp["active"] = active;
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+      yield();
     }
   }
   else if (cmd == "start") {
     sequencer.start();
+    StaticJsonDocument<96> resp;
+    resp["type"] = "playState";
+    resp["playing"] = true;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "stop") {
     sequencer.stop();
+    StaticJsonDocument<96> resp;
+    resp["type"] = "playState";
+    resp["playing"] = false;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "clearPattern") {
     int pattern = doc.containsKey("pattern") ? doc["pattern"].as<int>() : sequencer.getCurrentPattern();
     sequencer.clearPattern(pattern);
-    yield(); // Prevent watchdog reset during bulk operations
+    yield();
     Serial.printf("[WS] Pattern %d cleared\n", pattern);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "patternCleared";
+    resp["pattern"] = pattern;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setSongMode") {
     bool enabled = doc["enabled"];
@@ -1056,6 +1080,11 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "tempo") {
     float tempo = doc["value"];
     sequencer.setTempo(tempo);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "tempoChange";
+    resp["tempo"] = tempo;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "selectPattern") {
     int pattern = doc["index"];
@@ -1210,111 +1239,219 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "setLedMonoMode") {
     bool monoMode = doc["value"];
     setLedMonoMode(monoMode);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "ledMode"; resp["mono"] = monoMode;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setFilter") {
     int type = doc["type"];
     audioEngine.setFilterType((FilterType)type);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "filterType"; resp["value"] = type;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setFilterCutoff") {
     float cutoff = doc["value"];
     audioEngine.setFilterCutoff(cutoff);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "filterCutoff"; resp["value"] = cutoff;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setFilterResonance") {
     float resonance = doc["value"];
     audioEngine.setFilterResonance(resonance);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "filterResonance"; resp["value"] = resonance;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setBitCrush") {
     int bits = doc["value"];
     audioEngine.setBitDepth(bits);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "bitCrush"; resp["value"] = bits;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setDistortion") {
     float amount = doc["value"];
     audioEngine.setDistortion(amount);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "distortion"; resp["value"] = amount;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setDistortionMode") {
     int mode = doc["value"];
     audioEngine.setDistortionMode((DistortionMode)mode);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "distortionMode"; resp["value"] = mode;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setSampleRate") {
     int rate = doc["value"];
     audioEngine.setSampleRateReduction(rate);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "sampleRate"; resp["value"] = rate;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   // ============= NEW: Master Effects Commands =============
   else if (cmd == "setDelayActive") {
     bool active = doc["value"];
     audioEngine.setDelayActive(active);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "delayActive"; resp["value"] = active;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setDelayTime") {
     float ms = doc["value"];
     audioEngine.setDelayTime(ms);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "delayTime"; resp["value"] = ms;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setDelayFeedback") {
     float fb = doc["value"];
-    audioEngine.setDelayFeedback(fb / 100.0f);  // Convert from 0-100 to 0-1
+    audioEngine.setDelayFeedback(fb / 100.0f);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "delayFeedback"; resp["value"] = fb;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setDelayMix") {
     float mix = doc["value"];
-    audioEngine.setDelayMix(mix / 100.0f);  // Convert from 0-100 to 0-1
+    audioEngine.setDelayMix(mix / 100.0f);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "delayMix"; resp["value"] = mix;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setPhaserActive") {
     bool active = doc["value"];
     audioEngine.setPhaserActive(active);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "phaserActive"; resp["value"] = active;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setPhaserRate") {
     float rate = doc["value"];
-    audioEngine.setPhaserRate(rate / 100.0f);  // Convert from 5-500 to 0.05-5.0
+    audioEngine.setPhaserRate(rate / 100.0f);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "phaserRate"; resp["value"] = rate;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setPhaserDepth") {
     float depth = doc["value"];
     audioEngine.setPhaserDepth(depth / 100.0f);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "phaserDepth"; resp["value"] = depth;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setPhaserFeedback") {
     float fb = doc["value"];
-    audioEngine.setPhaserFeedback(fb / 100.0f);  // Convert from -90..90 to -0.9..0.9
+    audioEngine.setPhaserFeedback(fb / 100.0f);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "phaserFeedback"; resp["value"] = fb;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setFlangerActive") {
     bool active = doc["value"];
     audioEngine.setFlangerActive(active);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "flangerActive"; resp["value"] = active;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setFlangerRate") {
     float rate = doc["value"];
     audioEngine.setFlangerRate(rate / 100.0f);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "flangerRate"; resp["value"] = rate;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setFlangerDepth") {
     float depth = doc["value"];
     audioEngine.setFlangerDepth(depth / 100.0f);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "flangerDepth"; resp["value"] = depth;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setFlangerFeedback") {
     float fb = doc["value"];
     audioEngine.setFlangerFeedback(fb / 100.0f);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "flangerFeedback"; resp["value"] = fb;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setFlangerMix") {
     float mix = doc["value"];
     audioEngine.setFlangerMix(mix / 100.0f);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "flangerMix"; resp["value"] = mix;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setCompressorActive") {
     bool active = doc["value"];
     audioEngine.setCompressorActive(active);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "compressorActive"; resp["value"] = active;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setCompressorThreshold") {
     float thresh = doc["value"];
-    audioEngine.setCompressorThreshold(thresh);  // Already in dB
+    audioEngine.setCompressorThreshold(thresh);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "compressorThreshold"; resp["value"] = thresh;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setCompressorRatio") {
     float ratio = doc["value"];
     audioEngine.setCompressorRatio(ratio);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "compressorRatio"; resp["value"] = ratio;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setCompressorAttack") {
     float attack = doc["value"];
-    audioEngine.setCompressorAttack(attack);  // Already in ms
+    audioEngine.setCompressorAttack(attack);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "compressorAttack"; resp["value"] = attack;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setCompressorRelease") {
     float release = doc["value"];
     audioEngine.setCompressorRelease(release);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "compressorRelease"; resp["value"] = release;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setCompressorMakeupGain") {
     float gain = doc["value"];
-    audioEngine.setCompressorMakeupGain(gain);  // Already in dB
+    audioEngine.setCompressorMakeupGain(gain);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "compressorMakeupGain"; resp["value"] = gain;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   // ============= Per-Pad / Per-Track FX Commands =============
   else if (cmd == "setPadDistortion") {
@@ -1402,34 +1539,50 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   // ============= REVERSE Command =============
   else if (cmd == "setReverse") {
     bool value = doc["value"];
+    StaticJsonDocument<128> resp;
+    resp["type"] = "trackFxUpdate";
+    resp["fx"] = "reverse";
+    resp["value"] = value;
     if (doc.containsKey("track")) {
       int track = doc["track"];
       if (track >= 0 && track < 16) {
         audioEngine.setReverseSample(track, value);
-        Serial.printf("[WS] Reverse %s -> Track %d\n", value ? "ON" : "OFF", track);
+        resp["track"] = track;
+        String out; serializeJson(resp, out);
+        if (ws) ws->textAll(out);
       }
     } else if (doc.containsKey("pad")) {
       int pad = doc["pad"];
       if (pad >= 0 && pad < 24) {
         audioEngine.setReverseSample(pad, value);
-        Serial.printf("[WS] Reverse %s -> Pad %d\n", value ? "ON" : "OFF", pad);
+        resp["pad"] = pad;
+        String out; serializeJson(resp, out);
+        if (ws) ws->textAll(out);
       }
     }
   }
   // ============= PITCH SHIFT Command =============
   else if (cmd == "setPitchShift") {
     float value = doc["value"];
+    StaticJsonDocument<128> resp;
+    resp["type"] = "trackFxUpdate";
+    resp["fx"] = "pitch";
+    resp["value"] = value;
     if (doc.containsKey("track")) {
       int track = doc["track"];
       if (track >= 0 && track < 16) {
         audioEngine.setTrackPitchShift(track, value);
-        Serial.printf("[WS] PitchShift %.2f -> Track %d\n", value, track);
+        resp["track"] = track;
+        String out; serializeJson(resp, out);
+        if (ws) ws->textAll(out);
       }
     } else if (doc.containsKey("pad")) {
       int pad = doc["pad"];
       if (pad >= 0 && pad < 24) {
         audioEngine.setTrackPitchShift(pad, value);
-        Serial.printf("[WS] PitchShift %.2f -> Pad %d\n", value, pad);
+        resp["pad"] = pad;
+        String out; serializeJson(resp, out);
+        if (ws) ws->textAll(out);
       }
     }
   }
@@ -1437,17 +1590,26 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "setStutter") {
     bool value = doc["value"];
     int interval = doc.containsKey("interval") ? (int)doc["interval"] : 100;
+    StaticJsonDocument<128> resp;
+    resp["type"] = "trackFxUpdate";
+    resp["fx"] = "stutter";
+    resp["value"] = value;
+    resp["interval"] = interval;
     if (doc.containsKey("track")) {
       int track = doc["track"];
       if (track >= 0 && track < 16) {
         audioEngine.setStutter(track, value, interval);
-        Serial.printf("[WS] Stutter %s %dms -> Track %d\n", value ? "ON" : "OFF", interval, track);
+        resp["track"] = track;
+        String out; serializeJson(resp, out);
+        if (ws) ws->textAll(out);
       }
     } else if (doc.containsKey("pad")) {
       int pad = doc["pad"];
       if (pad >= 0 && pad < 24) {
         audioEngine.setStutter(pad, value, interval);
-        Serial.printf("[WS] Stutter %s %dms -> Pad %d\n", value ? "ON" : "OFF", interval, pad);
+        resp["pad"] = pad;
+        String out; serializeJson(resp, out);
+        if (ws) ws->textAll(out);
       }
     }
   }
@@ -1482,6 +1644,97 @@ void WebInterface::processCommand(const JsonDocument& doc) {
                     value ? "ON" : "OFF", track, autoMode, mode, brakeSpeed, backspinSpeed, transformRate, vinylNoise);
     }
   }
+  // ============= PER-TRACK LIVE FX (SLAVE Controller) =============
+  else if (cmd == "setTrackEcho") {
+    int track = doc["track"];
+    if (track >= 0 && track < 16) {
+      // One-knob mode (pot 0-127) or detailed mode
+      if (doc.containsKey("value")) {
+        int val = doc["value"].as<int>();
+        bool active = val > 0;
+        float mix = (float)val / 127.0f * 100.0f;
+        float time = doc.containsKey("time") ? doc["time"].as<float>() : 100.0f;
+        float feedback = doc.containsKey("feedback") ? doc["feedback"].as<float>() : 40.0f;
+        audioEngine.setTrackEcho(track, active, time, feedback, mix);
+      } else {
+        bool active = doc["active"] | false;
+        float time = doc.containsKey("time") ? doc["time"].as<float>() : 100.0f;
+        float feedback = doc.containsKey("feedback") ? doc["feedback"].as<float>() : 40.0f;
+        float mix = doc.containsKey("mix") ? doc["mix"].as<float>() : 50.0f;
+        audioEngine.setTrackEcho(track, active, time, feedback, mix);
+      }
+      StaticJsonDocument<160> resp;
+      resp["type"] = "trackLiveFx";
+      resp["track"] = track;
+      resp["fx"] = "echo";
+      resp["active"] = audioEngine.getTrackEchoActive(track);
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
+  else if (cmd == "setTrackFlanger") {
+    int track = doc["track"];
+    if (track >= 0 && track < 16) {
+      if (doc.containsKey("value")) {
+        int val = doc["value"].as<int>();
+        bool active = val > 0;
+        float depth = (float)val / 127.0f * 100.0f;
+        float rate = doc.containsKey("rate") ? doc["rate"].as<float>() : 50.0f;
+        float feedback = doc.containsKey("feedback") ? doc["feedback"].as<float>() : 30.0f;
+        audioEngine.setTrackFlanger(track, active, rate, depth, feedback);
+      } else {
+        bool active = doc["active"] | false;
+        float rate = doc.containsKey("rate") ? doc["rate"].as<float>() : 50.0f;
+        float depth = doc.containsKey("depth") ? doc["depth"].as<float>() : 50.0f;
+        float feedback = doc.containsKey("feedback") ? doc["feedback"].as<float>() : 30.0f;
+        audioEngine.setTrackFlanger(track, active, rate, depth, feedback);
+      }
+      StaticJsonDocument<160> resp;
+      resp["type"] = "trackLiveFx";
+      resp["track"] = track;
+      resp["fx"] = "flanger";
+      resp["active"] = audioEngine.getTrackFlangerActive(track);
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
+  else if (cmd == "setTrackCompressor") {
+    int track = doc["track"];
+    if (track >= 0 && track < 16) {
+      if (doc.containsKey("value")) {
+        int val = doc["value"].as<int>();
+        bool active = val > 0;
+        float threshold = -60.0f + (float)val / 127.0f * 60.0f; // 0=-60dB, 127=0dB
+        float ratio = doc.containsKey("ratio") ? doc["ratio"].as<float>() : 4.0f;
+        audioEngine.setTrackCompressor(track, active, threshold, ratio);
+      } else {
+        bool active = doc["active"] | false;
+        float threshold = doc.containsKey("threshold") ? doc["threshold"].as<float>() : -20.0f;
+        float ratio = doc.containsKey("ratio") ? doc["ratio"].as<float>() : 4.0f;
+        audioEngine.setTrackCompressor(track, active, threshold, ratio);
+      }
+      StaticJsonDocument<160> resp;
+      resp["type"] = "trackLiveFx";
+      resp["track"] = track;
+      resp["fx"] = "compressor";
+      resp["active"] = audioEngine.getTrackCompressorActive(track);
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
+  else if (cmd == "clearTrackLiveFX") {
+    int track = doc["track"];
+    if (track >= 0 && track < 16) {
+      audioEngine.clearTrackLiveFX(track);
+      StaticJsonDocument<128> resp;
+      resp["type"] = "trackLiveFx";
+      resp["track"] = track;
+      resp["fx"] = "cleared";
+      resp["active"] = false;
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
   else if (cmd == "setSequencerVolume") {
     int volume = doc["value"];
     audioEngine.setSequencerVolume(volume);
@@ -1511,16 +1764,27 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "setVolume") {
     int volume = doc["value"];
     audioEngine.setMasterVolume(volume);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "volume"; resp["value"] = volume;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "stopAllSounds") {
     audioEngine.stopAll();
     Serial.println("[WS] KILL ALL - All sounds stopped");
+    StaticJsonDocument<64> resp;
+    resp["type"] = "allStopped";
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "setLivePitch") {
     float pitch = doc["pitch"].as<float>();
     pitch = constrain(pitch, 0.25f, 3.0f);
     audioEngine.setLivePitchShift(pitch);
-    Serial.printf("[WS] Live pitch set to %.2f\n", pitch);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "livePitch"; resp["value"] = pitch;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   // ============= NEW: Per-Track Filter Commands =============
   else if (cmd == "setTrackFilter") {

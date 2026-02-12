@@ -77,9 +77,7 @@ const FILTER_TYPES = [
     { icon: '🌟', name: 'TREBLE BOOST' },
     { icon: '⛰️', name: 'PEAK BOOST' },
     { icon: '🌀', name: 'PHASE' },
-    { icon: '⚡', name: 'RESONANT' },
-    { icon: '💿', name: 'SCRATCH', padOnly: true },
-    { icon: '🎧', name: 'TURNTABLISM', padOnly: true }
+    { icon: '⚡', name: 'RESONANT' }
 ];
 window.FILTER_TYPES = FILTER_TYPES;
 
@@ -372,11 +370,147 @@ function handleWebSocketMessage(data) {
         case 'midiScan':
             handleMidiScanState(data);
             break;
+
+        // ============= UDP→WS SYNC HANDLERS =============
+        case 'playState':
+            isPlaying = !!data.playing;
+            updateSequencerStatusMeter();
+            break;
+
+        case 'tempoChange':
+            if (data.tempo !== undefined) {
+                const _ts = document.getElementById('tempoSlider');
+                const _tv = document.getElementById('tempoValue');
+                if (_ts) _ts.value = String(data.tempo);
+                if (_tv) _tv.textContent = String(data.tempo);
+                updateBpmMeter(parseFloat(data.tempo));
+            }
+            break;
+
+        case 'stepSet':
+            if (data.track !== undefined && data.step !== undefined) {
+                const stepEl = document.querySelector(`.step-btn[data-track="${data.track}"][data-step="${data.step}"]`);
+                if (stepEl) stepEl.classList.toggle('active', !!data.active);
+            }
+            break;
+
+        case 'patternCleared':
+            // Refresh pattern grid from server
+            sendWebSocket({ cmd: 'getPattern' });
+            break;
+
+        case 'masterFx':
+            handleMasterFxUpdate(data);
+            break;
+
+        case 'trackFxUpdate':
+            handleTrackFxUpdate(data);
+            break;
+
+        case 'allStopped':
+            isPlaying = false;
+            updateSequencerStatusMeter();
+            break;
+
+        case 'ledMode':
+            // LED mono mode changed from slave, UI seldom shows this
+            break;
+
+        case 'trackLiveFx':
+            // Per-track live FX from SLAVE (echo/flanger/compressor)
+            if (data.track !== undefined && data.fx) {
+                console.log(`[WS] Track ${data.track} live FX: ${data.fx} ${data.active ? 'ON' : 'OFF'}`);
+            }
+            break;
     }
     
     // Call keyboard controls handler if function exists
     if (typeof window.handleKeyboardWebSocketMessage === 'function') {
         window.handleKeyboardWebSocketMessage(data);
+    }
+}
+
+// ============= MASTER FX UPDATE FROM UDP/WS =============
+function handleMasterFxUpdate(data) {
+    const p = data.param;
+    const v = data.value;
+    const byId = (id) => document.getElementById(id);
+
+    // --- Global Filter ---
+    if (p === 'filterType') {
+        const sel = byId('filterType'); if (sel) sel.value = v;
+    } else if (p === 'filterCutoff') {
+        const sl = byId('filterCutoff'); if (sl) { sl.value = v; const vd = byId('filterCutoffValue'); if (vd) vd.textContent = Math.round(v); }
+    } else if (p === 'filterResonance') {
+        const sl = byId('filterResonance'); if (sl) { sl.value = v; const vd = byId('filterResonanceValue'); if (vd) vd.textContent = parseFloat(v).toFixed(1); }
+    } else if (p === 'bitCrush') {
+        const sl = byId('bitCrush'); if (sl) { sl.value = v; const vd = byId('bitCrushValue'); if (vd) vd.textContent = v; }
+    } else if (p === 'distortion') {
+        const sl = byId('distortion'); if (sl) { sl.value = v; const vd = byId('distortionValue'); if (vd) vd.textContent = v; }
+    } else if (p === 'distortionMode') {
+        const sel = byId('distortionMode'); if (sel) sel.value = v;
+    } else if (p === 'sampleRate') {
+        const sl = byId('sampleRate'); if (sl) { sl.value = v; const vd = byId('sampleRateValue'); if (vd) vd.textContent = v; }
+    }
+
+    // --- Delay ---
+    else if (p === 'delayActive') { const cb = byId('delayActive'); if (cb) cb.checked = !!v; }
+    else if (p === 'delayTime') { const sl = byId('delayTime'); if (sl) { sl.value = v; const vd = byId('delayTimeValue'); if (vd) vd.textContent = Math.round(v); } }
+    else if (p === 'delayFeedback') { const sl = byId('delayFeedback'); if (sl) { sl.value = v; const vd = byId('delayFeedbackValue'); if (vd) vd.textContent = Math.round(v); } }
+    else if (p === 'delayMix') { const sl = byId('delayMix'); if (sl) { sl.value = v; const vd = byId('delayMixValue'); if (vd) vd.textContent = Math.round(v); } }
+
+    // --- Phaser ---
+    else if (p === 'phaserActive') { const cb = byId('phaserActive'); if (cb) cb.checked = !!v; }
+    else if (p === 'phaserRate') { const sl = byId('phaserRate'); if (sl) { sl.value = v; const vd = byId('phaserRateValue'); if (vd) vd.textContent = Math.round(v); } }
+    else if (p === 'phaserDepth') { const sl = byId('phaserDepth'); if (sl) { sl.value = v; const vd = byId('phaserDepthValue'); if (vd) vd.textContent = Math.round(v); } }
+    else if (p === 'phaserFeedback') { const sl = byId('phaserFeedback'); if (sl) { sl.value = v; const vd = byId('phaserFeedbackValue'); if (vd) vd.textContent = Math.round(v); } }
+
+    // --- Flanger ---
+    else if (p === 'flangerActive') { const cb = byId('flangerActive'); if (cb) cb.checked = !!v; }
+    else if (p === 'flangerRate') { const sl = byId('flangerRate'); if (sl) { sl.value = v; const vd = byId('flangerRateValue'); if (vd) vd.textContent = Math.round(v); } }
+    else if (p === 'flangerDepth') { const sl = byId('flangerDepth'); if (sl) { sl.value = v; const vd = byId('flangerDepthValue'); if (vd) vd.textContent = Math.round(v); } }
+    else if (p === 'flangerFeedback') { const sl = byId('flangerFeedback'); if (sl) { sl.value = v; const vd = byId('flangerFeedbackValue'); if (vd) vd.textContent = Math.round(v); } }
+    else if (p === 'flangerMix') { const sl = byId('flangerMix'); if (sl) { sl.value = v; const vd = byId('flangerMixValue'); if (vd) vd.textContent = Math.round(v); } }
+
+    // --- Compressor ---
+    else if (p === 'compressorActive') { const cb = byId('compressorActive'); if (cb) cb.checked = !!v; }
+    else if (p === 'compressorThreshold') { const sl = byId('compressorThreshold'); if (sl) { sl.value = v; const vd = byId('compressorThresholdValue'); if (vd) vd.textContent = Math.round(v); } }
+    else if (p === 'compressorRatio') { const sl = byId('compressorRatio'); if (sl) { sl.value = v; const vd = byId('compressorRatioValue'); if (vd) vd.textContent = parseFloat(v).toFixed(1); } }
+    else if (p === 'compressorAttack') { const sl = byId('compressorAttack'); if (sl) { sl.value = v; const vd = byId('compressorAttackValue'); if (vd) vd.textContent = Math.round(v); } }
+    else if (p === 'compressorRelease') { const sl = byId('compressorRelease'); if (sl) { sl.value = v; const vd = byId('compressorReleaseValue'); if (vd) vd.textContent = Math.round(v); } }
+    else if (p === 'compressorMakeupGain') { const sl = byId('compressorMakeupGain'); if (sl) { sl.value = v; const vd = byId('compressorMakeupGainValue'); if (vd) vd.textContent = parseFloat(v).toFixed(1); } }
+
+    // --- Master Volume ---
+    else if (p === 'volume') {
+        const sl = byId('masterVolume'); if (sl) { sl.value = v; const vd = byId('masterVolumeValue'); if (vd) vd.textContent = v; }
+    }
+    // --- Live Pitch ---
+    else if (p === 'livePitch') {
+        const sl = byId('livePitchSlider'); if (sl) { sl.value = v; const vd = byId('livePitchValue'); if (vd) vd.textContent = parseFloat(v).toFixed(2); }
+    }
+}
+
+// ============= TRACK FX UPDATE FROM UDP/WS =============
+function handleTrackFxUpdate(data) {
+    const track = data.track !== undefined ? data.track : data.pad;
+    if (track === undefined || track < 0) return;
+
+    if (data.fx === 'reverse') {
+        if (track < 16 && typeof trackFxEffects !== 'undefined') {
+            trackFxEffects[track].reverse = !!data.value;
+            if (typeof updateTrackFxUI === 'function') updateTrackFxUI();
+        }
+    } else if (data.fx === 'pitch') {
+        if (track < 16 && typeof trackFxEffects !== 'undefined') {
+            trackFxEffects[track].pitch = parseFloat(data.value);
+            if (typeof updateTrackFxUI === 'function') updateTrackFxUI();
+        }
+    } else if (data.fx === 'stutter') {
+        if (track < 16 && typeof trackFxEffects !== 'undefined') {
+            trackFxEffects[track].stutter = !!data.value;
+            trackFxEffects[track].stutterMs = data.interval || 100;
+            if (typeof updateTrackFxUI === 'function') updateTrackFxUI();
+        }
     }
 }
 
@@ -4195,20 +4329,7 @@ let trackFxEffects = new Array(16).fill(null).map(() => ({
     reverse: false,
     pitch: 1.0,
     stutter: false,
-    stutterMs: 100,
-    scratch: false,
-    scratchRate: 5.0,
-    scratchDepth: 0.85,
-    scratchFilter: 4000,
-    scratchCrackle: 0.25,
-    scratchStyle: 'baby',
-    turntablism: false,
-    turntableControl: 'auto',
-    turntableMode: 0,
-    brakeSpeed: 350,
-    backspinSpeed: 450,
-    transformRate: 11,
-    vinylNoise: 0.35
+    stutterMs: 100
 }));
 let selectedFxTrack = 0;
 
@@ -4277,58 +4398,7 @@ function updateTrackFxUI() {
         btn.classList.toggle('active', val === fx.stutterMs && fx.stutter);
     });
     
-    // Scratch toggle & UI
-    const scratchToggle = document.getElementById('fxScratchToggle');
-    if (scratchToggle) scratchToggle.checked = fx.scratch;
-    document.getElementById('fxCardScratch')?.classList.toggle('fx-active', fx.scratch);
-    const scratchRate = document.getElementById('fxScratchRate');
-    if (scratchRate) scratchRate.value = Math.round(fx.scratchRate * 10);
-    const scratchRateVal = document.getElementById('fxScratchRateValue');
-    if (scratchRateVal) scratchRateVal.textContent = fx.scratchRate.toFixed(1);
-    const scratchDepth = document.getElementById('fxScratchDepth');
-    if (scratchDepth) scratchDepth.value = Math.round(fx.scratchDepth * 100);
-    const scratchDepthVal = document.getElementById('fxScratchDepthValue');
-    if (scratchDepthVal) scratchDepthVal.textContent = Math.round(fx.scratchDepth * 100);
-    const scratchFilter = document.getElementById('fxScratchFilter');
-    if (scratchFilter) scratchFilter.value = fx.scratchFilter;
-    const scratchFilterVal = document.getElementById('fxScratchFilterValue');
-    if (scratchFilterVal) scratchFilterVal.textContent = fx.scratchFilter;
-    const scratchCrackle = document.getElementById('fxScratchCrackle');
-    if (scratchCrackle) scratchCrackle.value = Math.round(fx.scratchCrackle * 100);
-    const scratchCrackleVal = document.getElementById('fxScratchCrackleValue');
-    if (scratchCrackleVal) scratchCrackleVal.textContent = Math.round(fx.scratchCrackle * 100);
-    // Update scratch style buttons
-    document.querySelectorAll('.scratch-mode-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.style === fx.scratchStyle);
-    });
-    
-    // Turntablism toggle & UI
-    const ttToggle = document.getElementById('fxTurntablismToggle');
-    if (ttToggle) ttToggle.checked = fx.turntablism;
-    document.getElementById('fxCardTurntablism')?.classList.toggle('fx-active', fx.turntablism);
-    const brakeSpeed = document.getElementById('fxBrakeSpeed');
-    if (brakeSpeed) brakeSpeed.value = fx.brakeSpeed;
-    const brakeVal = document.getElementById('fxBrakeSpeedValue');
-    if (brakeVal) brakeVal.textContent = fx.brakeSpeed;
-    const backspinSpeed = document.getElementById('fxBackspinSpeed');
-    if (backspinSpeed) backspinSpeed.value = fx.backspinSpeed;
-    const backspinVal = document.getElementById('fxBackspinValue');
-    if (backspinVal) backspinVal.textContent = fx.backspinSpeed;
-    const transformRate = document.getElementById('fxTransformRate');
-    if (transformRate) transformRate.value = fx.transformRate;
-    const transformVal = document.getElementById('fxTransformRateValue');
-    if (transformVal) transformVal.textContent = fx.transformRate;
-    const vinylNoise = document.getElementById('fxVinylNoise');
-    if (vinylNoise) vinylNoise.value = Math.round(fx.vinylNoise * 100);
-    const vinylNoiseVal = document.getElementById('fxVinylNoiseValue');
-    if (vinylNoiseVal) vinylNoiseVal.textContent = Math.round(fx.vinylNoise * 100);
-    // Turntable control mode
-    document.querySelectorAll('.turntable-mode-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.ctrl === fx.turntableControl);
-    });
-    // Status dot
-    const ttStatusDot = document.querySelector('.tt-mode-dot');
-    if (ttStatusDot) ttStatusDot.classList.toggle('active', fx.turntablism);
+
 }
 
 function toggleTrackFx(fxType, active) {
@@ -4366,29 +4436,6 @@ function toggleTrackFx(fxType, active) {
             if (window.showToast) window.showToast(`${active ? '🔁 STUTTER ON ' + fx.stutterMs + 'ms' : '🔁 STUTTER OFF'} → ${padNames[track]}`, window.TOAST_TYPES?.SUCCESS, 2000);
             break;
             
-        case 'scratch':
-            fx.scratch = active;
-            if (active) {
-                sendWebSocket({ cmd: 'setScratch', track: track, value: true, rate: fx.scratchRate, depth: fx.scratchDepth, filter: fx.scratchFilter, crackle: fx.scratchCrackle });
-            } else {
-                sendWebSocket({ cmd: 'setScratch', track: track, value: false });
-            }
-            document.getElementById('fxCardScratch')?.classList.toggle('fx-active', active);
-            if (window.showToast) window.showToast(`${active ? '💿 SCRATCH ON' : '💿 SCRATCH OFF'} → ${padNames[track]}`, window.TOAST_TYPES?.SUCCESS, 2000);
-            break;
-            
-        case 'turntablism':
-            fx.turntablism = active;
-            if (active) {
-                sendWebSocket({ cmd: 'setTurntablism', track: track, value: true, control: fx.turntableControl, brakeSpeed: fx.brakeSpeed, backspinSpeed: fx.backspinSpeed, transformRate: fx.transformRate, vinylNoise: fx.vinylNoise });
-            } else {
-                sendWebSocket({ cmd: 'setTurntablism', track: track, value: false });
-            }
-            document.getElementById('fxCardTurntablism')?.classList.toggle('fx-active', active);
-            const ttDot = document.querySelector('.tt-mode-dot');
-            if (ttDot) ttDot.classList.toggle('active', active);
-            if (window.showToast) window.showToast(`${active ? '🎧 TURNTABLISM ON' : '🎧 TURNTABLISM OFF'} → ${padNames[track]}`, window.TOAST_TYPES?.SUCCESS, 2000);
-            break;
     }
     
     updateTrackFxStatusGrid();
@@ -4462,7 +4509,7 @@ function updateTrackFxBtnIndicators() {
     document.querySelectorAll('.track-fx-btn').forEach(btn => {
         const track = parseInt(btn.dataset.track);
         const fx = trackFxEffects[track];
-        const hasFx = fx && (fx.reverse || fx.pitch !== 1.0 || fx.stutter || fx.scratch || fx.turntablism);
+        const hasFx = fx && (fx.reverse || fx.pitch !== 1.0 || fx.stutter);
         btn.classList.toggle('has-fx', hasFx);
     });
 }
@@ -4475,15 +4522,13 @@ function updateTrackFxStatusGrid() {
     let html = '';
     for (let i = 0; i < 16; i++) {
         const fx = trackFxEffects[i];
-        const hasAny = fx.reverse || fx.pitch !== 1.0 || fx.stutter || fx.scratch || fx.turntablism;
+        const hasAny = fx.reverse || fx.pitch !== 1.0 || fx.stutter;
         html += `<div class="track-fx-status-item" style="${hasAny ? 'background:rgba(168,85,247,0.1);' : ''}">
             <span class="status-name">${padNames[i]}</span>
             <div class="status-fx">
                 <span class="fx-dot ${fx.reverse ? 'reverse-on' : ''}" title="Reverse"></span>
                 <span class="fx-dot ${fx.pitch !== 1.0 ? 'pitch-on' : ''}" title="Pitch ${fx.pitch.toFixed(2)}×"></span>
                 <span class="fx-dot ${fx.stutter ? 'stutter-on' : ''}" title="Stutter ${fx.stutterMs}ms"></span>
-                <span class="fx-dot ${fx.scratch ? 'scratch-on' : ''}" title="Scratch"></span>
-                <span class="fx-dot ${fx.turntablism ? 'turntablism-on' : ''}" title="Turntablism"></span>
             </div>
         </div>`;
     }
@@ -4621,230 +4666,7 @@ window.toggleTrackFx = toggleTrackFx;
 window.setTrackFxPitch = setTrackFxPitch;
 window.setTrackFxStutter = setTrackFxStutter;
 window.selectFxTrack = selectFxTrack;
-window.setScratchStyle = setScratchStyle;
-window.setScratchParam = setScratchParam;
-window.setTurntableControl = setTurntableControl;
-window.setTurntableParam = setTurntableParam;
-window.triggerTurntableMode = triggerTurntableMode;
 
-// ============= SCRATCH FX Functions =============
-
-const SCRATCH_STYLES = {
-    baby:        { rate: 3.0,  depth: 0.6,  filter: 3000, crackle: 0.15 },
-    chirp:       { rate: 8.0,  depth: 0.9,  filter: 5000, crackle: 0.20 },
-    scribble:    { rate: 15.0, depth: 0.5,  filter: 6000, crackle: 0.10 },
-    drag:        { rate: 1.5,  depth: 1.0,  filter: 2000, crackle: 0.40 },
-    transformer: { rate: 12.0, depth: 0.95, filter: 8000, crackle: 0.05 }
-};
-
-function setScratchStyle(style) {
-    const track = selectedFxTrack;
-    const fx = trackFxEffects[track];
-    const preset = SCRATCH_STYLES[style];
-    if (!preset) return;
-    
-    fx.scratchStyle = style;
-    fx.scratchRate = preset.rate;
-    fx.scratchDepth = preset.depth;
-    fx.scratchFilter = preset.filter;
-    fx.scratchCrackle = preset.crackle;
-    
-    // Auto-enable scratch
-    fx.scratch = true;
-    const scratchToggle = document.getElementById('fxScratchToggle');
-    if (scratchToggle) scratchToggle.checked = true;
-    document.getElementById('fxCardScratch')?.classList.add('fx-active');
-    
-    sendWebSocket({ cmd: 'setScratch', track: track, value: true, rate: fx.scratchRate, depth: fx.scratchDepth, filter: fx.scratchFilter, crackle: fx.scratchCrackle });
-    
-    updateTrackFxUI();
-    updateTrackFxStatusGrid();
-    updateTrackFxBtnIndicators();
-    updateScratchVisualizer();
-    
-    if (window.showToast) window.showToast(`💿 ${style.toUpperCase()} SCRATCH → ${padNames[track]}`, window.TOAST_TYPES?.SUCCESS, 2000);
-}
-
-function setScratchParam(param, value) {
-    const track = selectedFxTrack;
-    const fx = trackFxEffects[track];
-    
-    switch (param) {
-        case 'rate':
-            fx.scratchRate = value;
-            document.getElementById('fxScratchRateValue').textContent = value.toFixed(1);
-            break;
-        case 'depth':
-            fx.scratchDepth = value;
-            document.getElementById('fxScratchDepthValue').textContent = Math.round(value * 100);
-            break;
-        case 'filter':
-            fx.scratchFilter = value;
-            document.getElementById('fxScratchFilterValue').textContent = value;
-            break;
-        case 'crackle':
-            fx.scratchCrackle = value;
-            document.getElementById('fxScratchCrackleValue').textContent = Math.round(value * 100);
-            break;
-    }
-    
-    // Send if scratch is active
-    if (fx.scratch) {
-        sendWebSocket({ cmd: 'setScratch', track: track, value: true, rate: fx.scratchRate, depth: fx.scratchDepth, filter: fx.scratchFilter, crackle: fx.scratchCrackle });
-    }
-    
-    updateScratchVisualizer();
-}
-
-// Mini scratch waveform visualizer
-let scratchVisFrame = null;
-function updateScratchVisualizer() {
-    const canvas = document.getElementById('scratchCanvas');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const fx = trackFxEffects[selectedFxTrack];
-    const w = canvas.width;
-    const h = canvas.height;
-    
-    if (scratchVisFrame) cancelAnimationFrame(scratchVisFrame);
-    
-    let phase = 0;
-    function drawFrame() {
-        ctx.clearRect(0, 0, w, h);
-        
-        // Background gradient
-        const gradient = ctx.createLinearGradient(0, 0, w, 0);
-        gradient.addColorStop(0, '#0d0a1a');
-        gradient.addColorStop(0.5, '#150d2e');
-        gradient.addColorStop(1, '#0d0a1a');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, w, h);
-        
-        // Center line
-        ctx.strokeStyle = 'rgba(139,92,246,0.2)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, h/2);
-        ctx.lineTo(w, h/2);
-        ctx.stroke();
-        
-        // Scratch waveform
-        ctx.strokeStyle = fx.scratch ? '#a78bfa' : '#444';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        for (let x = 0; x < w; x++) {
-            const t = (x / w) * Math.PI * 2 * 3 + phase;
-            // Triangle wave 
-            const tri = Math.abs(((t / (Math.PI * 2)) % 1) * 4 - 2) - 1;
-            const y = h/2 + tri * fx.scratchDepth * (h/2 - 4);
-            if (x === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-        
-        // Crackle dots
-        if (fx.scratch && fx.scratchCrackle > 0) {
-            ctx.fillStyle = 'rgba(255,255,255,0.4)';
-            for (let i = 0; i < 5; i++) {
-                if (Math.random() < fx.scratchCrackle) {
-                    const cx = Math.random() * w;
-                    const cy = Math.random() * h;
-                    ctx.beginPath();
-                    ctx.arc(cx, cy, 1, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-            }
-        }
-        
-        if (fx.scratch) {
-            phase += fx.scratchRate * 0.02;
-            scratchVisFrame = requestAnimationFrame(drawFrame);
-        }
-    }
-    drawFrame();
-}
-
-// ============= TURNTABLISM FX Functions =============
-
-function setTurntableControl(mode) {
-    const track = selectedFxTrack;
-    const fx = trackFxEffects[track];
-    fx.turntableControl = mode;
-    
-    document.querySelectorAll('.turntable-mode-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.ctrl === mode);
-    });
-    
-    if (fx.turntablism) {
-        sendWebSocket({ cmd: 'setTurntablism', track: track, value: true, control: mode, brakeSpeed: fx.brakeSpeed, backspinSpeed: fx.backspinSpeed, transformRate: fx.transformRate, vinylNoise: fx.vinylNoise });
-    }
-    
-    if (window.showToast) window.showToast(`🎧 Control: ${mode.toUpperCase()} → ${padNames[track]}`, window.TOAST_TYPES?.INFO, 1500);
-}
-
-function setTurntableParam(param, value) {
-    const track = selectedFxTrack;
-    const fx = trackFxEffects[track];
-    
-    switch (param) {
-        case 'brakeSpeed':
-            fx.brakeSpeed = value;
-            document.getElementById('fxBrakeSpeedValue').textContent = value;
-            break;
-        case 'backspinSpeed':
-            fx.backspinSpeed = value;
-            document.getElementById('fxBackspinValue').textContent = value;
-            break;
-        case 'transformRate':
-            fx.transformRate = value;
-            document.getElementById('fxTransformRateValue').textContent = value;
-            break;
-        case 'vinylNoise':
-            fx.vinylNoise = value;
-            document.getElementById('fxVinylNoiseValue').textContent = Math.round(value * 100);
-            break;
-    }
-    
-    if (fx.turntablism) {
-        sendWebSocket({ cmd: 'setTurntablism', track: track, value: true, control: fx.turntableControl, brakeSpeed: fx.brakeSpeed, backspinSpeed: fx.backspinSpeed, transformRate: fx.transformRate, vinylNoise: fx.vinylNoise });
-    }
-}
-
-function triggerTurntableMode(mode) {
-    const track = selectedFxTrack;
-    const fx = trackFxEffects[track];
-    
-    // Auto-enable turntablism
-    if (!fx.turntablism) {
-        fx.turntablism = true;
-        const ttToggle = document.getElementById('fxTurntablismToggle');
-        if (ttToggle) ttToggle.checked = true;
-        document.getElementById('fxCardTurntablism')?.classList.add('fx-active');
-    }
-    
-    // Switch to manual mode
-    fx.turntableControl = 'manual';
-    fx.turntableMode = mode;
-    document.querySelectorAll('.turntable-mode-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.ctrl === 'manual');
-    });
-    
-    sendWebSocket({ cmd: 'setTurntablism', track: track, value: true, control: 'manual', mode: mode, brakeSpeed: fx.brakeSpeed, backspinSpeed: fx.backspinSpeed, transformRate: fx.transformRate, vinylNoise: fx.vinylNoise });
-    
-    const modeNames = ['NORMAL', 'BRAKE', 'BACKSPIN', 'TRANSFORM'];
-    const modeIcons = ['▶️', '⏹️', '🔄', '⚡'];
-    
-    // Update status
-    const statusEl = document.querySelector('.tt-status-mode');
-    if (statusEl) {
-        statusEl.innerHTML = `<span class="tt-mode-dot active"></span> ${modeNames[mode]}`;
-    }
-    
-    if (window.showToast) window.showToast(`${modeIcons[mode]} ${modeNames[mode]} → ${padNames[track]}`, window.TOAST_TYPES?.SUCCESS, 1500);
-    
-    updateTrackFxStatusGrid();
-    updateTrackFxBtnIndicators();
-}
 
 // ============= Update XTRA Pads Filter Status =============
 function updateXtraFiltersStatus() {

@@ -164,6 +164,37 @@ AudioEngine::AudioEngine() : i2sPort(I2S_NUM_0),
   compressorParams.makeupGain = 1.0f;
   compressorParams.envelope = 0.0f;
   
+  // ============= Initialize Per-track Live FX (SLAVE controller) =============
+  trackFlangerBuffers = (float*)ps_calloc(MAX_AUDIO_TRACKS * TRACK_FLANGER_BUF, sizeof(float));
+  trackFxInputBuf = (float*)ps_calloc(MAX_AUDIO_TRACKS * DMA_BUF_LEN, sizeof(float));
+  for (int i = 0; i < MAX_AUDIO_TRACKS; i++) {
+    trackEchoBuffer[i] = nullptr;
+    trackEcho[i].active = false;
+    trackEcho[i].time = 100.0f;
+    trackEcho[i].feedback = 0.4f;
+    trackEcho[i].mix = 0.5f;
+    trackEcho[i].delaySamples = 4410;
+    trackEcho[i].writePos = 0;
+    trackFlanger[i].active = false;
+    trackFlanger[i].rate = 0.5f;
+    trackFlanger[i].depth = 0.5f;
+    trackFlanger[i].feedback = 0.3f;
+    trackFlanger[i].writePos = 0;
+    trackFlanger[i].lfo.phase = 0;
+    trackFlanger[i].lfo.depth = 0.5f;
+    trackFlanger[i].lfo.waveform = LFO_SINE;
+    updateLFOPhaseInc(trackFlanger[i].lfo, 0.5f);
+    trackComp[i].active = false;
+    trackComp[i].threshold = 0.5f;
+    trackComp[i].ratio = 4.0f;
+    trackComp[i].attackCoeff = expf(-1.0f / (SAMPLE_RATE * 0.010f));
+    trackComp[i].releaseCoeff = expf(-1.0f / (SAMPLE_RATE * 0.100f));
+    trackComp[i].envelope = 0.0f;
+  }
+  Serial.printf("[AudioEngine] Per-track live FX buffers: flanger=%d bytes, input=%d bytes PSRAM\n",
+                MAX_AUDIO_TRACKS * TRACK_FLANGER_BUF * (int)sizeof(float),
+                MAX_AUDIO_TRACKS * DMA_BUF_LEN * (int)sizeof(float));
+  
   // Clear mix accumulator
   memset(mixAcc, 0, sizeof(mixAcc));
 }
@@ -174,6 +205,12 @@ AudioEngine::~AudioEngine() {
     free(delayBuffer);
     delayBuffer = nullptr;
   }
+  // Free per-track live FX buffers
+  for (int i = 0; i < MAX_AUDIO_TRACKS; i++) {
+    if (trackEchoBuffer[i]) { free(trackEchoBuffer[i]); trackEchoBuffer[i] = nullptr; }
+  }
+  if (trackFlangerBuffers) { free(trackFlangerBuffers); trackFlangerBuffers = nullptr; }
+  if (trackFxInputBuf) { free(trackFxInputBuf); trackFxInputBuf = nullptr; }
 }
 
 // ============= LFO Initialization =============
@@ -409,6 +446,18 @@ void IRAM_ATTR AudioEngine::fillBuffer(int16_t* buffer, size_t samples) {
   memset(buffer, 0, samples * sizeof(int16_t) * 2);
   memset(mixAcc, 0, samples * sizeof(int32_t) * 2);
   
+  // Determine which tracks have per-track live FX and clear their input buffers
+  bool trackHasLiveFx[MAX_AUDIO_TRACKS] = {};
+  if (trackFxInputBuf) {
+    for (int t = 0; t < MAX_AUDIO_TRACKS; t++) {
+      trackHasLiveFx[t] = (trackEcho[t].active && trackEchoBuffer[t]) ||
+                           trackFlanger[t].active || trackComp[t].active;
+      if (trackHasLiveFx[t]) {
+        memset(&trackFxInputBuf[t * DMA_BUF_LEN], 0, DMA_BUF_LEN * sizeof(float));
+      }
+    }
+  }
+  
   // Mix all active voices
   for (int v = 0; v < MAX_VOICES; v++) {
     if (!voices[v].active) continue;
@@ -631,9 +680,13 @@ void IRAM_ATTR AudioEngine::fillBuffer(int16_t* buffer, size_t samples) {
         }
       }
       
-      // Mix to accumulator (stereo - mono source)
-      mixAcc[i * 2] += filtered;
-      mixAcc[i * 2 + 1] += filtered;
+      // Mix to accumulator or per-track live FX input
+      if (!voice.isLivePad && voice.padIndex >= 0 && voice.padIndex < MAX_AUDIO_TRACKS && trackHasLiveFx[voice.padIndex]) {
+        trackFxInputBuf[voice.padIndex * DMA_BUF_LEN + i] += (float)filtered / 32768.0f;
+      } else {
+        mixAcc[i * 2] += filtered;
+        mixAcc[i * 2 + 1] += filtered;
+      }
       
       // Advance position (with pitch shift support)
       if (hasPitchShift) {
@@ -642,6 +695,24 @@ void IRAM_ATTR AudioEngine::fillBuffer(int16_t* buffer, size_t samples) {
       } else {
         voice.position++;
       }
+    }
+  }
+  
+  // Process per-track live FX (echo, flanger, compressor) - SLAVE controller
+  for (int t = 0; t < MAX_AUDIO_TRACKS; t++) {
+    bool hasEcho = trackEcho[t].active && trackEchoBuffer[t];
+    bool hasFlanger = trackFlanger[t].active && trackFlangerBuffers;
+    bool hasComp = trackComp[t].active;
+    if (!hasEcho && !hasFlanger && !hasComp) continue;
+    
+    for (size_t i = 0; i < samples; i++) {
+      float s = trackFxInputBuf ? trackFxInputBuf[t * DMA_BUF_LEN + i] : 0.0f;
+      if (hasEcho) s = processTrackEcho(t, s);
+      if (hasFlanger) s = processTrackFlanger(t, s);
+      if (hasComp) s = processTrackCompressor(t, s);
+      int32_t out = (int32_t)(s * 32768.0f);
+      mixAcc[i * 2] += out;
+      mixAcc[i * 2 + 1] += out;
     }
   }
   
@@ -1217,6 +1288,164 @@ void AudioEngine::setCompressorRelease(float ms) {
 void AudioEngine::setCompressorMakeupGain(float db) {
   float d = constrain(db, 0.0f, 24.0f);
   compressorParams.makeupGain = powf(10.0f, d / 20.0f);
+}
+
+// ============= PER-TRACK LIVE FX (SLAVE Controller) =============
+
+void AudioEngine::setTrackEcho(int track, bool active, float time, float feedback, float mix) {
+  if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+  
+  trackEcho[track].active = active;
+  if (active) {
+    // Allocate echo buffer in PSRAM if needed
+    if (!trackEchoBuffer[track]) {
+      trackEchoBuffer[track] = (float*)ps_calloc(TRACK_ECHO_SIZE, sizeof(float));
+      if (!trackEchoBuffer[track]) {
+        Serial.printf("[AudioEngine] ERROR: Failed to alloc echo buffer for track %d\n", track);
+        trackEcho[track].active = false;
+        return;
+      }
+      Serial.printf("[AudioEngine] Echo buffer allocated track %d (%d bytes PSRAM)\n",
+                    track, TRACK_ECHO_SIZE * (int)sizeof(float));
+    }
+    trackEcho[track].time = constrain(time, 10.0f, 200.0f);
+    trackEcho[track].feedback = constrain(feedback / 100.0f, 0.0f, 0.9f);
+    trackEcho[track].mix = constrain(mix / 100.0f, 0.0f, 1.0f);
+    trackEcho[track].delaySamples = (uint32_t)(trackEcho[track].time * SAMPLE_RATE / 1000.0f);
+    if (trackEcho[track].delaySamples >= TRACK_ECHO_SIZE) {
+      trackEcho[track].delaySamples = TRACK_ECHO_SIZE - 1;
+    }
+  } else {
+    // Free echo buffer when deactivated
+    if (trackEchoBuffer[track]) {
+      free(trackEchoBuffer[track]);
+      trackEchoBuffer[track] = nullptr;
+    }
+    trackEcho[track].writePos = 0;
+  }
+  Serial.printf("[AudioEngine] Track %d echo: %s (time:%.0fms fb:%.0f%% mix:%.0f%%)\n",
+                track, active ? "ON" : "OFF", time, feedback, mix);
+}
+
+void AudioEngine::setTrackFlanger(int track, bool active, float rate, float depth, float feedback) {
+  if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+  
+  trackFlanger[track].active = active;
+  if (active) {
+    trackFlanger[track].rate = constrain(rate / 100.0f, 0.05f, 5.0f);
+    trackFlanger[track].depth = constrain(depth / 100.0f, 0.0f, 1.0f);
+    trackFlanger[track].feedback = constrain(feedback / 100.0f, -0.9f, 0.9f);
+    trackFlanger[track].lfo.depth = trackFlanger[track].depth;
+    updateLFOPhaseInc(trackFlanger[track].lfo, trackFlanger[track].rate);
+    // Clear flanger buffer for this track
+    if (trackFlangerBuffers) {
+      memset(&trackFlangerBuffers[track * TRACK_FLANGER_BUF], 0, TRACK_FLANGER_BUF * sizeof(float));
+    }
+    trackFlanger[track].writePos = 0;
+  }
+  Serial.printf("[AudioEngine] Track %d flanger: %s (rate:%.2fHz depth:%.0f%% fb:%.0f%%)\n",
+                track, active ? "ON" : "OFF", rate / 100.0f, depth, feedback);
+}
+
+void AudioEngine::setTrackCompressor(int track, bool active, float threshold, float ratio) {
+  if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+  
+  trackComp[track].active = active;
+  if (active) {
+    float db = constrain(threshold, -60.0f, 0.0f);
+    trackComp[track].threshold = powf(10.0f, db / 20.0f);
+    trackComp[track].ratio = constrain(ratio, 1.0f, 20.0f);
+    trackComp[track].envelope = 0.0f;
+  }
+  Serial.printf("[AudioEngine] Track %d compressor: %s (thresh:%.1fdB ratio:%.1f)\n",
+                track, active ? "ON" : "OFF", threshold, ratio);
+}
+
+void AudioEngine::clearTrackLiveFX(int track) {
+  if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+  trackEcho[track].active = false;
+  if (trackEchoBuffer[track]) { free(trackEchoBuffer[track]); trackEchoBuffer[track] = nullptr; }
+  trackEcho[track].writePos = 0;
+  trackFlanger[track].active = false;
+  trackComp[track].active = false;
+  trackComp[track].envelope = 0.0f;
+  Serial.printf("[AudioEngine] Track %d live FX cleared\n", track);
+}
+
+bool AudioEngine::getTrackEchoActive(int track) const {
+  if (track < 0 || track >= MAX_AUDIO_TRACKS) return false;
+  return trackEcho[track].active;
+}
+
+bool AudioEngine::getTrackFlangerActive(int track) const {
+  if (track < 0 || track >= MAX_AUDIO_TRACKS) return false;
+  return trackFlanger[track].active;
+}
+
+bool AudioEngine::getTrackCompressorActive(int track) const {
+  if (track < 0 || track >= MAX_AUDIO_TRACKS) return false;
+  return trackComp[track].active;
+}
+
+// --- Per-track Echo Processing ---
+inline float AudioEngine::processTrackEcho(int track, float input) {
+  TrackEchoState& e = trackEcho[track];
+  float* buf = trackEchoBuffer[track];
+  if (!buf) return input;
+  
+  uint32_t readPos = (e.writePos + TRACK_ECHO_SIZE - e.delaySamples) % TRACK_ECHO_SIZE;
+  float delayed = buf[readPos];
+  
+  float writeVal = input + delayed * e.feedback;
+  writeVal = writeVal / (1.0f + fabsf(writeVal)); // Prevent feedback runaway
+  buf[e.writePos] = writeVal;
+  e.writePos = (e.writePos + 1) % TRACK_ECHO_SIZE;
+  
+  return input * (1.0f - e.mix) + delayed * e.mix;
+}
+
+// --- Per-track Flanger Processing ---
+inline float AudioEngine::processTrackFlanger(int track, float input) {
+  TrackFlangerState& f = trackFlanger[track];
+  float* buf = &trackFlangerBuffers[track * TRACK_FLANGER_BUF];
+  
+  buf[f.writePos] = input;
+  
+  float lfoVal = (lfoTick(f.lfo) + 1.0f) * 0.5f;
+  float delaySamplesF = lfoVal * f.depth * 120.0f + 1.0f;
+  
+  uint32_t delayInt = (uint32_t)delaySamplesF;
+  float frac = delaySamplesF - (float)delayInt;
+  
+  uint32_t readPos1 = (f.writePos + TRACK_FLANGER_BUF - delayInt) % TRACK_FLANGER_BUF;
+  uint32_t readPos2 = (readPos1 + TRACK_FLANGER_BUF - 1) % TRACK_FLANGER_BUF;
+  
+  float delayed = buf[readPos1] * (1.0f - frac) + buf[readPos2] * frac;
+  buf[f.writePos] += delayed * f.feedback;
+  
+  f.writePos = (f.writePos + 1) % TRACK_FLANGER_BUF;
+  
+  return input * 0.5f + delayed * 0.5f;
+}
+
+// --- Per-track Compressor Processing ---
+inline float AudioEngine::processTrackCompressor(int track, float input) {
+  TrackCompressorState& c = trackComp[track];
+  
+  float absInput = fabsf(input);
+  if (absInput > c.envelope) {
+    c.envelope = c.attackCoeff * c.envelope + (1.0f - c.attackCoeff) * absInput;
+  } else {
+    c.envelope = c.releaseCoeff * c.envelope + (1.0f - c.releaseCoeff) * absInput;
+  }
+  
+  float gain = 1.0f;
+  if (c.envelope > c.threshold) {
+    float excess = c.envelope / c.threshold;
+    gain = c.threshold * powf(excess, 1.0f / c.ratio - 1.0f);
+  }
+  
+  return input * gain;
 }
 
 // ============= PER-TRACK FILTER MANAGEMENT =============
