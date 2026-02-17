@@ -648,8 +648,155 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   
   // Endpoint para obtener forma de onda de un sample cargado (para visualizador)
   server->on("/api/waveform", HTTP_GET, [](AsyncWebServerRequest *request){
+    // Mode 1: waveform from loaded pad (?pad=N)
+    // Mode 2: waveform from file on LittleFS (?file=/family/name.wav)
+    
+    int points = 200;
+    if (request->hasParam("points")) {
+      points = request->getParam("points")->value().toInt();
+      if (points < 20) points = 20;
+      if (points > 400) points = 400;
+    }
+    
+    // === MODE 2: From file path (for preview before loading) ===
+    if (request->hasParam("file")) {
+      String filePath = request->getParam("file")->value();
+      if (!filePath.startsWith("/")) filePath = "/" + filePath;
+      
+      File file = LittleFS.open(filePath, "r");
+      if (!file) {
+        request->send(404, "application/json", "{\"error\":\"File not found\"}");
+        return;
+      }
+      
+      size_t fileSize = file.size();
+      
+      // Parse WAV header to find data chunk
+      uint32_t dataOffset = 0;
+      uint32_t dataSize = 0;
+      uint16_t numChannels = 1;
+      uint16_t bitsPerSample = 16;
+      uint32_t sampleRate = 44100;
+      
+      String fname = filePath;
+      fname.toLowerCase();
+      
+      if (fname.endsWith(".wav")) {
+        // Read WAV header
+        uint8_t header[44];
+        file.seek(0);
+        if (file.read(header, 44) == 44 && memcmp(header, "RIFF", 4) == 0) {
+          numChannels = header[22] | (header[23] << 8);
+          sampleRate = header[24] | (header[25] << 8) | (header[26] << 16) | (header[27] << 24);
+          bitsPerSample = header[34] | (header[35] << 8);
+          
+          // Find data chunk
+          file.seek(36);
+          while (file.available() >= 8) {
+            char chunkId[4];
+            uint32_t chunkSize;
+            if (file.read((uint8_t*)chunkId, 4) != 4) break;
+            if (file.read((uint8_t*)&chunkSize, 4) != 4) break;
+            if (memcmp(chunkId, "data", 4) == 0) {
+              dataOffset = file.position();
+              dataSize = chunkSize;
+              break;
+            }
+            file.seek(file.position() + chunkSize);
+          }
+        }
+        if (dataSize == 0) {
+          file.close();
+          request->send(400, "application/json", "{\"error\":\"Invalid WAV\"}");
+          return;
+        }
+      } else {
+        // RAW file - whole file is data
+        dataOffset = 0;
+        dataSize = fileSize;
+      }
+      
+      uint32_t bytesPerSample = bitsPerSample / 8;
+      uint32_t totalSamples = dataSize / bytesPerSample;
+      if (numChannels == 2) totalSamples /= 2;
+      
+      uint32_t samplesPerPoint = totalSamples / points;
+      if (samplesPerPoint == 0) samplesPerPoint = 1;
+      int actualPoints = totalSamples / samplesPerPoint;
+      if (actualPoints > points) actualPoints = points;
+      
+      float durationMs = (totalSamples * 1000.0f) / sampleRate;
+      
+      // Extract filename from path
+      String name = filePath;
+      int lastSlash = name.lastIndexOf('/');
+      if (lastSlash >= 0) name = name.substring(lastSlash + 1);
+      
+      // Build response while reading file in chunks
+      String json = "{\"file\":\"";
+      json += name;
+      json += "\",\"samples\":";
+      json += totalSamples;
+      json += ",\"duration\":";
+      json += String(durationMs, 1);
+      json += ",\"rate\":";
+      json += sampleRate;
+      json += ",\"points\":";
+      json += actualPoints;
+      json += ",\"peaks\":[";
+      
+      // Read peaks in small chunks to minimize memory
+      const int CHUNK_SAMPLES = 512;
+      int16_t chunkBuf[CHUNK_SAMPLES * 2]; // *2 for stereo
+      
+      file.seek(dataOffset);
+      
+      for (int p = 0; p < actualPoints; p++) {
+        int16_t maxVal = 0, minVal = 0;
+        uint32_t remaining = samplesPerPoint;
+        
+        while (remaining > 0) {
+          uint32_t toRead = remaining;
+          if (toRead > CHUNK_SAMPLES) toRead = CHUNK_SAMPLES;
+          
+          size_t bytesToRead = toRead * bytesPerSample * numChannels;
+          size_t bytesRead = file.read((uint8_t*)chunkBuf, bytesToRead);
+          if (bytesRead == 0) break;
+          
+          uint32_t samplesRead = bytesRead / (bytesPerSample * numChannels);
+          
+          for (uint32_t j = 0; j < samplesRead; j++) {
+            int16_t s;
+            if (numChannels == 2) {
+              s = (chunkBuf[j * 2] / 2) + (chunkBuf[j * 2 + 1] / 2);
+            } else {
+              s = chunkBuf[j];
+            }
+            if (s > maxVal) maxVal = s;
+            if (s < minVal) minVal = s;
+          }
+          remaining -= samplesRead;
+        }
+        
+        if (p > 0) json += ",";
+        json += "[";
+        json += (int)(maxVal >> 8);
+        json += ",";
+        json += (int)(minVal >> 8);
+        json += "]";
+        
+        if (p % 10 == 9) yield();
+      }
+      json += "]}";
+      
+      file.close();
+      request->send(200, "application/json", json);
+      return;
+    }
+    
+    // === MODE 1: From loaded pad ===
     if (!request->hasParam("pad")) {
-      request->send(400, "application/json", "{\"error\":\"Missing pad parameter\"}");
+      request->send(400, "application/json", "{\"error\":\"Missing pad or file parameter\"}");
       return;
     }
     int pad = request->getParam("pad")->value().toInt();
@@ -662,12 +809,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
       return;
     }
     
-    int points = 200; // Default resolution
-    if (request->hasParam("points")) {
-      points = request->getParam("points")->value().toInt();
-      if (points < 20) points = 20;
-      if (points > 400) points = 400;
-    }
+    // 'points' already declared at top of lambda
     
     // Get waveform peaks (pairs: max, min per point)
     int8_t* peaks = (int8_t*)malloc(points * 2);
@@ -1322,11 +1464,19 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int padIndex = doc["pad"];
     if (padIndex < 0 || padIndex >= 16) return;
     
+    float trimStart = doc.containsKey("trimStart") ? (float)doc["trimStart"] : 0.0f;
+    float trimEnd = doc.containsKey("trimEnd") ? (float)doc["trimEnd"] : 1.0f;
+    
     String fullPath = String("/") + String(family) + String("/") + String(filename);
     
     yield();
     
     if (sampleManager.loadSample(fullPath.c_str(), padIndex)) {
+      // Apply trim if specified (not default 0-1)
+      if (trimStart > 0.001f || trimEnd < 0.999f) {
+        sampleManager.trimSample(padIndex, trimStart, trimEnd);
+      }
+      
       StaticJsonDocument<256> responseDoc;
       responseDoc["type"] = "sampleLoaded";
       responseDoc["pad"] = padIndex;
@@ -1337,6 +1487,24 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       String output;
       serializeJson(responseDoc, output);
       if (ws) ws->textAll(output);
+    }
+  }
+  // === Trim already-loaded sample ===
+  else if (cmd == "trimSample") {
+    int padIndex = doc["pad"];
+    float trimStart = doc.containsKey("trimStart") ? (float)doc["trimStart"] : 0.0f;
+    float trimEnd = doc.containsKey("trimEnd") ? (float)doc["trimEnd"] : 1.0f;
+    if (padIndex >= 0 && padIndex < MAX_SAMPLES && sampleManager.isSampleLoaded(padIndex)) {
+      if (sampleManager.trimSample(padIndex, trimStart, trimEnd)) {
+        StaticJsonDocument<256> responseDoc;
+        responseDoc["type"] = "sampleTrimmed";
+        responseDoc["pad"] = padIndex;
+        responseDoc["size"] = sampleManager.getSampleLength(padIndex) * 2;
+        responseDoc["samples"] = sampleManager.getSampleLength(padIndex);
+        String output;
+        serializeJson(responseDoc, output);
+        if (ws) ws->textAll(output);
+      }
     }
   }
   // === XTRA PADS: list samples from /xtra folder ===

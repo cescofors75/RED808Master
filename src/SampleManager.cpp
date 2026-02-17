@@ -260,6 +260,41 @@ bool SampleManager::unloadSample(int padIndex) {
   return true;
 }
 
+bool SampleManager::trimSample(int padIndex, float startNorm, float endNorm) {
+  if (padIndex < 0 || padIndex >= MAX_SAMPLES || !sampleBuffers[padIndex]) return false;
+  if (startNorm < 0.0f) startNorm = 0.0f;
+  if (endNorm > 1.0f) endNorm = 1.0f;
+  if (startNorm >= endNorm) return false;
+  
+  uint32_t origLen = sampleLengths[padIndex];
+  uint32_t newStart = (uint32_t)(startNorm * origLen);
+  uint32_t newEnd = (uint32_t)(endNorm * origLen);
+  uint32_t newLen = newEnd - newStart;
+  if (newLen < 64) return false;  // Minimum sample length
+  
+  // Allocate new buffer
+  int16_t* newBuf = (int16_t*)ps_malloc(newLen * sizeof(int16_t));
+  if (!newBuf) {
+    Serial.println("[Trim] Failed to allocate trimmed buffer");
+    return false;
+  }
+  
+  // Copy trimmed region
+  memcpy(newBuf, sampleBuffers[padIndex] + newStart, newLen * sizeof(int16_t));
+  
+  // Free old buffer and replace
+  free(sampleBuffers[padIndex]);
+  sampleBuffers[padIndex] = newBuf;
+  sampleLengths[padIndex] = newLen;
+  
+  // Update audio engine
+  audioEngine.setSampleBuffer(padIndex, newBuf, newLen);
+  
+  Serial.printf("[Trim] Pad %d: %u -> %u samples (%.1f%% - %.1f%%)\n",
+                padIndex, origLen, newLen, startNorm * 100, endNorm * 100);
+  return true;
+}
+
 void SampleManager::unloadAll() {
   for (int i = 0; i < MAX_SAMPLES; i++) {
     if (sampleBuffers[i] != nullptr) {

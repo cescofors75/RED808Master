@@ -8594,21 +8594,115 @@ body.midi-dialog-open .midi-import-overlay * {
   letter-spacing: 1px;
   margin-bottom: 6px;
 }
+.waveform-canvas-wrapper {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+  max-width: 400px;
+}
 .sample-preview-canvas {
   width: 100%;
-  max-width: 320px;
-  height: 80px;
+  height: 100px;
   border-radius: 4px;
   border: 1px solid rgba(0,255,136,0.15);
   display: block;
   margin: 0 auto;
   image-rendering: pixelated;
+  cursor: crosshair;
+}
+.waveform-marker {
+  position: absolute;
+  top: 0;
+  width: 16px;
+  height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: bold;
+  font-family: monospace;
+  cursor: ew-resize;
+  z-index: 10;
+  user-select: none;
+  touch-action: none;
+  padding-top: 2px;
+}
+.waveform-marker-start {
+  left: -8px;
+  color: #ff3366;
+  border-left: 2px solid #ff3366;
+  background: linear-gradient(to right, rgba(255,51,102,0.3), transparent);
+}
+.waveform-marker-end {
+  left: calc(100% - 8px);
+  color: #ff6633;
+  border-right: 2px solid #ff6633;
+  background: linear-gradient(to left, rgba(255,102,51,0.3), transparent);
+}
+.waveform-marker.dragging {
+  background: rgba(255,255,255,0.15);
+}
+.waveform-marker:hover {
+  background: rgba(255,255,255,0.1);
+}
+.waveform-trim-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+  gap: 8px;
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.waveform-trim-value {
+  font-size: 10px;
+  font-family: monospace;
+  color: #ff3366;
+  min-width: 65px;
+}
+.waveform-trim-value:last-child {
+  color: #ff6633;
+  text-align: right;
 }
 .waveform-preview-info {
   font-size: 10px;
   color: rgba(255,255,255,0.4);
-  margin-top: 4px;
   font-family: monospace;
+  flex: 1;
+  text-align: center;
+}
+.sample-modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  justify-content: center;
+}
+.btn-trim-load {
+  background: linear-gradient(135deg, #ff3366, #ff6633);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  transition: all 0.2s ease;
+}
+.btn-trim-load:hover:not(:disabled) {
+  transform: scale(1.03);
+  box-shadow: 0 0 12px rgba(255,51,102,0.5);
+}
+.btn-trim-load:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.sample-item.selected {
+  background: rgba(0,255,136,0.15) !important;
+  border-color: #00ff88 !important;
+  box-shadow: 0 0 8px rgba(0,255,136,0.2);
 }
 .waveform-canvas {
   border-radius: 3px;

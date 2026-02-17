@@ -41,6 +41,7 @@ public:
   
   // Sample loading
   bool loadSample(const char* filename, int padIndex);
+  bool trimSample(int padIndex, float startNorm, float endNorm);
   bool unloadSample(int padIndex);
   void unloadAll();
   

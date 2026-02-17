@@ -3288,18 +3288,50 @@ function displaySampleList(data) {
             <h3>Select ${family} Sample for Pad ${padIndex + 1}</h3>
             <div class="sample-modal-waveform">
                 <div class="waveform-preview-label">📊 FORMA DE ONDA</div>
-                <canvas id="samplePreviewWaveform" class="sample-preview-canvas" width="320" height="80"></canvas>
-                <div class="waveform-preview-info" id="samplePreviewInfo">Selecciona un sample para previsualizar</div>
+                <div class="waveform-canvas-wrapper" id="waveformCanvasWrapper">
+                    <canvas id="samplePreviewWaveform" class="sample-preview-canvas" width="400" height="100"></canvas>
+                    <div class="waveform-marker waveform-marker-start" id="waveformMarkerStart" title="Arrastra para Start">S</div>
+                    <div class="waveform-marker waveform-marker-end" id="waveformMarkerEnd" title="Arrastra para End">E</div>
+                </div>
+                <div class="waveform-trim-controls">
+                    <span class="waveform-trim-value" id="trimStartValue">Start: 0%</span>
+                    <span class="waveform-preview-info" id="samplePreviewInfo">Selecciona un sample</span>
+                    <span class="waveform-trim-value" id="trimEndValue">End: 100%</span>
+                </div>
             </div>
             <div class="sample-list"></div>
-            <button class="btn-close-modal">Close</button>
+            <div class="sample-modal-actions">
+                <button class="btn-trim-load" id="btnTrimLoad" disabled>✂️ TRIM & LOAD</button>
+                <button class="btn-close-modal">Cerrar</button>
+            </div>
         </div>
     `;
     
+    // Waveform state for this modal
+    const wfState = {
+        startNorm: 0, endNorm: 1,
+        selectedFile: null, selectedFamily: family,
+        peaks: null, padIndex: padIndex
+    };
+    
     // Show current pad waveform if already loaded
-    if (typeof previewSampleWaveform === 'function') {
-        setTimeout(() => previewSampleWaveform(padIndex), 100);
+    const previewCanvas = modal.querySelector('#samplePreviewWaveform');
+    if (typeof SampleWaveform !== 'undefined') {
+        SampleWaveform.fetchWaveform(padIndex).then(data => {
+            if (data && data.peaks) {
+                wfState.peaks = data.peaks;
+                _drawWaveformWithMarkers(previewCanvas, wfState);
+                const info = modal.querySelector('#samplePreviewInfo');
+                if (info && data.duration) {
+                    const dur = (data.duration / 1000).toFixed(2);
+                    info.textContent = `${data.name || ''} · ${dur}s`;
+                }
+            }
+        });
     }
+    
+    // Setup draggable S/E markers
+    _setupWaveformMarkers(modal, previewCanvas, wfState);
     
     const sampleList = modal.querySelector('.sample-list');
     
@@ -3312,21 +3344,50 @@ function displaySampleList(data) {
             <span class="sample-size">${sizeKB} KB</span>
         `;
         sampleItem.addEventListener('click', () => {
-            loadSampleToPad(padIndex, family, sample.name);
-            const modalToRemove = modal;
-            if (modalToRemove && modalToRemove.parentNode) {
-                modalToRemove.parentNode.removeChild(modalToRemove);
-            }
-            sampleSelectorContext = null;
+            // Mark selected
+            sampleList.querySelectorAll('.sample-item').forEach(s => s.classList.remove('selected'));
+            sampleItem.classList.add('selected');
+            
+            // Fetch waveform from file
+            wfState.selectedFile = sample.name;
+            wfState.startNorm = 0;
+            wfState.endNorm = 1;
+            _updateTrimLabels(modal, wfState);
+            
+            const filePath = `/${family}/${sample.name}`;
+            const info = modal.querySelector('#samplePreviewInfo');
+            if (info) info.textContent = 'Cargando forma de onda...';
+            
+            fetch(`/api/waveform?file=${encodeURIComponent(filePath)}&points=200`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data && data.peaks) {
+                        wfState.peaks = data.peaks;
+                        _drawWaveformWithMarkers(previewCanvas, wfState);
+                        if (info) {
+                            const dur = (data.duration / 1000).toFixed(2);
+                            info.textContent = `${sample.name} · ${dur}s · ${data.samples} samples`;
+                        }
+                        modal.querySelector('#btnTrimLoad').disabled = false;
+                    }
+                })
+                .catch(() => {
+                    if (info) info.textContent = 'Error cargando waveform';
+                });
         });
         sampleList.appendChild(sampleItem);
     });
     
+    // Trim & Load button
+    modal.querySelector('#btnTrimLoad').addEventListener('click', () => {
+        if (!wfState.selectedFile) return;
+        loadSampleToPad(padIndex, family, wfState.selectedFile, false, wfState.startNorm, wfState.endNorm);
+        modal.parentNode.removeChild(modal);
+        sampleSelectorContext = null;
+    });
+    
     modal.querySelector('.btn-close-modal').addEventListener('click', () => {
-        const modalToRemove = modal;
-        if (modalToRemove && modalToRemove.parentNode) {
-            modalToRemove.parentNode.removeChild(modalToRemove);
-        }
+        modal.parentNode.removeChild(modal);
         sampleSelectorContext = null;
     });
     
@@ -3583,7 +3644,7 @@ function auditionSample(family, filename) {
     loadSampleToPad(padIndex, family, filename, true);
 }
 
-function loadSampleToPad(padIndex, family, filename, autoPlay = false) {
+function loadSampleToPad(padIndex, family, filename, autoPlay = false, trimStart = 0, trimEnd = 1) {
     if (autoPlay) {
         pendingAutoPlayPad = padIndex;
         setTimeout(() => {
@@ -3592,12 +3653,21 @@ function loadSampleToPad(padIndex, family, filename, autoPlay = false) {
             }
         }, 350);
     }
-    sendWebSocket({
+    const msg = {
         cmd: 'loadSample',
         family: family,
         filename: filename,
         pad: padIndex
-    });
+    };
+    if (trimStart > 0.001 || trimEnd < 0.999) {
+        msg.trimStart = trimStart;
+        msg.trimEnd = trimEnd;
+    }
+    sendWebSocket(msg);
+    // Invalidate waveform cache for this pad
+    if (typeof SampleWaveform !== 'undefined') {
+        SampleWaveform.clearCache(padIndex);
+    }
 }
 
 function updatePadInfo(data) {
@@ -5521,3 +5591,108 @@ function handleSDFileList(data) {
 }
 
 window.initSDCard = initSDCard;
+
+// ============================================
+// WAVEFORM MARKER HELPERS (drag start/end)
+// ============================================
+
+function _drawWaveformWithMarkers(canvas, state) {
+    if (!canvas || !state.peaks) return;
+    const color = (state.padIndex < 16) ? WaveformRenderer.trackColors[state.padIndex] : '#00ff88';
+    WaveformRenderer.drawStatic(canvas, state.peaks, {
+        color: color,
+        startPoint: state.startNorm,
+        endPoint: state.endNorm,
+        accentColor: '#ff3366'
+    });
+}
+
+function _updateTrimLabels(modal, state) {
+    const startLabel = modal.querySelector('#trimStartValue');
+    const endLabel = modal.querySelector('#trimEndValue');
+    if (startLabel) startLabel.textContent = `Start: ${Math.round(state.startNorm * 100)}%`;
+    if (endLabel) endLabel.textContent = `End: ${Math.round(state.endNorm * 100)}%`;
+    
+    // Reset markers position
+    const wrapper = modal.querySelector('#waveformCanvasWrapper');
+    const markerS = modal.querySelector('#waveformMarkerStart');
+    const markerE = modal.querySelector('#waveformMarkerEnd');
+    if (wrapper && markerS && markerE) {
+        const w = wrapper.offsetWidth;
+        markerS.style.left = (state.startNorm * w - 8) + 'px';
+        markerE.style.left = (state.endNorm * w - 8) + 'px';
+    }
+}
+
+function _setupWaveformMarkers(modal, canvas, state) {
+    const wrapper = modal.querySelector('#waveformCanvasWrapper');
+    const markerS = modal.querySelector('#waveformMarkerStart');
+    const markerE = modal.querySelector('#waveformMarkerEnd');
+    if (!wrapper || !markerS || !markerE) return;
+    
+    // Function to get normalized X position from pointer event
+    function getNormX(e) {
+        const rect = wrapper.getBoundingClientRect();
+        let clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        let x = (clientX - rect.left) / rect.width;
+        return Math.max(0, Math.min(1, x));
+    }
+    
+    function makeDraggable(marker, isStart) {
+        let dragging = false;
+        
+        function onStart(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            dragging = true;
+            marker.classList.add('dragging');
+        }
+        
+        function onMove(e) {
+            if (!dragging) return;
+            e.preventDefault();
+            const norm = getNormX(e);
+            if (isStart) {
+                state.startNorm = Math.min(norm, state.endNorm - 0.02);
+            } else {
+                state.endNorm = Math.max(norm, state.startNorm + 0.02);
+            }
+            _updateTrimLabels(modal, state);
+            _drawWaveformWithMarkers(canvas, state);
+        }
+        
+        function onEnd() {
+            if (!dragging) return;
+            dragging = false;
+            marker.classList.remove('dragging');
+        }
+        
+        marker.addEventListener('mousedown', onStart);
+        marker.addEventListener('touchstart', onStart, { passive: false });
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('mouseup', onEnd);
+        document.addEventListener('touchend', onEnd);
+    }
+    
+    makeDraggable(markerS, true);
+    makeDraggable(markerE, false);
+    
+    // Click on canvas to set nearest marker
+    canvas.addEventListener('click', (e) => {
+        const rect = wrapper.getBoundingClientRect();
+        const norm = (e.clientX - rect.left) / rect.width;
+        const distStart = Math.abs(norm - state.startNorm);
+        const distEnd = Math.abs(norm - state.endNorm);
+        if (distStart < distEnd) {
+            state.startNorm = Math.min(norm, state.endNorm - 0.02);
+        } else {
+            state.endNorm = Math.max(norm, state.startNorm + 0.02);
+        }
+        _updateTrimLabels(modal, state);
+        _drawWaveformWithMarkers(canvas, state);
+    });
+    
+    // Initial marker positions
+    setTimeout(() => _updateTrimLabels(modal, state), 50);
+}
