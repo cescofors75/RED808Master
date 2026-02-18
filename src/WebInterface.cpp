@@ -565,7 +565,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   
   // MIDI Mapping endpoints
   server->on("/api/midi/mapping", HTTP_GET, [this](AsyncWebServerRequest *request){
-    StaticJsonDocument<1024> doc;
+    StaticJsonDocument<2048> doc;
     JsonArray mappings = doc.createNestedArray("mappings");
     
     int count = 0;
@@ -597,7 +597,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
       if (doc.containsKey("note") && doc.containsKey("pad")) {
         uint8_t note = doc["note"];
         int8_t pad = doc["pad"];
-        midiController->setNoteMapping(note, pad);
+        midiController->setPadMapping(pad, note);  // busca por pad, actualiza nota
         request->send(200, "application/json", "{\"success\":true}");
       } else if (doc.containsKey("reset") && doc["reset"] == true) {
         midiController->resetToDefaultMapping();

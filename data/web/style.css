@@ -4666,46 +4666,87 @@ body.mono-mode .info-item {
     display: flex;
     align-items: center;
     gap: 7px;
+    flex: 1;
+    min-width: 0;
 }
 
-.note-input {
-    width: 52px;
-    background: rgba(0,0,0,0.5);
-    border: 1px solid rgba(0, 170, 255, 0.35);
-    color: #fff;
+/* Slider range */
+.note-input[type="range"] {
+    flex: 1;
+    min-width: 0;
+    height: 4px;
+    accent-color: #00aaff;
+    cursor: not-allowed;
+    opacity: 0.5;
+    transition: opacity 0.2s, accent-color 0.2s;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(0,170,255,0.2);
+    border-radius: 2px;
+    outline: none;
+}
+.note-input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #00aaff;
+    cursor: not-allowed;
+    box-shadow: 0 0 6px rgba(0,170,255,0.6);
+    transition: background 0.2s, box-shadow 0.2s;
+}
+.note-input[type="range"]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #00aaff;
+    border: none;
+    cursor: not-allowed;
+    box-shadow: 0 0 6px rgba(0,170,255,0.6);
+}
+
+/* Slider en modo edición */
+.note-input[type="range"].editing {
+    cursor: pointer;
+    opacity: 1;
+    accent-color: #ff9900;
+    background: rgba(255,153,0,0.25);
+}
+.note-input[type="range"].editing::-webkit-slider-thumb {
+    background: #ff9900;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(255,153,0,0.8);
+}
+.note-input[type="range"].editing::-moz-range-thumb {
+    background: #ff9900;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(255,153,0,0.8);
+}
+
+/* Valor numérico de la nota */
+.note-value {
+    min-width: 26px;
+    text-align: center;
     font-weight: 700;
     font-size: 0.9em;
-    padding: 4px 6px;
-    border-radius: 5px;
-    text-align: center;
-    -moz-appearance: textfield;
+    color: #00aaff;
+    background: rgba(0,170,255,0.12);
+    border: 1px solid rgba(0,170,255,0.25);
+    border-radius: 4px;
+    padding: 1px 4px;
+    transition: color 0.2s, background 0.2s, border-color 0.2s;
 }
-.note-input::-webkit-outer-spin-button,
-.note-input::-webkit-inner-spin-button { -webkit-appearance: none; }
-.note-input:disabled {
-    opacity: 0.7;
-    cursor: default;
-}
-.note-input.editing {
-    background: rgba(255, 102, 0, 0.2);
-    border-color: rgba(255, 153, 0, 0.7);
-    cursor: text;
-}
-.note-input.editing:focus {
-    outline: none;
-    border-color: #ff9900;
-    box-shadow: 0 0 10px rgba(255,153,0,0.5);
-}
-.note-input.error {
-    border-color: #ff3333;
-    background: rgba(255, 0, 0, 0.2);
-    animation: shake 0.3s;
+.mapping-grid.editing .note-value {
+    color: #ff9900;
+    background: rgba(255,153,0,0.15);
+    border-color: rgba(255,153,0,0.35);
 }
 
 .note-name {
-    color: rgba(255,255,255,0.55);
-    font-size: 0.78em;
-    min-width: 30px;
+    color: rgba(255,255,255,0.5);
+    font-size: 0.75em;
+    min-width: 28px;
+    white-space: nowrap;
 }
 
 /* Velocity bar */

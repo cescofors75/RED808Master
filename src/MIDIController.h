@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include "usb/usb_host.h"
 #include <functional>
+#include <Preferences.h>
 
 // MIDI Message Types
 #define MIDI_NOTE_OFF 0x80
@@ -66,10 +67,13 @@ public:
 
   // MIDI Note Mapping
   void setNoteMapping(uint8_t note, int8_t pad);  // Mapear nota → pad
+  void setPadMapping(int8_t pad, uint8_t newNote); // Cambiar nota de un pad (busca por pad)
   int8_t getMappedPad(uint8_t note) const;        // Obtener pad de una nota
   void clearMapping(uint8_t note);                 // Eliminar mapeo
   void resetToDefaultMapping();                    // Resetear a mapeo por defecto (36-43)
   const MIDINoteMapping* getAllMappings(int& count) const;  // Obtener todos los mapeos
+  void saveMappings();                             // Guardar mapeo en NVS
+  void loadMappings();                             // Cargar mapeo desde NVS
 
   // Get recent messages (for web display)
   void getRecentMessages(MIDIMessage* buffer, size_t& count, size_t maxCount);

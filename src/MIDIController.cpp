@@ -1,4 +1,5 @@
 #include "MIDIController.h"
+#include <Preferences.h>
 
 // Static callback wrapper
 static MIDIController* s_midiInstance = nullptr;
@@ -35,8 +36,9 @@ MIDIController::MIDIController()
   deviceInfo.productId = 0;
   deviceInfo.connectTime = 0;
   
-  // Inicializar mapeo por defecto (36-43 → pads 0-7)
+  // Cargar mapeo desde NVS; si no existe, usar mapa GM por defecto
   resetToDefaultMapping();
+  loadMappings();
   
   scanEnabled = false;  // Desactivado por defecto, se activa desde la web
   
@@ -562,6 +564,21 @@ void MIDIController::readMidiData() {
 // MIDI NOTE MAPPING FUNCTIONS
 // ========================================
 
+void MIDIController::setPadMapping(int8_t pad, uint8_t newNote) {
+  // Buscar en los primeros 16 (mapeos principales) el que tenga este pad
+  for (int i = 0; i < mappingCount && i < 16; i++) {
+    if (noteMappings[i].pad == pad) {
+      noteMappings[i].note    = newNote;
+      noteMappings[i].enabled = true;
+      Serial.printf("[MIDI Mapping] Pad %d → Note %d\n", pad, newNote);
+      saveMappings();
+      return;
+    }
+  }
+  // Si no estaba en los primeros 16, añadir nuevo
+  setNoteMapping(newNote, pad);
+}
+
 void MIDIController::setNoteMapping(uint8_t note, int8_t pad) {
   // Buscar si ya existe mapeo para esta nota
   for (int i = 0; i < mappingCount; i++) {
@@ -569,6 +586,7 @@ void MIDIController::setNoteMapping(uint8_t note, int8_t pad) {
       noteMappings[i].pad = pad;
       noteMappings[i].enabled = (pad >= 0);
       Serial.printf("[MIDI Mapping] Updated: Note %d → Pad %d\n", note, pad);
+      saveMappings();
       return;
     }
   }
@@ -580,6 +598,7 @@ void MIDIController::setNoteMapping(uint8_t note, int8_t pad) {
     noteMappings[mappingCount].enabled = (pad >= 0);
     mappingCount++;
     Serial.printf("[MIDI Mapping] Added: Note %d → Pad %d\n", note, pad);
+    saveMappings();
   } else {
     Serial.println("[MIDI Mapping] ⚠️ Maximum mappings reached!");
   }
@@ -666,6 +685,52 @@ void MIDIController::resetToDefaultMapping() {
   Serial.println("[MIDI Mapping] Reset to GM Drum Map (16 pads)");
   Serial.println("  BD=36, SD=38, CH=42, OH=46, CY=49, CP=39, RS=37, CB=56");
   Serial.println("  LT=41, MT=47, HT=50, MA=70, CL=75, HC=62, MC=63, LC=64");
+  saveMappings();
+}
+
+void MIDIController::saveMappings() {
+  Preferences prefs;
+  prefs.begin("midi_map", false);
+  prefs.putInt("count", mappingCount);
+  for (int i = 0; i < mappingCount; i++) {
+    char keyNote[12], keyPad[12], keyEn[12];
+    snprintf(keyNote, sizeof(keyNote), "n%d", i);
+    snprintf(keyPad,  sizeof(keyPad),  "p%d", i);
+    snprintf(keyEn,   sizeof(keyEn),   "e%d", i);
+    prefs.putUChar(keyNote, noteMappings[i].note);
+    prefs.putChar (keyPad,  noteMappings[i].pad);
+    prefs.putBool (keyEn,   noteMappings[i].enabled);
+  }
+  prefs.end();
+  Serial.printf("[MIDI Mapping] Saved %d mappings to NVS\n", mappingCount);
+}
+
+void MIDIController::loadMappings() {
+  Preferences prefs;
+  prefs.begin("midi_map", true);  // read-only
+  int count = prefs.getInt("count", -1);
+  prefs.end();
+
+  if (count <= 0 || count > MAX_MIDI_MAPPINGS) {
+    Serial.println("[MIDI Mapping] No saved mapping found, using GM defaults");
+    return;  // Mantener el GM por defecto ya cargado
+  }
+
+  Preferences prefs2;
+  prefs2.begin("midi_map", true);
+  mappingCount = 0;
+  for (int i = 0; i < count; i++) {
+    char keyNote[12], keyPad[12], keyEn[12];
+    snprintf(keyNote, sizeof(keyNote), "n%d", i);
+    snprintf(keyPad,  sizeof(keyPad),  "p%d", i);
+    snprintf(keyEn,   sizeof(keyEn),   "e%d", i);
+    noteMappings[i].note    = prefs2.getUChar(keyNote, 0);
+    noteMappings[i].pad     = prefs2.getChar (keyPad,  -1);
+    noteMappings[i].enabled = prefs2.getBool (keyEn,   false);
+    mappingCount++;
+  }
+  prefs2.end();
+  Serial.printf("[MIDI Mapping] Loaded %d mappings from NVS\n", mappingCount);
 }
 
 const MIDINoteMapping* MIDIController::getAllMappings(int& count) const {

@@ -4367,18 +4367,24 @@ async function loadMIDIMapping() {
                 const note = padNoteMap[pad];
                 if (note === undefined) continue;
                 
-                const input = item.querySelector('.note-input');
-                if (input) {
-                    input.value = note;
-                    item.dataset.note = note;
-                }
-                const nameEl = item.querySelector('.note-name');
-                if (nameEl) nameEl.textContent = getNoteNameFromNumber(note);
+                const input   = item.querySelector('.note-input');
+                const valueEl = item.querySelector('.note-value');
+                const nameEl  = item.querySelector('.note-name');
+                try {
+                    if (input)   { input.value = note; item.dataset.note = note; }
+                    if (valueEl) valueEl.textContent = note;
+                    if (nameEl)  nameEl.textContent  = getNoteNameFromNumber(note);
+                } catch(ex) { /* elemento no visible aún */ }
             }
         }
     } catch (error) {
         console.error('[MIDI Mapping] Error loading:', error);
     }
+}
+
+// Bloquear atajos globales cuando el slider de mapping tiene el foco
+function stopKeyPropForSlider(e) {
+    e.stopPropagation();
 }
 
 function toggleMappingEdit() {
@@ -4400,17 +4406,18 @@ function toggleMappingEdit() {
         if (presets) presets.style.display = 'flex';
         mappingGrid.classList.add('editing');
         
-        // Guardar valores originales y habilitar inputs
+        // Guardar valores originales y habilitar sliders
         inputs.forEach(input => {
             const item = input.closest('.mapping-item');
             originalMappings[item.dataset.pad] = input.value;
             input.disabled = false;
             input.classList.add('editing');
-            // Actualizar note-name en tiempo real mientras se escribe
             input.addEventListener('input', onNoteInputChange);
+            // Evitar que el teclado global intercepte las flechas del slider
+            input.addEventListener('keydown', stopKeyPropForSlider);
         });
         
-        if (window.showToast) window.showToast('✏️ Modo edición — cambia notas 0-127 y pulsa Guardar', window.TOAST_TYPES?.INFO, 3000);
+        if (window.showToast) window.showToast('✏️ Modo edición — arrastra los sliders y pulsa Guardar', window.TOAST_TYPES?.INFO, 3000);
     } else {
         // Cancelar → restaurar
         inputs.forEach(input => {
@@ -4420,8 +4427,12 @@ function toggleMappingEdit() {
             input.disabled = true;
             input.classList.remove('editing');
             input.removeEventListener('input', onNoteInputChange);
-            const nameEl = item.querySelector('.note-name');
-            if (nameEl) nameEl.textContent = getNoteNameFromNumber(parseInt(input.value));
+            input.removeEventListener('keydown', stopKeyPropForSlider);
+            const val = parseInt(input.value);
+            const valueEl = item.querySelector('.note-value');
+            const nameEl  = item.querySelector('.note-name');
+            if (valueEl) valueEl.textContent = val;
+            if (nameEl)  nameEl.textContent  = getNoteNameFromNumber(val);
         });
         editBtn.style.display   = 'inline-block';
         resetBtn.style.display  = 'none';
@@ -4441,14 +4452,10 @@ function onNoteInputChange(e) {
     const input = e.target;
     const val = parseInt(input.value);
     const item = input.closest('.mapping-item');
-    const nameEl = item.querySelector('.note-name');
-    if (!isNaN(val) && val >= 0 && val <= 127) {
-        input.classList.remove('error');
-        if (nameEl) nameEl.textContent = getNoteNameFromNumber(val);
-    } else {
-        input.classList.add('error');
-        if (nameEl) nameEl.textContent = '—';
-    }
+    const valueEl = item.querySelector('.note-value');
+    const nameEl  = item.querySelector('.note-name');
+    if (valueEl) valueEl.textContent = val;
+    if (nameEl)  nameEl.textContent  = getNoteNameFromNumber(val);
 }
 
 function applyMappingPreset(name) {
@@ -4458,10 +4465,12 @@ function applyMappingPreset(name) {
     preset.forEach(({pad, note}) => {
         const item = document.querySelector(`.mapping-item[data-pad="${pad}"]`);
         if (!item) return;
-        const input = item.querySelector('.note-input');
-        const nameEl = item.querySelector('.note-name');
-        if (input) { input.value = note; input.classList.remove('error'); }
-        if (nameEl) nameEl.textContent = getNoteNameFromNumber(note);
+        const input   = item.querySelector('.note-input');
+        const valueEl = item.querySelector('.note-value');
+        const nameEl  = item.querySelector('.note-name');
+        if (input)   { input.value = note; input.classList.remove('error'); }
+        if (valueEl) valueEl.textContent = note;
+        if (nameEl)  nameEl.textContent  = getNoteNameFromNumber(note);
     });
     
     if (window.showToast) window.showToast(`✅ Preset "${name.toUpperCase()}" aplicado — pulsa Guardar para confirmar`, window.TOAST_TYPES?.INFO, 3000);
@@ -4503,19 +4512,23 @@ async function saveMIDIMapping() {
         
         // Actualizar dataset y note-names
         inputs.forEach(input => {
-            const item = input.closest('.mapping-item');
-            const note = parseInt(input.value);
+            const item    = input.closest('.mapping-item');
+            const note    = parseInt(input.value);
+            const valueEl = item.querySelector('.note-value');
+            const nameEl  = item.querySelector('.note-name');
             item.dataset.note = note;
-            const nameEl = item.querySelector('.note-name');
-            if (nameEl) nameEl.textContent = getNoteNameFromNumber(note);
+            if (valueEl) valueEl.textContent = note;
+            if (nameEl)  nameEl.textContent  = getNoteNameFromNumber(note);
         });
         
-        // Salir modo edición (sin restaurar valores)
+        // Salir modo edición
         isEditingMapping = true;  // forzar a que toggleMappingEdit lo desactive
         cancelMappingEdit();
-        // Reactivar botón Editar
         const editBtn = document.getElementById('editMappingBtn');
         if (editBtn) editBtn.style.display = 'inline-block';
+        
+        // Recargar desde ESP32 para confirmar valores guardados
+        await loadMIDIMapping();
         
         if (window.showToast) window.showToast('✅ Mapeo MIDI guardado', window.TOAST_TYPES?.SUCCESS, 3000);
     } catch (error) {
