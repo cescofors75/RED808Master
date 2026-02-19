@@ -51,6 +51,11 @@ public:
   uint8_t getStepVelocity(int track, int step);
   uint8_t getStepVelocity(int pattern, int track, int step);
   
+  // Note length per step (divider: 1=full, 2=half, 4=quarter, 8=eighth)
+  void setStepNoteLen(int track, int step, uint8_t div);
+  uint8_t getStepNoteLen(int track, int step);
+  uint8_t getStepNoteLen(int pattern, int track, int step);
+  
   // Bulk pattern writing (for reliable MIDI import)
   void setPatternBulk(int pattern, const bool stepsData[16][16], const uint8_t velsData[16][16]);
   
@@ -86,7 +91,8 @@ public:
   void processLoops(); // Called internally
   
   // Callbacks
-  typedef void (*StepCallback)(int track, uint8_t velocity, uint8_t trackVolume);
+  // noteLenSamples: 0 = full sample, >0 = cut after N samples (note length)
+  typedef void (*StepCallback)(int track, uint8_t velocity, uint8_t trackVolume, uint32_t noteLenSamples);
   typedef void (*StepChangeCallback)(int newStep);
   typedef void (*PatternChangeCallback)(int newPattern, int songLength);
   void setStepCallback(StepCallback callback);
@@ -97,6 +103,7 @@ private:
   // Pattern data: [pattern][track][step]
   bool steps[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
   uint8_t velocities[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+  uint8_t noteLenDivs[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN]; // 1=full,2=half,4=quarter,8=eighth
   
   bool playing;
   int currentPattern;

@@ -1008,7 +1008,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
           
           if (cmd == "getPattern") {
             int pattern = sequencer.getCurrentPattern();
-            DynamicJsonDocument responseDoc(6144);  // ~4KB needed for 16x16 steps+vels
+            DynamicJsonDocument responseDoc(7168);  // ~5KB for steps + vels + noteLens
             responseDoc["type"] = "pattern";
             responseDoc["index"] = pattern;
             
@@ -1026,6 +1026,15 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
               JsonArray trackVels = velocitiesObj.createNestedArray(String(track));
               for (int step = 0; step < 16; step++) {
                 trackVels.add(sequencer.getStepVelocity(track, step));
+              }
+            }
+            
+            // Send note lengths (1=full, 2=half, 4=quarter, 8=eighth)
+            JsonObject noteLensObj = responseDoc.createNestedObject("noteLens");
+            for (int track = 0; track < 16; track++) {
+              JsonArray trackNL = noteLensObj.createNestedArray(String(track));
+              for (int step = 0; step < 16; step++) {
+                trackNL.add(sequencer.getStepNoteLen(track, step));
               }
             }
             
@@ -1371,6 +1380,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     if (track < 0 || track >= 16 || step < 0 || step >= 16) return;
     bool active = doc["active"];
     bool silent = doc.containsKey("silent") && doc["silent"].as<bool>();
+    uint8_t noteLen = doc.containsKey("noteLen") ? (uint8_t)doc["noteLen"].as<int>() : 1;
+    if (noteLen == 0 || (noteLen != 1 && noteLen != 2 && noteLen != 4 && noteLen != 8)) noteLen = 1;
     // Support writing to a specific pattern (for multi-pattern MIDI import)
     if (doc.containsKey("pattern")) {
       int pattern = doc["pattern"].as<int>();
@@ -1383,13 +1394,15 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       }
     } else {
       sequencer.setStep(track, step, active);
+      sequencer.setStepNoteLen(track, step, noteLen);
       // Only broadcast if not in silent/bulk mode
       if (!silent) {
-        StaticJsonDocument<128> resp;
+        StaticJsonDocument<160> resp;
         resp["type"] = "stepSet";
         resp["track"] = track;
         resp["step"] = step;
         resp["active"] = active;
+        resp["noteLen"] = noteLen;
         String out; serializeJson(resp, out);
         if (ws) ws->textAll(out);
       }
@@ -1480,6 +1493,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     
     float trimStart = doc.containsKey("trimStart") ? (float)doc["trimStart"] : 0.0f;
     float trimEnd = doc.containsKey("trimEnd") ? (float)doc["trimEnd"] : 1.0f;
+    float fadeIn  = doc.containsKey("fadeIn")  ? (float)doc["fadeIn"]  / 1000.0f : 0.0f;  // ms → sec
+    float fadeOut = doc.containsKey("fadeOut") ? (float)doc["fadeOut"] / 1000.0f : 0.0f;  // ms → sec
     
     String fullPath = String("/") + String(family) + String("/") + String(filename);
     
@@ -1489,6 +1504,10 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       // Apply trim if specified (not default 0-1)
       if (trimStart > 0.001f || trimEnd < 0.999f) {
         sampleManager.trimSample(padIndex, trimStart, trimEnd);
+      }
+      // Apply fade in/out if specified
+      if (fadeIn > 0.001f || fadeOut > 0.001f) {
+        sampleManager.applyFade(padIndex, fadeIn, fadeOut);
       }
       
       StaticJsonDocument<256> responseDoc;

@@ -325,7 +325,7 @@ void AudioEngine::triggerSample(int padIndex, uint8_t velocity) {
   triggerSampleLive(padIndex, velocity);
 }
 
-void AudioEngine::triggerSampleSequencer(int padIndex, uint8_t velocity, uint8_t trackVolume) {
+void AudioEngine::triggerSampleSequencer(int padIndex, uint8_t velocity, uint8_t trackVolume, uint32_t maxSamples) {
   if (padIndex < 0 || padIndex >= MAX_PADS || sampleBuffers[padIndex] == nullptr) return;
   
   int voiceIndex = findFreeVoice();
@@ -334,6 +334,7 @@ void AudioEngine::triggerSampleSequencer(int padIndex, uint8_t velocity, uint8_t
   voices[voiceIndex].buffer = sampleBuffers[padIndex];
   voices[voiceIndex].position = 0;
   voices[voiceIndex].length = sampleLengths[padIndex];
+  voices[voiceIndex].maxLength = maxSamples;  // 0 = full sample
   voices[voiceIndex].active = true;
   voices[voiceIndex].velocity = velocity;
   voices[voiceIndex].volume = constrain((sequencerVolume * trackVolume) / 100, 0, 150);
@@ -353,6 +354,7 @@ void AudioEngine::triggerSampleLive(int padIndex, uint8_t velocity) {
   voices[voiceIndex].buffer = sampleBuffers[padIndex];
   voices[voiceIndex].position = 0;
   voices[voiceIndex].length = sampleLengths[padIndex];
+  voices[voiceIndex].maxLength = 0;  // Live pads always play full sample
   voices[voiceIndex].active = true;
   voices[voiceIndex].velocity = velocity;
   voices[voiceIndex].volume = constrain((liveVolume * 120) / 100, 0, 180);
@@ -616,9 +618,13 @@ void IRAM_ATTR AudioEngine::fillBuffer(int16_t* buffer, size_t samples) {
     const bool hasPitchShift = (voice.pitchShift < 0.99f || voice.pitchShift > 1.01f);
     if (hasPitchShift) voice.scratchPos = (float)voice.position;
     
+    // Effective length: limited by note length if set (maxLength > 0)
+    const uint32_t effectiveLength = (voice.maxLength > 0 && voice.maxLength < voice.length)
+                                      ? voice.maxLength : voice.length;
+    
     for (size_t i = 0; i < samples; i++) {
-      if (voice.position >= voice.length) {
-        if (voice.loop && voice.loopEnd > voice.loopStart) {
+      if (voice.position >= effectiveLength) {
+        if (voice.loop && voice.loopEnd > voice.loopStart && voice.maxLength == 0) {
           voice.position = voice.loopStart;
           if (hasPitchShift) voice.scratchPos = (float)voice.loopStart;
         } else {
@@ -818,6 +824,7 @@ void AudioEngine::resetVoice(int voiceIndex) {
   voices[voiceIndex].buffer = nullptr;
   voices[voiceIndex].position = 0;
   voices[voiceIndex].length = 0;
+  voices[voiceIndex].maxLength = 0;
   voices[voiceIndex].active = false;
   voices[voiceIndex].velocity = 127;
   voices[voiceIndex].volume = 100;

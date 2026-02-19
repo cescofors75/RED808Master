@@ -23,6 +23,7 @@ Sequencer::Sequencer() :
     for (int t = 0; t < MAX_TRACKS; t++) {
       for (int s = 0; s < STEPS_PER_PATTERN; s++) {
         velocities[p][t][s] = 127;
+        noteLenDivs[p][t][s] = 1;  // Default: full note
       }
     }
   }
@@ -129,10 +130,20 @@ void Sequencer::processStep() {
     // Check sequencer steps
     if (steps[currentPattern][track][currentStep] && !trackMuted[track]) {
       uint8_t velocity = velocities[currentPattern][track][currentStep];
+      uint8_t div = noteLenDivs[currentPattern][track][currentStep];
+      
+      // Compute max samples for note length (0 = full sample)
+      // stepInterval is in microseconds, SAMPLE_RATE = 44100
+      uint32_t noteLenSamples = 0;
+      if (div > 1) {
+        // samples = (stepInterval_us / div) * 44100 / 1000000
+        noteLenSamples = (uint32_t)(((uint64_t)stepInterval * 44100UL) / ((uint32_t)div * 1000000UL));
+        if (noteLenSamples < 64) noteLenSamples = 64;  // minimum
+      }
       
       // Call callback if set
       if (stepCallback != nullptr) {
-        stepCallback(track, velocity, trackVolume[track]);
+        stepCallback(track, velocity, trackVolume[track], noteLenSamples);
       }
     }
   }
@@ -216,6 +227,26 @@ uint8_t Sequencer::getStepVelocity(int pattern, int track, int step) {
   if (step < 0 || step >= STEPS_PER_PATTERN) return 127;
   
   return velocities[pattern][track][step];
+}
+
+void Sequencer::setStepNoteLen(int track, int step, uint8_t div) {
+  if (track < 0 || track >= MAX_TRACKS) return;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return;
+  if (div == 0) div = 1;  // Sanitize
+  noteLenDivs[currentPattern][track][step] = div;
+}
+
+uint8_t Sequencer::getStepNoteLen(int track, int step) {
+  if (track < 0 || track >= MAX_TRACKS) return 1;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return 1;
+  return noteLenDivs[currentPattern][track][step];
+}
+
+uint8_t Sequencer::getStepNoteLen(int pattern, int track, int step) {
+  if (pattern < 0 || pattern >= MAX_PATTERNS) return 1;
+  if (track < 0 || track >= MAX_TRACKS) return 1;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return 1;
+  return noteLenDivs[pattern][track][step];
 }
 
 void Sequencer::setPatternBulk(int pattern, const bool stepsData[16][16], const uint8_t velsData[16][16]) {
@@ -400,7 +431,7 @@ void Sequencer::processLoops() {
       }
       
       if (shouldTrigger && stepCallback != nullptr) {
-        stepCallback(track, 100, trackVolume[track]);
+        stepCallback(track, 100, trackVolume[track], 0);  // 0 = full note for loops
       }
       
       loopStepCounter[track] = (loopStepCounter[track] + 1) % 16;

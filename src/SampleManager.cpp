@@ -295,6 +295,39 @@ bool SampleManager::trimSample(int padIndex, float startNorm, float endNorm) {
   return true;
 }
 
+bool SampleManager::applyFade(int padIndex, float fadeInSec, float fadeOutSec) {
+  if (padIndex < 0 || padIndex >= MAX_SAMPLES || !sampleBuffers[padIndex]) return false;
+  if (fadeInSec < 0.0f) fadeInSec = 0.0f;
+  if (fadeOutSec < 0.0f) fadeOutSec = 0.0f;
+  
+  uint32_t len = sampleLengths[padIndex];
+  if (len < 4) return false;
+  
+  // Fade in: ramp up gain from 0 to 1 over the first fadeInSamples
+  if (fadeInSec > 0.001f) {
+    uint32_t fadeInSamples = (uint32_t)(fadeInSec * 44100.0f);
+    if (fadeInSamples > len / 2) fadeInSamples = len / 2;  // Max half the sample
+    for (uint32_t i = 0; i < fadeInSamples; i++) {
+      float t = (float)i / (float)fadeInSamples;  // 0.0 to 1.0
+      sampleBuffers[padIndex][i] = (int16_t)((float)sampleBuffers[padIndex][i] * t);
+    }
+  }
+  
+  // Fade out: ramp down gain from 1 to 0 over the last fadeOutSamples
+  if (fadeOutSec > 0.001f) {
+    uint32_t fadeOutSamples = (uint32_t)(fadeOutSec * 44100.0f);
+    if (fadeOutSamples > len / 2) fadeOutSamples = len / 2;  // Max half the sample
+    uint32_t fadeOutStart = len - fadeOutSamples;
+    for (uint32_t i = 0; i < fadeOutSamples; i++) {
+      float t = 1.0f - ((float)i / (float)fadeOutSamples);  // 1.0 to 0.0
+      sampleBuffers[padIndex][fadeOutStart + i] = (int16_t)((float)sampleBuffers[padIndex][fadeOutStart + i] * t);
+    }
+  }
+  
+  Serial.printf("[Fade] Pad %d: FadeIn=%.3fs FadeOut=%.3fs\n", padIndex, fadeInSec, fadeOutSec);
+  return true;
+}
+
 void SampleManager::unloadAll() {
   for (int i = 0; i < MAX_SAMPLES; i++) {
     if (sampleBuffers[i] != nullptr) {

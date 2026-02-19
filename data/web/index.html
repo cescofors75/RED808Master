@@ -19,31 +19,45 @@
                     <span id="statusText">Conectando...</span>
                 </div>
             </div>
-            <div class="header-meters">
-                <div class="meter" id="meter-bpm">
-                    <span class="meter-label">BPM</span>
-                    <span class="meter-hint">[ / ]</span>
-                    <div class="meter-value" id="meterBpmValue">110</div>
-                    <div class="meter-bar">
-                        <span id="meterBpmBar"></span>
-                    </div>
+            <div class="header-controls">
+                <!-- BPM -->
+                <div class="hdr-ctrl" id="meter-bpm">
+                    <span class="hdr-ctrl-label">BPM <span class="hdr-ctrl-hint">[ / ]</span></span>
+                    <input type="range" id="tempoSlider" min="60" max="200" value="110" class="hdr-slider">
+                    <span class="hdr-ctrl-value" id="tempoValue">110</span>
+                    <!-- keep hidden meter IDs for JS compat -->
+                    <span id="meterBpmValue" style="display:none">110</span>
+                    <span id="meterBpmBar" style="display:none"></span>
                 </div>
-                <div class="meter" id="meter-seq-volume">
-                    <span class="meter-label">VOL SEQ</span>
-                    <span class="meter-hint">A / S</span>
-                    <div class="meter-value" id="meterSequencerVolumeValue">100%</div>
-                    <div class="meter-bar">
-                        <span id="meterSequencerVolumeBar"></span>
-                    </div>
+                <!-- VOL SEQ -->
+                <div class="hdr-ctrl" id="meter-seq-volume">
+                    <span class="hdr-ctrl-label">VOL SEQ <span class="hdr-ctrl-hint">A/S</span></span>
+                    <input type="range" id="sequencerVolumeSlider" min="0" max="150" value="100" class="hdr-slider">
+                    <span class="hdr-ctrl-value" id="sequencerVolumeValue">100</span>
+                    <span id="meterSequencerVolumeValue" style="display:none">100%</span>
+                    <span id="meterSequencerVolumeBar" style="display:none"></span>
                 </div>
-                <div class="meter" id="meter-live-volume">
-                    <span class="meter-label">VOL LIVE</span>
-                    <span class="meter-hint">- / +</span>
-                    <div class="meter-value" id="meterLiveVolumeValue">100%</div>
-                    <div class="meter-bar">
-                        <span id="meterLiveVolumeBar"></span>
-                    </div>
+                <!-- VOL PADS -->
+                <div class="hdr-ctrl" id="meter-live-volume">
+                    <span class="hdr-ctrl-label">VOL PADS <span class="hdr-ctrl-hint">-/+</span></span>
+                    <input type="range" id="liveVolumeSlider" min="0" max="150" value="100" class="hdr-slider">
+                    <span class="hdr-ctrl-value" id="liveVolumeValue">100</span>
+                    <span id="meterLiveVolumeValue" style="display:none">100%</span>
+                    <span id="meterLiveVolumeBar" style="display:none"></span>
                 </div>
+                <!-- V / M / S global buttons -->
+                <div class="hdr-vsm-btns">
+                    <button class="hdr-btn hdr-btn-v" id="hdrVolBtn" title="Volumen track seleccionado">V</button>
+                    <button class="hdr-btn hdr-btn-m" id="hdrMuteBtn" title="Mute track seleccionado">M</button>
+                    <button class="hdr-btn hdr-btn-s" id="hdrSoloBtn" title="Solo track seleccionado">S</button>
+                </div>
+                <!-- V popup slider -->
+                <div class="hdr-vol-popup" id="hdrVolPopup" style="display:none">
+                    <span class="hdr-vol-popup-label" id="hdrVolPopupLabel">TRACK VOL</span>
+                    <input type="range" id="hdrVolPopupSlider" min="0" max="150" value="100" class="hdr-slider">
+                    <span class="hdr-ctrl-value" id="hdrVolPopupValue">100</span>
+                </div>
+                <!-- SQNCR status -->
                 <div class="meter meter-sequencer" id="meter-sequencer">
                     <span class="meter-label">SQNCR</span>
                     <div class="meter-value" id="meterSequencerStatus">STOP</div>
@@ -59,7 +73,6 @@
             <button class="tab-btn active" data-tab="performance">🎹 LIVE PADS</button>
             <button class="tab-btn" data-tab="xtra-pads">🎲 XTRA PADS</button>
             <button class="tab-btn" data-tab="sequencer">🎵 SEQUENCER</button>
-            <button class="tab-btn" data-tab="controls">🎛️ CONTROLES</button>
             <button class="tab-btn" data-tab="volumes">🎚️ VOLUMENES</button>
             <button class="tab-btn" data-tab="fx">🔊 FX</button>
             <button class="tab-btn" data-tab="midi">🎹 MIDI</button>
@@ -78,6 +91,12 @@
                         <span class="sync-leds-slider"></span>
                         <span class="sync-leds-label">💡 SYNC LEDS</span>
                     </label>
+                    <div class="pad-layout-selector">
+                        <span class="layout-sel-label">GRID</span>
+                        <button class="pls-btn" data-cols="2">2</button>
+                        <button class="pls-btn active" data-cols="4">4</button>
+                        <button class="pls-btn" data-cols="8">8</button>
+                    </div>
                     <button id="loadSampleListsBtn" class="btn btn-load-samples" title="Recargar Samplers">
                         🔄
                     </button>
@@ -207,8 +226,8 @@
                     </div>
                     <div class="seq-chat-header-right">
                         <input type="text" id="chatServerUrl" class="seq-chat-server-input" 
-                               placeholder="http://192.168.1.131:3808" 
-                               value="http://192.168.1.131:3808"
+                               placeholder="http://192.168.1.133:3808" 
+                               value="http://192.168.1.133:3808"
                                onclick="event.stopPropagation()">
                         <button class="seq-chat-connect-btn" id="chatConnectBtn" onclick="event.stopPropagation();chatConnect()" title="Conectar al servidor AI">CONECTAR</button>
                         <button class="seq-chat-action-btn" onclick="event.stopPropagation();chatResetSession()" title="Reset sesión">🔄</button>
@@ -241,43 +260,11 @@
             </div>
         </div>
 
-        <!-- TAB: Controls -->
-        <div id="tab-controls" class="tab-content">
-            <!-- Controls Section -->
-            <section id="section-controls" class="controls-section" data-section="controls" data-title="Controls">
-                <div class="control-group">
-                    <label for="tempoSlider">TEMPO: <span id="tempoValue">110</span> BPM</label>
-                    <input type="range" id="tempoSlider" min="60" max="200" value="110" class="slider">
-                </div>
-                
-                <div class="control-group">
-                    <label for="sequencerVolumeSlider">VOLUMEN SEQUENCER: <span id="sequencerVolumeValue">100</span>%</label>
-                    <input type="range" id="sequencerVolumeSlider" min="0" max="150" value="100" class="slider">
-                </div>
-
-                <div class="control-group">
-                    <label for="liveVolumeSlider">VOLUMEN LIVE PADS: <span id="liveVolumeValue">100</span>%</label>
-                    <input type="range" id="liveVolumeSlider" min="0" max="150" value="100" class="slider">
-                </div>
-                
-                <div class="control-group">
-                    <label>PATTERN:</label>
-                    <div class="pattern-buttons">
-                        <button class="btn-pattern active" data-pattern="0">HIP HOP</button>
-                        <button class="btn-pattern" data-pattern="1">TECHNO</button>
-                        <button class="btn-pattern" data-pattern="2">DnB</button>
-                        <button class="btn-pattern" data-pattern="3">BREAK</button>
-                        <button class="btn-pattern" data-pattern="4">HOUSE</button>
-                        <button class="btn-pattern" data-pattern="5">TRAP</button>
-                    </div>
-                </div>
-                
-                <div class="control-group">
-                    <button id="colorToggle" class="btn-color-toggle">🎨 COLOR MODE</button>
-                </div>
+        <!-- TAB: Controls (hidden, kept for JS compat) -->
+        <div id="tab-controls" class="tab-content" style="display:none!important">
+            <section id="section-controls" class="controls-section">
+                <button id="colorToggle" class="btn-color-toggle" style="display:none">🎨 COLOR MODE</button>
             </section>
-
-
         </div>
 
         <!-- TAB: Volumes -->
@@ -287,6 +274,12 @@
                 <div class="volumes-header">
                     <h2>🎚️ CONTROLES DE VOLUMEN</h2>
                     <p class="volumes-description">Control individual de volúmenes en tiempo real</p>
+                    <div class="vol-layout-selector">
+                        <span class="layout-sel-label">COLS</span>
+                        <button class="vls-btn" data-cols="4">4</button>
+                        <button class="vls-btn" data-cols="8">8</button>
+                        <button class="vls-btn active" data-cols="16">16</button>
+                    </div>
                 </div>
 
                 <!-- Master Volumes -->
@@ -408,6 +401,94 @@
                             </div>
                             <div class="track-volume-bar-container">
                                 <div class="track-volume-bar" id="trackVolumeBar7" data-track="7" style="height: 100%;"></div>
+                            </div>
+                        </div>
+                        <!-- Track 8: LT -->
+                        <div class="track-volume-card" data-track="8">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">LT</span>
+                                <span class="track-volume-value" id="trackVolumeValue8">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator8"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar8" data-track="8" style="height: 100%;"></div>
+                            </div>
+                        </div>
+                        <!-- Track 9: MT -->
+                        <div class="track-volume-card" data-track="9">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">MT</span>
+                                <span class="track-volume-value" id="trackVolumeValue9">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator9"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar9" data-track="9" style="height: 100%;"></div>
+                            </div>
+                        </div>
+                        <!-- Track 10: HT -->
+                        <div class="track-volume-card" data-track="10">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">HT</span>
+                                <span class="track-volume-value" id="trackVolumeValue10">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator10"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar10" data-track="10" style="height: 100%;"></div>
+                            </div>
+                        </div>
+                        <!-- Track 11: MA -->
+                        <div class="track-volume-card" data-track="11">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">MA</span>
+                                <span class="track-volume-value" id="trackVolumeValue11">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator11"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar11" data-track="11" style="height: 100%;"></div>
+                            </div>
+                        </div>
+                        <!-- Track 12: CB -->
+                        <div class="track-volume-card" data-track="12">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">CB</span>
+                                <span class="track-volume-value" id="trackVolumeValue12">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator12"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar12" data-track="12" style="height: 100%;"></div>
+                            </div>
+                        </div>
+                        <!-- Track 13: HC -->
+                        <div class="track-volume-card" data-track="13">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">HC</span>
+                                <span class="track-volume-value" id="trackVolumeValue13">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator13"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar13" data-track="13" style="height: 100%;"></div>
+                            </div>
+                        </div>
+                        <!-- Track 14: MC -->
+                        <div class="track-volume-card" data-track="14">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">MC</span>
+                                <span class="track-volume-value" id="trackVolumeValue14">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator14"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar14" data-track="14" style="height: 100%;"></div>
+                            </div>
+                        </div>
+                        <!-- Track 15: LC -->
+                        <div class="track-volume-card" data-track="15">
+                            <div class="track-volume-header">
+                                <span class="track-volume-label">LC</span>
+                                <span class="track-volume-value" id="trackVolumeValue15">100%</span>
+                                <span class="track-volume-mute-indicator" id="trackMuteIndicator15"></span>
+                            </div>
+                            <div class="track-volume-bar-container">
+                                <div class="track-volume-bar" id="trackVolumeBar15" data-track="15" style="height: 100%;"></div>
                             </div>
                         </div>
                     </div>

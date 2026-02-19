@@ -216,6 +216,7 @@ struct Voice {
   int16_t* buffer;
   uint32_t position;
   uint32_t length;
+  uint32_t maxLength;   // 0 = play full sample; >0 = cut after this many samples (note length)
   bool active;
   uint8_t velocity;
   uint8_t volume;
@@ -243,7 +244,7 @@ public:
   
   // Playback control
   void triggerSample(int padIndex, uint8_t velocity);
-  void triggerSampleSequencer(int padIndex, uint8_t velocity, uint8_t trackVolume = 100);
+  void triggerSampleSequencer(int padIndex, uint8_t velocity, uint8_t trackVolume = 100, uint32_t maxSamples = 0);
   void triggerSampleLive(int padIndex, uint8_t velocity);
   void stopSample(int padIndex);
   void stopAll();

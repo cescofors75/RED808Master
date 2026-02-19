@@ -42,6 +42,7 @@ public:
   // Sample loading
   bool loadSample(const char* filename, int padIndex);
   bool trimSample(int padIndex, float startNorm, float endNorm);
+  bool applyFade(int padIndex, float fadeInSec, float fadeOutSec);  // Apply fade in/out to buffer
   bool unloadSample(int padIndex);
   void unloadAll();
   

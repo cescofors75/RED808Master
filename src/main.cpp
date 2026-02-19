@@ -24,7 +24,10 @@
 // Pon aquí tu SSID y contraseña WiFi de casa.
 // Si se deja vacío (""), usará solo modo AP (red propia RED808).
 #define HOME_WIFI_SSID     "MIWIFI_2G_yU2f"         // ← tu WiFi doméstico, ej: "MiRedCasa"
-#define HOME_WIFI_PASS     "M6LR7zHk"         // ← contraseña WiFi
+#define HOME_WIFI_PASS     "M6LR7zHk"   
+//#define HOME_WIFI_SSID     "Mr_Coconut"         // ← tu WiFi doméstico, ej: "MiRedCasa"
+//#define HOME_WIFI_PASS     "Llorosenlalluvia82" 
+// ← contraseña WiFi
 //#define HOME_WIFI_SSID     "iPhone de Francesc "         // ← tu WiFi doméstico, ej: "MiRedCasa"
 //#define HOME_WIFI_PASS     "gp5zoiqszdy9j"         // ← contraseña WiFi
 
@@ -162,8 +165,8 @@ void systemTask(void *pvParameters) {
 
 // Callback que el Sequencer llama cada vez que hay un "trigger" en un step
 // NO enciende el LED (solo secuenciador)
-void onStepTrigger(int track, uint8_t velocity, uint8_t trackVolume) {
-    audioEngine.triggerSampleSequencer(track, velocity, trackVolume);
+void onStepTrigger(int track, uint8_t velocity, uint8_t trackVolume, uint32_t noteLenSamples) {
+    audioEngine.triggerSampleSequencer(track, velocity, trackVolume, noteLenSamples);
 }
 
 // Función para triggers manuales desde live pads (web interface)

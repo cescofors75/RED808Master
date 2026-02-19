@@ -35,6 +35,8 @@ let keyboardTremoloState = {};
 // Pad hold timers for long press detection
 let padHoldTimers = {};
 let trackMutedState = new Array(16).fill(false);
+let trackSoloState = -1;        // -1 = none, 0-15 = índice del track en solo
+let preSoloMuteState = null;    // estado de mutes guardado antes de entrar en solo
 
 // Pad filter state (stores active filter type for each pad)
 let padFilterState = new Array(24).fill(0); // 0 = FILTER_NONE (16 main + 8 xtra)
@@ -406,6 +408,15 @@ function handleWebSocketMessage(data) {
             if (data.track !== undefined && data.step !== undefined) {
                 const stepEl = document.querySelector(`.step-btn[data-track="${data.track}"][data-step="${data.step}"]`);
                 if (stepEl) stepEl.classList.toggle('active', !!data.active);
+                // Also update grid-based seq-step (the primary grid)
+                const seqStepEl = document.querySelector(`.seq-step[data-track="${data.track}"][data-step="${data.step}"]`);
+                if (seqStepEl) {
+                    seqStepEl.classList.toggle('active', !!data.active);
+                    if (data.noteLen) {
+                        seqStepEl.dataset.notelen = String(data.noteLen);
+                        _noteLenLabel(seqStepEl);
+                    }
+                }
             }
             break;
 
@@ -581,6 +592,22 @@ function loadPatternData(data) {
                     const stepEl = document.querySelector(`[data-track="${track}"][data-step="${step}"]`);
                     if (stepEl && stepEl.classList.contains('active')) {
                         stepEl.dataset.velocity = velocity;
+                    }
+                });
+            }
+        }
+    }
+    
+    // Cargar duraciones de nota si están disponibles
+    if (data.noteLens) {
+        for (let track = 0; track < 16; track++) {
+            const nlData = data.noteLens[track] || data.noteLens[track.toString()];
+            if (nlData && Array.isArray(nlData)) {
+                nlData.forEach((div, step) => {
+                    const stepEl = document.querySelector(`[data-track="${track}"][data-step="${step}"]`);
+                    if (stepEl) {
+                        stepEl.dataset.notelen = String(div || 1);
+                        _noteLenLabel(stepEl);
                     }
                 });
             }
@@ -1708,6 +1735,38 @@ function setTrackMuted(track, isMuted, sendCommand) {
     }
 }
 
+function setSoloTrack(track) {
+    if (trackSoloState === track) {
+        // Desactivar solo: restaurar estado de mutes previo
+        trackSoloState = -1;
+        if (preSoloMuteState) {
+            for (let t = 0; t < 16; t++) {
+                setTrackMuted(t, preSoloMuteState[t], true);
+            }
+            preSoloMuteState = null;
+        }
+        if (window.showToast && window.TOAST_TYPES) {
+            window.showToast('🔊 Solo OFF', window.TOAST_TYPES.INFO, 1500);
+        }
+    } else {
+        // Guardar estado actual y activar solo
+        preSoloMuteState = [...trackMutedState];
+        trackSoloState = track;
+        for (let t = 0; t < 16; t++) {
+            setTrackMuted(t, t !== track, true);
+        }
+        const trackName = padNames[track] || `Track ${track + 1}`;
+        if (window.showToast && window.TOAST_TYPES) {
+            window.showToast(`🎯 Solo: ${trackName}`, window.TOAST_TYPES.SUCCESS, 1500);
+        }
+    }
+    // Actualizar visual de botones solo
+    document.querySelectorAll('.solo-btn').forEach(btn => {
+        const t = parseInt(btn.dataset.track);
+        btn.classList.toggle('active', t === trackSoloState);
+    });
+}
+
 function updateTrackLoopVisual(trackIndex) {
     const label = document.querySelector(`.track-label[data-track="${trackIndex}"]`);
     const steps = document.querySelectorAll(`.seq-step[data-track="${trackIndex}"]`);
@@ -1764,6 +1823,28 @@ function createSequencer() {
             e.stopPropagation();
             showVolumeMenu(track, e.target);
         });
+
+        // Mute button
+        const muteBtn = document.createElement('button');
+        muteBtn.className = 'mute-btn';
+        muteBtn.textContent = 'M';
+        muteBtn.title = 'Mute track';
+        muteBtn.dataset.track = track;
+        muteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setTrackMuted(track, !trackMutedState[track], true);
+        });
+
+        // Solo button
+        const soloBtn = document.createElement('button');
+        soloBtn.className = 'solo-btn';
+        soloBtn.textContent = 'S';
+        soloBtn.title = 'Solo track';
+        soloBtn.dataset.track = track;
+        soloBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setSoloTrack(track);
+        });
         
         const name = document.createElement('span');
         name.textContent = trackNames[track];
@@ -1774,6 +1855,8 @@ function createSequencer() {
         loopIndicator.textContent = 'LOOP';
         
         label.appendChild(volumeBtn);
+        label.appendChild(muteBtn);
+        label.appendChild(soloBtn);
         label.appendChild(name);
         label.appendChild(loopIndicator);
         label.style.borderColor = trackColors[track];
@@ -1796,6 +1879,37 @@ function createSequencer() {
             stepEl.className = 'seq-step';
             stepEl.dataset.track = track;
             stepEl.dataset.step = step;
+            stepEl.dataset.notelen = '1';  // default: full note
+            
+            // Inner elements for note-length visualization
+            const nlBar = document.createElement('div');
+            nlBar.className = 'step-notelen-bar';
+            stepEl.appendChild(nlBar);
+            
+            const nlLabel = document.createElement('div');
+            nlLabel.className = 'step-notelen-label';
+            stepEl.appendChild(nlLabel);
+            
+            // Right-click / long-press: show note-length menu
+            stepEl.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                if (stepEl.classList.contains('active')) {
+                    showNoteLenMenu(e, track, step, stepEl);
+                }
+            });
+            
+            // Long-press support (touch)
+            let _nlTimer = null;
+            stepEl.addEventListener('touchstart', (e) => {
+                _nlTimer = setTimeout(() => {
+                    _nlTimer = null;
+                    if (stepEl.classList.contains('active')) {
+                        showNoteLenMenu(e.touches[0], track, step, stepEl);
+                    }
+                }, 500);
+            }, { passive: true });
+            stepEl.addEventListener('touchend', () => { if (_nlTimer) clearTimeout(_nlTimer); }, { passive: true });
+            stepEl.addEventListener('touchmove', () => { if (_nlTimer) clearTimeout(_nlTimer); }, { passive: true });
             
             stepEl.addEventListener('click', () => {
                 toggleStep(track, step, stepEl);
@@ -1863,12 +1977,92 @@ function toggleStep(track, step, element) {
     }
     if (renderCircularSequencer) renderCircularSequencer._dirty = true;
     
+    const noteLen = parseInt(element.dataset.notelen || '1', 10);
+    
     sendWebSocket({
         cmd: 'setStep',
         track: track,
         step: step,
-        active: isActive
+        active: isActive,
+        noteLen: noteLen
     });
+}
+
+// ====== NOTE LENGTH MENU ======
+let _activeLenMenu = null;
+
+function _noteLenLabel(div) {
+    const labels = { 1: '', 2: '½', 4: '¼', 8: '⅛' };
+    const el = div.querySelector('.step-notelen-label');
+    if (el) el.textContent = labels[parseInt(div.dataset.notelen || '1', 10)] || '';
+}
+
+function showNoteLenMenu(e, track, step, stepEl) {
+    closeNoteLenMenu();
+    
+    const menu = document.createElement('div');
+    menu.className = 'notelen-menu';
+    
+    const opts = [
+        { div: 1, icon: '♩', label: '1/1' },
+        { div: 2, icon: '♪', label: '1/2' },
+        { div: 4, icon: '♬', label: '1/4' },
+        { div: 8, icon: '𝅘𝅥𝅮', label: '1/8' }
+    ];
+    
+    const curDiv = parseInt(stepEl.dataset.notelen || '1', 10);
+    
+    opts.forEach(opt => {
+        const btn = document.createElement('button');
+        btn.className = 'notelen-btn' + (opt.div === curDiv ? ' active' : '');
+        btn.innerHTML = `<span class="nl-icon">${opt.icon}</span><span class="nl-label">${opt.label}</span>`;
+        btn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            setStepNoteLen(track, step, stepEl, opt.div);
+            closeNoteLenMenu();
+        });
+        menu.appendChild(btn);
+    });
+    
+    // Position near click
+    const x = e.clientX || (e.pageX - window.scrollX) || 0;
+    const y = e.clientY || (e.pageY - window.scrollY) || 0;
+    menu.style.left = Math.min(x, window.innerWidth - 220) + 'px';
+    menu.style.top = Math.max(y - 10, 4) + 'px';
+    
+    document.body.appendChild(menu);
+    _activeLenMenu = menu;
+    
+    // Close on outside click
+    setTimeout(() => {
+        document.addEventListener('click', closeNoteLenMenu, { once: true });
+        document.addEventListener('touchstart', closeNoteLenMenu, { once: true, passive: true });
+    }, 10);
+}
+
+function closeNoteLenMenu() {
+    if (_activeLenMenu) {
+        _activeLenMenu.remove();
+        _activeLenMenu = null;
+    }
+}
+
+function setStepNoteLen(track, step, stepEl, div) {
+    stepEl.dataset.notelen = String(div);
+    // Update label
+    _noteLenLabel(stepEl);
+    
+    sendWebSocket({
+        cmd: 'setStep',
+        track: track,
+        step: step,
+        active: stepEl.classList.contains('active'),
+        noteLen: div
+    });
+    
+    // Show visual feedback notification
+    const names = { 1: 'Nota entera (1/1)', 2: 'Media nota (1/2)', 4: 'Cuarto (1/4)', 8: 'Octavo (1/8)' };
+    showNotification(`Track ${track + 1} Step ${step + 1}: ${names[div] || div}`);
 }
 
 // Throttle step updates via rAF to avoid layout thrashing
@@ -3317,6 +3511,19 @@ function displaySampleList(data) {
                     <span class="waveform-preview-info" id="samplePreviewInfo">Selecciona un sample</span>
                     <span class="waveform-trim-value" id="trimEndValue">End: 100%</span>
                 </div>
+                <!-- FADE IN / FADE OUT controls -->
+                <div class="sample-fade-controls">
+                    <div class="fade-control">
+                        <label><span class="fade-icon">🌅</span> FADE IN <span class="fade-value-display" id="fadeInDisplay">0ms</span></label>
+                        <div class="fade-preview"><div class="fade-preview-bar fade-in-preview" id="fadeInPreviewBar" style="width:0%"></div></div>
+                        <input type="range" id="fadeInSlider" min="0" max="500" step="5" value="0">
+                    </div>
+                    <div class="fade-control">
+                        <label><span class="fade-icon">🌇</span> FADE OUT <span class="fade-value-display" id="fadeOutDisplay">0ms</span></label>
+                        <div class="fade-preview"><div class="fade-preview-bar fade-out-preview" id="fadeOutPreviewBar" style="width:0%"></div></div>
+                        <input type="range" id="fadeOutSlider" min="0" max="500" step="5" value="0">
+                    </div>
+                </div>
             </div>
             <div class="sample-list"></div>
             <div class="sample-modal-actions">
@@ -3327,12 +3534,32 @@ function displaySampleList(data) {
         </div>
     `;
     
-    // Waveform state for this modal
+    // Waveform state for this modal — includes fade params
     const wfState = {
         startNorm: 0, endNorm: 1,
+        fadeInMs: 0, fadeOutMs: 0,
         selectedFile: null, selectedFamily: family,
         peaks: null, padIndex: padIndex
     };
+    
+    // Bind fade sliders
+    const fadeInSlider = modal.querySelector('#fadeInSlider');
+    const fadeOutSlider = modal.querySelector('#fadeOutSlider');
+    const fadeInDisplay = modal.querySelector('#fadeInDisplay');
+    const fadeOutDisplay = modal.querySelector('#fadeOutDisplay');
+    const fadeInPreviewBar = modal.querySelector('#fadeInPreviewBar');
+    const fadeOutPreviewBar = modal.querySelector('#fadeOutPreviewBar');
+    
+    fadeInSlider.addEventListener('input', () => {
+        wfState.fadeInMs = parseInt(fadeInSlider.value, 10);
+        fadeInDisplay.textContent = wfState.fadeInMs + 'ms';
+        fadeInPreviewBar.style.width = (wfState.fadeInMs / 500 * 100) + '%';
+    });
+    fadeOutSlider.addEventListener('input', () => {
+        wfState.fadeOutMs = parseInt(fadeOutSlider.value, 10);
+        fadeOutDisplay.textContent = wfState.fadeOutMs + 'ms';
+        fadeOutPreviewBar.style.width = (wfState.fadeOutMs / 500 * 100) + '%';
+    });
     
     // Show current pad waveform if already loaded
     const previewCanvas = modal.querySelector('#samplePreviewWaveform');
@@ -3399,13 +3626,13 @@ function displaySampleList(data) {
         sampleList.appendChild(sampleItem);
     });
     
-    // Preview Play button — loads with trim and auto-triggers
+    // Preview Play button — loads with trim+fade and auto-triggers
     modal.querySelector('#btnPreviewPlay').addEventListener('click', () => {
         if (!wfState.selectedFile) return;
         const btn = modal.querySelector('#btnPreviewPlay');
         btn.textContent = '⏳ ...';
         btn.disabled = true;
-        loadSampleToPad(padIndex, family, wfState.selectedFile, true, wfState.startNorm, wfState.endNorm);
+        loadSampleToPad(padIndex, family, wfState.selectedFile, true, wfState.startNorm, wfState.endNorm, wfState.fadeInMs, wfState.fadeOutMs);
         // Re-enable after sample loads (~400ms)
         setTimeout(() => {
             btn.textContent = '▶ PLAY';
@@ -3420,7 +3647,7 @@ function displaySampleList(data) {
     // Trim & Load button
     modal.querySelector('#btnTrimLoad').addEventListener('click', () => {
         if (!wfState.selectedFile) return;
-        loadSampleToPad(padIndex, family, wfState.selectedFile, false, wfState.startNorm, wfState.endNorm);
+        loadSampleToPad(padIndex, family, wfState.selectedFile, false, wfState.startNorm, wfState.endNorm, wfState.fadeInMs, wfState.fadeOutMs);
         modal.parentNode.removeChild(modal);
         sampleSelectorContext = null;
     });
@@ -3683,7 +3910,7 @@ function auditionSample(family, filename) {
     loadSampleToPad(padIndex, family, filename, true);
 }
 
-function loadSampleToPad(padIndex, family, filename, autoPlay = false, trimStart = 0, trimEnd = 1) {
+function loadSampleToPad(padIndex, family, filename, autoPlay = false, trimStart = 0, trimEnd = 1, fadeInMs = 0, fadeOutMs = 0) {
     if (autoPlay) {
         pendingAutoPlayPad = padIndex;
         setTimeout(() => {
@@ -3702,6 +3929,8 @@ function loadSampleToPad(padIndex, family, filename, autoPlay = false, trimStart
         msg.trimStart = trimStart;
         msg.trimEnd = trimEnd;
     }
+    if (fadeInMs > 0) msg.fadeIn = fadeInMs;
+    if (fadeOutMs > 0) msg.fadeOut = fadeOutMs;
     sendWebSocket(msg);
     // Invalidate waveform cache for this pad
     if (typeof SampleWaveform !== 'undefined') {
@@ -5642,3 +5871,118 @@ function _setupWaveformMarkers(modal, canvas, state) {
     // Initial marker positions
     setTimeout(() => _updateTrimLabels(modal, state), 50);
 }
+
+// ── Header M / S buttons ────────────────────────────────────────────────────
+(function initHeaderMSButtons() {
+    const volBtn  = document.getElementById('hdrVolBtn');
+    const muteBtn = document.getElementById('hdrMuteBtn');
+    const soloBtn = document.getElementById('hdrSoloBtn');
+    const volPopup  = document.getElementById('hdrVolPopup');
+    const volSlider = document.getElementById('hdrVolPopupSlider');
+    const volVal    = document.getElementById('hdrVolPopupValue');
+    const volLabel  = document.getElementById('hdrVolPopupLabel');
+    const trackNames16 = ['BD','SD','CH','OH','CY','CP','RS','CB','LT','MT','HT','MA','CL','HC','MC','LC'];
+
+    function getSelectedTrack() {
+        if (typeof window.lastSelectedPad === 'number') return window.lastSelectedPad;
+        const selEl = document.querySelector('.pad.selected, .pad-active-selected, .pad[data-selected="true"]');
+        if (selEl) {
+            const idx = parseInt(selEl.dataset.pad ?? selEl.dataset.padIndex ?? '-1');
+            if (!isNaN(idx) && idx >= 0) return idx;
+        }
+        return -1;
+    }
+
+    // ── V button ──
+    if (volBtn && volPopup) {
+        volBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const track = getSelectedTrack();
+            if (track < 0) {
+                if (window.showToast) window.showToast('Selecciona un pad primero', 'warning');
+                return;
+            }
+            const cur = typeof trackVolumes !== 'undefined' ? (trackVolumes[track] ?? 100) : 100;
+            volSlider.value = cur;
+            if (volVal) volVal.textContent = cur;
+            if (volLabel) volLabel.textContent = (trackNames16[track] || `T${track}`) + ' VOL';
+            volPopup.style.display = volPopup.style.display === 'flex' ? 'none' : 'flex';
+            volBtn.classList.toggle('active', volPopup.style.display === 'flex');
+        });
+
+        volSlider.addEventListener('input', () => {
+            if (volVal) volVal.textContent = volSlider.value;
+        });
+
+        volSlider.addEventListener('change', () => {
+            const track = getSelectedTrack();
+            if (track < 0) return;
+            const volume = parseInt(volSlider.value);
+            sendWebSocket({ cmd: 'setTrackVolume', track, volume });
+            if (typeof trackVolumes !== 'undefined') trackVolumes[track] = volume;
+            if (typeof updateTrackVolume === 'function') updateTrackVolume(track, volume);
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!volPopup.contains(e.target) && e.target !== volBtn) {
+                volPopup.style.display = 'none';
+                volBtn.classList.remove('active');
+            }
+        });
+    }
+
+    // ── M button ──
+    if (muteBtn) {
+        muteBtn.addEventListener('click', () => {
+            const track = getSelectedTrack();
+            if (track < 0) {
+                if (window.showToast) window.showToast('Selecciona un pad primero', 'warning');
+                return;
+            }
+            const nowMuted = typeof trackMutedState !== 'undefined' ? trackMutedState[track] : false;
+            if (typeof setTrackMuted === 'function') setTrackMuted(track, !nowMuted, true);
+            muteBtn.classList.toggle('active', !nowMuted);
+        });
+    }
+
+    // ── S button ──
+    if (soloBtn) {
+        soloBtn.addEventListener('click', () => {
+            const track = getSelectedTrack();
+            if (track < 0) {
+                if (window.showToast) window.showToast('Selecciona un pad primero', 'warning');
+                return;
+            }
+            if (typeof setSoloTrack === 'function') setSoloTrack(track);
+            const isSolo = typeof trackSoloState !== 'undefined' && trackSoloState === track;
+            soloBtn.classList.toggle('active', !isSolo);
+        });
+    }
+})();
+
+// ── Pad layout selector (4 / 8 / 16 per row) ────────────────────────────────
+(function initPadLayoutSelector() {
+    const grid = document.getElementById('padsGrid');
+    document.querySelectorAll('.pls-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.pls-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const cols = parseInt(btn.dataset.cols);
+            if (grid) grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+        });
+    });
+})();
+
+// ── Volume layout selector (4 / 8 / 16 per row) ─────────────────────────────
+(function initVolLayoutSelector() {
+    const grid = document.getElementById('trackVolumesGrid');
+    document.querySelectorAll('.vls-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.vls-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const cols = parseInt(btn.dataset.cols);
+            if (grid) grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+        });
+    });
+})();
+
