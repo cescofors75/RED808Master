@@ -10249,3 +10249,471 @@ textarea {
         flex-basis: 100%;
     }
 }
+
+/* ================================================================
+   EXPORT BUTTON & DIALOG
+   ================================================================ */
+
+/* Export button in sequencer controls */
+.seq-btn-export {
+    --btn-accent: #f0c040;
+}
+.seq-btn-export::before {
+    background: linear-gradient(135deg, #f0c040 0%, #d4a020 100%) !important;
+}
+
+/* ── Overlay ── */
+.export-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: exportFadeIn 0.2s ease;
+}
+.export-overlay.closing {
+    animation: exportFadeOut 0.2s ease forwards;
+}
+@keyframes exportFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@keyframes exportFadeOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+/* ── Dialog ── */
+.export-dialog {
+    background: #1a1a2e;
+    border: 1px solid #333;
+    border-radius: 16px;
+    width: 90vw;
+    max-width: 560px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 30px rgba(0,255,136,0.05);
+    animation: exportSlideUp 0.25s ease;
+}
+@keyframes exportSlideUp {
+    from { transform: translateY(30px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+/* ── Header ── */
+.export-dialog-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 20px;
+    border-bottom: 1px solid #333;
+    background: linear-gradient(135deg, #1a1a2e, #16213e);
+    border-radius: 16px 16px 0 0;
+}
+.export-dialog-icon {
+    font-size: 1.5em;
+}
+.export-dialog-header h2 {
+    flex: 1;
+    margin: 0;
+    font-size: 1.1em;
+    letter-spacing: 2px;
+    color: #00ff88;
+    font-family: 'JetBrains Mono', monospace;
+}
+.export-close-btn {
+    background: none;
+    border: 1px solid #555;
+    color: #aaa;
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1em;
+    transition: all 0.15s;
+}
+.export-close-btn:hover {
+    background: #ff4444;
+    border-color: #ff4444;
+    color: #fff;
+}
+
+/* ── Info Row ── */
+.export-info-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    background: rgba(0,255,136,0.04);
+    border-bottom: 1px solid #2a2a3e;
+    font-size: 0.85em;
+}
+.export-info-label {
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 0.75em;
+}
+.export-info-value {
+    color: #00ff88;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    margin-right: 16px;
+}
+
+/* ── Sections ── */
+.export-sections {
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.export-section {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid #2a2a3e;
+    border-radius: 10px;
+    padding: 14px 16px;
+    transition: border-color 0.2s;
+}
+.export-section:hover {
+    border-color: #444;
+}
+.export-section-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.export-section-icon {
+    font-size: 1.4em;
+    margin-top: 2px;
+}
+.export-section-header h3 {
+    margin: 0;
+    font-size: 0.95em;
+    color: #e0e0e0;
+    letter-spacing: 1px;
+}
+.export-section-header p {
+    margin: 2px 0 0;
+    font-size: 0.75em;
+    color: #777;
+}
+
+/* ── Options ── */
+.export-options-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+.export-radio {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.8em;
+    color: #bbb;
+    cursor: pointer;
+}
+.export-radio input[type="radio"] {
+    accent-color: #00ff88;
+}
+.export-option-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8em;
+    color: #bbb;
+}
+.export-select {
+    background: #0d1117;
+    border: 1px solid #333;
+    color: #e0e0e0;
+    padding: 4px 8px;
+    border-radius: 5px;
+    font-size: 0.85em;
+    font-family: 'JetBrains Mono', monospace;
+}
+.export-select:focus {
+    border-color: #00ff88;
+    outline: none;
+}
+
+/* ── Action Buttons ── */
+.export-btn-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.export-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: 1px solid #333;
+    border-radius: 8px;
+    font-size: 0.82em;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+}
+
+/* MIDI button */
+.export-midi-btn {
+    background: linear-gradient(135deg, #1a3a5c, #0d2240);
+    color: #4da6ff;
+    border-color: #2a5a8c;
+}
+.export-midi-btn:hover {
+    background: linear-gradient(135deg, #2a5a8c, #1a3a5c);
+    box-shadow: 0 0 12px rgba(77,166,255,0.3);
+    transform: translateY(-1px);
+}
+
+/* WAV button */
+.export-wav-btn {
+    background: linear-gradient(135deg, #2a4a1a, #1a3010);
+    color: #88dd44;
+    border-color: #3a6a2a;
+}
+.export-wav-btn:hover {
+    background: linear-gradient(135deg, #3a6a2a, #2a4a1a);
+    box-shadow: 0 0 12px rgba(136,221,68,0.3);
+    transform: translateY(-1px);
+}
+.export-wav-stems {
+    background: linear-gradient(135deg, #3a3a1a, #2a2a10);
+    color: #ddcc44;
+    border-color: #5a5a2a;
+}
+.export-wav-stems:hover {
+    background: linear-gradient(135deg, #5a5a2a, #3a3a1a);
+    box-shadow: 0 0 12px rgba(221,204,68,0.3);
+}
+
+/* JSON button */
+.export-json-btn {
+    background: linear-gradient(135deg, #3a1a3a, #2a102a);
+    color: #cc88ff;
+    border-color: #5a2a5a;
+}
+.export-json-btn:hover {
+    background: linear-gradient(135deg, #5a2a5a, #3a1a3a);
+    box-shadow: 0 0 12px rgba(204,136,255,0.3);
+    transform: translateY(-1px);
+}
+
+.export-action-btn:active {
+    transform: translateY(1px) !important;
+}
+
+/* ── Progress ── */
+.export-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    border-top: 1px solid #2a2a3e;
+}
+.export-progress-track {
+    flex: 1;
+    height: 6px;
+    background: #1a1a2e;
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid #333;
+}
+.export-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #00ff88, #00cc66);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+    box-shadow: 0 0 6px rgba(0,255,136,0.4);
+}
+.export-progress-text {
+    font-size: 0.75em;
+    color: #00ff88;
+    font-family: 'JetBrains Mono', monospace;
+    min-width: 130px;
+    text-align: right;
+}
+
+/* ── Mobile responsive ── */
+@media (max-width: 600px) {
+    .export-dialog {
+        width: 96vw;
+        max-height: 95vh;
+        border-radius: 12px;
+    }
+    .export-sections {
+        padding: 8px 10px;
+    }
+    .export-section {
+        padding: 10px 12px;
+    }
+    .export-btn-row {
+        flex-direction: column;
+    }
+    .export-action-btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* ================================================================
+   TRACK SELECTOR CHIPS (Export dialog)
+   ================================================================ */
+.export-track-selector {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+}
+.export-track-selector-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 0.78em;
+    color: #aaa;
+    letter-spacing: 0.5px;
+}
+.export-track-select-btns {
+    display: flex;
+    gap: 4px;
+}
+.export-track-sel-all,
+.export-track-sel-none {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid #444;
+    color: #ccc;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8em;
+    font-family: 'JetBrains Mono', monospace;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.export-track-sel-all:hover { background: rgba(0,255,136,0.15); border-color: #00ff88; color: #00ff88; }
+.export-track-sel-none:hover { background: rgba(255,68,68,0.15); border-color: #ff4444; color: #ff4444; }
+
+.export-track-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 4px;
+    margin-bottom: 10px;
+}
+.export-track-chip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 5px 4px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid #333;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+}
+.export-track-chip input[type="checkbox"] {
+    display: none;
+}
+.export-chip-name {
+    font-size: 0.7em;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 1px;
+    color: #999;
+}
+.export-chip-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #555;
+    transition: all 0.15s;
+}
+.export-track-chip.has-notes .export-chip-name { color: #ddd; }
+.export-track-chip.has-notes .export-chip-dot { background: #00ff88; box-shadow: 0 0 4px rgba(0,255,136,0.5); }
+.export-track-chip.no-notes { opacity: 0.45; }
+.export-track-chip:has(input:checked) {
+    background: rgba(0,255,136,0.1);
+    border-color: #00ff88;
+}
+.export-track-chip:has(input:checked) .export-chip-name { color: #00ff88; }
+.export-track-chip:has(input:checked) .export-chip-dot { background: #00ff88; box-shadow: 0 0 6px rgba(0,255,136,0.7); }
+.export-track-chip:hover {
+    border-color: #666;
+    background: rgba(255,255,255,0.06);
+}
+
+/* Render in Sequencer button */
+.export-render-inline-btn {
+    background: linear-gradient(135deg, #1a3050, #102040);
+    color: #4dc8ff;
+    border-color: #2a5a90;
+}
+.export-render-inline-btn:hover {
+    background: linear-gradient(135deg, #2a5a8c, #1a3050);
+    box-shadow: 0 0 14px rgba(77,200,255,0.35);
+    transform: translateY(-1px);
+}
+
+/* Clear renders button */
+.export-clear-render-btn {
+    background: linear-gradient(135deg, #3a1a1a, #2a1010);
+    color: #ff7777;
+    border-color: #5a2a2a;
+}
+.export-clear-render-btn:hover {
+    background: linear-gradient(135deg, #5a2a2a, #3a1a1a);
+    box-shadow: 0 0 12px rgba(255,100,100,0.3);
+    transform: translateY(-1px);
+}
+
+/* WAV selected button */
+.export-wav-selected {
+    background: linear-gradient(135deg, #2a3a1a, #1a2a10);
+    color: #aadd66;
+    border-color: #4a6a3a;
+}
+.export-wav-selected:hover {
+    background: linear-gradient(135deg, #4a6a3a, #2a3a1a);
+    box-shadow: 0 0 12px rgba(170,221,102,0.3);
+}
+
+/* ================================================================
+   INLINE WAVEFORM CANVAS (DAW-style in sequencer grid)
+   ================================================================ */
+.seq-waveform-canvas {
+    pointer-events: none;
+    z-index: 5;
+    height: 100%;
+    width: 100%;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.35);
+    opacity: 0.85;
+    transition: opacity 0.3s ease;
+    animation: waveformFadeIn 0.4s ease;
+}
+.seq-waveform-canvas:hover {
+    opacity: 1;
+}
+
+@keyframes waveformFadeIn {
+    from { opacity: 0; transform: scaleY(0.3); }
+    to { opacity: 0.85; transform: scaleY(1); }
+}
+
+/* When waveform is present, dim the steps slightly */
+.sequencer-grid:has(.seq-waveform-canvas) .seq-step {
+    z-index: 6;
+    mix-blend-mode: screen;
+}
