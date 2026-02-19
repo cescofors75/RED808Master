@@ -2005,6 +2005,7 @@ body:not(.mono-mode) .pad.tremolo-active {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     padding-bottom: 12px;
+    position: relative;
 }
 
 .sequencer-grid-wrapper::-webkit-scrollbar {
@@ -10693,18 +10694,14 @@ textarea {
    INLINE WAVEFORM CANVAS (DAW-style in sequencer grid)
    ================================================================ */
 .seq-waveform-canvas {
+    position: absolute;
     pointer-events: none;
     z-index: 5;
-    height: 100%;
-    width: 100%;
     border-radius: 3px;
     background: rgba(0, 0, 0, 0.35);
     opacity: 0.85;
     transition: opacity 0.3s ease;
     animation: waveformFadeIn 0.4s ease;
-}
-.seq-waveform-canvas:hover {
-    opacity: 1;
 }
 
 @keyframes waveformFadeIn {
@@ -10712,8 +10709,47 @@ textarea {
     to { opacity: 0.85; transform: scaleY(1); }
 }
 
-/* When waveform is present, dim the steps slightly */
-.sequencer-grid:has(.seq-waveform-canvas) .seq-step {
-    z-index: 6;
-    mix-blend-mode: screen;
+/* ===== RENDER BUTTON (R) in FX cell ===== */
+.seq-render-btn {
+    background: rgba(0, 80, 120, 0.5) !important;
+    border-color: rgba(77, 200, 255, 0.35) !important;
+    color: #4dc8ff !important;
+    font-size: 8px !important;
+    font-weight: 800 !important;
+    letter-spacing: 0.5px;
+    transition: all 0.2s;
+}
+.seq-render-btn:hover {
+    background: rgba(0, 120, 180, 0.6) !important;
+    border-color: #4dc8ff !important;
+    color: #fff !important;
+    box-shadow: 0 0 8px rgba(77, 200, 255, 0.4);
+    transform: scale(1.1);
+}
+
+/* Rendered state - green glow */
+.seq-render-btn.rendered {
+    background: rgba(0, 180, 80, 0.5) !important;
+    border-color: #00ff88 !important;
+    color: #00ff88 !important;
+    box-shadow: 0 0 6px rgba(0, 255, 136, 0.4);
+    text-shadow: 0 0 4px rgba(0, 255, 136, 0.6);
+}
+.seq-render-btn.rendered:hover {
+    background: rgba(180, 50, 50, 0.5) !important;
+    border-color: #ff5555 !important;
+    color: #ff5555 !important;
+    box-shadow: 0 0 6px rgba(255, 85, 85, 0.4);
+}
+
+/* Rendering animation */
+.seq-render-btn.rendering {
+    background: rgba(255, 180, 0, 0.4) !important;
+    border-color: #ffb400 !important;
+    color: #ffb400 !important;
+    animation: renderSpin 0.8s linear infinite;
+}
+@keyframes renderSpin {
+    0%   { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }

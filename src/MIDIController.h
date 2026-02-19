@@ -86,9 +86,8 @@ public:
   void handleMIDIData(const uint8_t* data, size_t length);
 
 private:
+  static void usbHostTask(void* arg);
   static void clientEventCallback(const usb_host_client_event_msg_t* eventMsg, void* arg);
-  
-  void handleMIDIData(const uint8_t* data, size_t length);
   void processMIDIMessage(uint8_t status, uint8_t data1, uint8_t data2);
   void notifyDeviceChange(bool connected);
   bool openMidiDevice(uint8_t deviceAddress);

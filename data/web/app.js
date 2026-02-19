@@ -2292,6 +2292,21 @@ function createSequencer() {
         
         fxCell.appendChild(filterBtn);
         fxCell.appendChild(trackFxBtn);
+
+        // Render button – renders track to WAV inline
+        const renderBtn = document.createElement('button');
+        renderBtn.className = 'seq-fx-btn seq-render-btn';
+        renderBtn.title = 'Render track to WAV';
+        renderBtn.textContent = 'R';
+        renderBtn.dataset.track = track;
+        renderBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (window.renderSingleTrackInline) {
+                window.renderSingleTrackInline(track);
+            }
+        });
+        fxCell.appendChild(renderBtn);
+
         grid.appendChild(fxCell);
     }
     
@@ -2347,7 +2362,7 @@ function toggleStep(track, step, element) {
 let _activeLenMenu = null;
 
 function _noteLenLabel(div) {
-    const labels = { 1: '', 2: '½', 4: '¼', 8: '⅛' };
+    const labels = { 1: '', 2: '½', 4: '¼', 8: '⅛', 16: '¹⁄₁₆', 32: '¹⁄₃₂', 64: '¹⁄₆₄' };
     const el = div.querySelector('.step-notelen-label');
     if (el) el.textContent = labels[parseInt(div.dataset.notelen || '1', 10)] || '';
 }
@@ -2362,7 +2377,10 @@ function showNoteLenMenu(e, track, step, stepEl) {
         { div: 1, icon: '♩', label: '1/1' },
         { div: 2, icon: '♪', label: '1/2' },
         { div: 4, icon: '♬', label: '1/4' },
-        { div: 8, icon: '𝅘𝅥𝅮', label: '1/8' }
+        { div: 8, icon: '𝅘𝅥𝅮', label: '1/8' },
+        { div: 16, icon: '𝅘𝅥𝅯', label: '1/16' },
+        { div: 32, icon: '𝅘𝅥𝅰', label: '1/32' },
+        { div: 64, icon: '𝅘𝅥𝅱', label: '1/64' }
     ];
     
     const curDiv = parseInt(stepEl.dataset.notelen || '1', 10);
@@ -2416,7 +2434,7 @@ function setStepNoteLen(track, step, stepEl, div) {
     });
     
     // Show visual feedback notification
-    const names = { 1: 'Nota entera (1/1)', 2: 'Media nota (1/2)', 4: 'Cuarto (1/4)', 8: 'Octavo (1/8)' };
+    const names = { 1: 'Nota entera (1/1)', 2: 'Media nota (1/2)', 4: 'Cuarto (1/4)', 8: 'Octavo (1/8)', 16: 'Semicorchea (1/16)', 32: 'Fusa (1/32)', 64: 'Semifusa (1/64)' };
     showNotification(`Track ${track + 1} Step ${step + 1}: ${names[div] || div}`);
 }
 

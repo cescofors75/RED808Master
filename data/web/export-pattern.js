@@ -287,41 +287,37 @@
     //  WAV RENDERER  – Offline render using Web Audio API
     // =========================================================
     async function loadSampleBuffer(audioCtx, trackIndex) {
-        // Try to fetch the current sample for this track from ESP32
-        const padName = PAD_NAMES[trackIndex];
-        // The samples are served from the ESP32 at /sample/<track>
-        // But we can also try to load from the data directory
-        const urls = [
-            `/sample/${trackIndex}`,
-            `/${padName}/sample.raw`
-        ];
+        // Fetch sample WAV from ESP32 API endpoint
+        const url = `/api/sampledata?pad=${trackIndex}`;
 
-        for (const url of urls) {
-            try {
-                const resp = await fetch(url);
-                if (!resp.ok) continue;
-                const arrayBuffer = await resp.arrayBuffer();
-                if (arrayBuffer.byteLength === 0) continue;
-
-                // Try to decode as audio first
-                try {
-                    const decoded = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
-                    return decoded;
-                } catch(e) {
-                    // Raw 16-bit signed PCM at 44100Hz mono
-                    const samples = new Int16Array(arrayBuffer);
-                    const floatBuf = audioCtx.createBuffer(1, samples.length, 44100);
-                    const chan = floatBuf.getChannelData(0);
-                    for (let i = 0; i < samples.length; i++) {
-                        chan[i] = samples[i] / 32768.0;
-                    }
-                    return floatBuf;
-                }
-            } catch(e) {
-                continue;
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) {
+                console.warn(`[loadSample] pad ${trackIndex}: HTTP ${resp.status}`);
+                return null;
             }
+            const arrayBuffer = await resp.arrayBuffer();
+            if (arrayBuffer.byteLength < 44) return null; // Too small for WAV
+
+            // Decode WAV audio
+            const decoded = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+            return decoded;
+        } catch(e) {
+            console.warn(`[loadSample] pad ${trackIndex} decode error:`, e);
+            return null;
         }
-        return null;
+    }
+
+    // Load waveform peaks from API (lightweight, for visualization only)
+    async function loadWaveformPeaks(trackIndex, points) {
+        try {
+            const resp = await fetch(`/api/waveform?pad=${trackIndex}&points=${points || 200}`);
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            return data; // { pad, name, samples, duration, points, peaks: [[max,min],...] }
+        } catch(e) {
+            return null;
+        }
     }
 
     async function renderPatternToWAV(patternData, bpm, options = {}) {
@@ -865,37 +861,88 @@
 
     // Store rendered waveform data per track
     const renderedWaveforms = {};
+    // Track rendered state: which tracks have been rendered
+    const renderedTrackState = {};
 
     function clearInlineWaveforms(trackIndex) {
         if (trackIndex !== undefined) {
             const existing = document.querySelector(`.seq-waveform-canvas[data-track="${trackIndex}"]`);
             if (existing) existing.remove();
             delete renderedWaveforms[trackIndex];
+            delete renderedTrackState[trackIndex];
+            updateRenderButtonState(trackIndex, false);
         } else {
             document.querySelectorAll('.seq-waveform-canvas').forEach(el => el.remove());
             Object.keys(renderedWaveforms).forEach(k => delete renderedWaveforms[k]);
+            Object.keys(renderedTrackState).forEach(k => {
+                updateRenderButtonState(parseInt(k), false);
+                delete renderedTrackState[k];
+            });
+        }
+    }
+
+    function updateRenderButtonState(trackIndex, isRendered) {
+        const btn = document.querySelector(`.seq-render-btn[data-track="${trackIndex}"]`);
+        if (!btn) return;
+        if (isRendered) {
+            btn.classList.add('rendered');
+            btn.title = 'Track renderizado ✓ (click para quitar)';
+        } else {
+            btn.classList.remove('rendered');
+            btn.title = 'Render track to WAV';
+        }
+    }
+
+    // Show a mini progress indicator on the render button
+    function showRenderButtonProgress(trackIndex, show) {
+        const btn = document.querySelector(`.seq-render-btn[data-track="${trackIndex}"]`);
+        if (!btn) return;
+        if (show) {
+            btn.classList.add('rendering');
+            btn.textContent = '⟳';
+        } else {
+            btn.classList.remove('rendering');
+            btn.textContent = 'R';
         }
     }
 
     function drawInlineWaveform(trackIndex, audioBuffer) {
+        const gridWrapper = document.getElementById('sequencerContainer');
         const grid = document.getElementById('sequencerGrid');
-        if (!grid) return;
+        if (!grid || !gridWrapper) return;
 
         // Remove existing canvas for this track
         const existing = document.querySelector(`.seq-waveform-canvas[data-track="${trackIndex}"]`);
         if (existing) existing.remove();
+
+        // Find the first and last step of this track to calculate position
+        const firstStep = grid.querySelector(`.seq-step[data-track="${trackIndex}"][data-step="0"]`);
+        const lastStep = grid.querySelector(`.seq-step[data-track="${trackIndex}"][data-step="15"]`);
+        if (!firstStep || !lastStep) return;
+
+        const wrapperRect = gridWrapper.getBoundingClientRect();
+        const firstRect = firstStep.getBoundingClientRect();
+        const lastRect = lastStep.getBoundingClientRect();
+
+        // Calculate position relative to the scroll wrapper
+        const left = firstRect.left - wrapperRect.left + gridWrapper.scrollLeft;
+        const top = firstRect.top - wrapperRect.top + gridWrapper.scrollTop;
+        const width = (lastRect.right - firstRect.left);
+        const height = firstRect.height;
 
         // Create canvas element
         const canvas = document.createElement('canvas');
         canvas.className = 'seq-waveform-canvas';
         canvas.dataset.track = trackIndex;
 
-        // Place in grid: row = trackIndex + 1, spans columns 2-17 (the 16 step columns)
-        const row = trackIndex + 1;
-        canvas.style.gridRow = `${row}`;
-        canvas.style.gridColumn = '2 / 18';
+        // Position absolutely over the steps
+        canvas.style.position = 'absolute';
+        canvas.style.left = left + 'px';
+        canvas.style.top = top + 'px';
+        canvas.style.width = width + 'px';
+        canvas.style.height = height + 'px';
 
-        grid.appendChild(canvas);
+        gridWrapper.appendChild(canvas);
 
         // Size canvas to match actual rendered pixels
         const rect = canvas.getBoundingClientRect();
@@ -1040,6 +1087,71 @@
         ctx.fillStyle = `rgba(${r},${g},${b},0.6)`;
         ctx.textAlign = 'right';
         ctx.fillText(`${PAD_NAMES[trackIndex]} ▸ WAV`, w - 4, 10);
+
+        // Mark as rendered
+        renderedTrackState[trackIndex] = true;
+        updateRenderButtonState(trackIndex, true);
+    }
+
+    // Render a single track directly from the sequencer (R button)
+    async function renderSingleTrackInline(trackIndex) {
+        // If already rendered, toggle off
+        if (renderedTrackState[trackIndex]) {
+            clearInlineWaveforms(trackIndex);
+            return;
+        }
+
+        const patternData = readPatternFromDOM();
+        if (!patternData.pattern[trackIndex].some(s => s)) {
+            // No notes on this track, flash the button red
+            const btn = document.querySelector(`.seq-render-btn[data-track="${trackIndex}"]`);
+            if (btn) {
+                btn.style.background = 'rgba(255,50,50,0.5)';
+                setTimeout(() => { btn.style.background = ''; }, 600);
+            }
+            return;
+        }
+
+        const bpm = getBPM();
+        const sampleRate = 44100;
+        const beatsPerSecond = bpm / 60;
+        const secondsPer16th = 1 / (beatsPerSecond * 4);
+        const totalDuration = 16 * secondsPer16th + 2;
+
+        showRenderButtonProgress(trackIndex, true);
+
+        try {
+            const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const buf = await loadSampleBuffer(tempCtx, trackIndex);
+            if (!buf) {
+                showRenderButtonProgress(trackIndex, false);
+                tempCtx.close();
+                return;
+            }
+
+            const offlineCtx = new OfflineAudioContext(2, Math.ceil(totalDuration * sampleRate), sampleRate);
+
+            for (let s = 0; s < 16; s++) {
+                if (!patternData.pattern[trackIndex][s]) continue;
+                const vel = (patternData.velocities[trackIndex][s] || 127) / 127;
+                const time = s * secondsPer16th;
+                const source = offlineCtx.createBufferSource();
+                source.buffer = buf;
+                const gain = offlineCtx.createGain();
+                gain.gain.value = vel;
+                source.connect(gain);
+                gain.connect(offlineCtx.destination);
+                source.start(time);
+            }
+
+            const rendered = await offlineCtx.startRendering();
+            drawInlineWaveform(trackIndex, rendered);
+            tempCtx.close();
+        } catch(err) {
+            console.error(`[Render Track ${trackIndex}]`, err);
+        }
+
+        showRenderButtonProgress(trackIndex, false);
     }
 
     // Render selected tracks inline in the sequencer
@@ -1136,6 +1248,7 @@
     window.doExportWAV = doExportWAV;
     window.doExportJSON = doExportJSON;
     window.doRenderInline = doRenderInline;
+    window.renderSingleTrackInline = renderSingleTrackInline;
     window.clearInlineWaveforms = clearInlineWaveforms;
     window.toggleInlineWaveforms = toggleInlineWaveforms;
     window.exportSelectAllTracks = exportSelectAllTracks;

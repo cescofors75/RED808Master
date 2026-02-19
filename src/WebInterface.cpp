@@ -824,6 +824,89 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     free(peaks);
     request->send(200, "application/json", json);
   });
+
+  // Endpoint para descargar audio RAW del pad cargado (PCM 16-bit mono 44100Hz)
+  server->on("/api/sampledata", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (!request->hasParam("pad")) {
+      request->send(400, "application/json", "{\"error\":\"Missing pad parameter\"}");
+      return;
+    }
+    int pad = request->getParam("pad")->value().toInt();
+    if (pad < 0 || pad >= MAX_SAMPLES) {
+      request->send(400, "application/json", "{\"error\":\"Invalid pad\"}");
+      return;
+    }
+    if (!sampleManager.isSampleLoaded(pad)) {
+      request->send(404, "application/json", "{\"error\":\"No sample loaded\"}");
+      return;
+    }
+
+    int16_t* buffer = sampleManager.getSampleBuffer(pad);
+    uint32_t length = sampleManager.getSampleLength(pad);
+    if (!buffer || length == 0) {
+      request->send(404, "application/json", "{\"error\":\"Empty sample\"}");
+      return;
+    }
+
+    // Build WAV header + stream PCM data
+    uint32_t dataSize = length * 2; // 16-bit = 2 bytes per sample
+    uint32_t fileSize = 44 + dataSize;
+
+    AsyncWebServerResponse *response = request->beginChunkedResponse("audio/wav",
+      [buffer, length, dataSize, fileSize](uint8_t *buf, size_t maxLen, size_t index) -> size_t {
+        if (index >= fileSize) return 0;
+
+        size_t written = 0;
+
+        // Write WAV header (first 44 bytes)
+        if (index < 44) {
+          uint8_t header[44];
+          memcpy(header, "RIFF", 4);
+          uint32_t riffSize = fileSize - 8;
+          memcpy(header + 4, &riffSize, 4);
+          memcpy(header + 8, "WAVE", 4);
+          memcpy(header + 12, "fmt ", 4);
+          uint32_t fmtSize = 16;
+          memcpy(header + 16, &fmtSize, 4);
+          uint16_t audioFormat = 1; // PCM
+          memcpy(header + 20, &audioFormat, 2);
+          uint16_t numChannels = 1;
+          memcpy(header + 22, &numChannels, 2);
+          uint32_t sampleRate = 44100;
+          memcpy(header + 24, &sampleRate, 4);
+          uint32_t byteRate = 44100 * 2;
+          memcpy(header + 28, &byteRate, 4);
+          uint16_t blockAlign = 2;
+          memcpy(header + 32, &blockAlign, 2);
+          uint16_t bitsPerSample = 16;
+          memcpy(header + 34, &bitsPerSample, 2);
+          memcpy(header + 36, "data", 4);
+          memcpy(header + 40, &dataSize, 4);
+
+          size_t headerBytesToCopy = 44 - (size_t)index;
+          if (headerBytesToCopy > maxLen) headerBytesToCopy = maxLen;
+          memcpy(buf, header + index, headerBytesToCopy);
+          written += headerBytesToCopy;
+        }
+
+        // Write PCM data
+        if (index + written >= 44 && written < maxLen) {
+          size_t pcmOffset = (index + written) - 44;
+          size_t pcmRemaining = dataSize - pcmOffset;
+          size_t toCopy = maxLen - written;
+          if (toCopy > pcmRemaining) toCopy = pcmRemaining;
+          memcpy(buf + written, ((uint8_t*)buffer) + pcmOffset, toCopy);
+          written += toCopy;
+        }
+
+        return written;
+      }
+    );
+
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    response->addHeader("Content-Disposition", "inline");
+    request->send(response);
+  });
   
   server->begin();
   Serial.println("✓ RED808 Web Server iniciado");
