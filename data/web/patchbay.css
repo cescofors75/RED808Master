@@ -239,9 +239,21 @@ body {
 #pbSVG path {
   pointer-events: stroke;
   cursor: pointer;
+  transition: stroke-width 0.18s ease, opacity 0.18s ease;
 }
 #pbSVG path:hover {
   stroke-width: 5;
+}
+#pbSVG path.pb-cable {
+  opacity: 0.9;
+}
+#patchbay.pb-playing #pbSVG path.pb-cable:not(.is-selected) {
+  stroke-dasharray: 14 10;
+  animation: pbCablePulse 1.1s ease-in-out infinite, pbSignalFlow 0.9s linear infinite;
+  animation-delay: var(--flow-delay, 0s), var(--flow-delay, 0s);
+}
+#patchbay.pb-playing #pbSVG path.pb-cable.is-selected {
+  animation: pbCablePulse 0.9s ease-in-out infinite;
 }
 #pbSVG .cable-preview {
   pointer-events: none;
@@ -275,6 +287,9 @@ body {
 }
 .pb-node.connected {
   box-shadow: 0 0 20px rgba(255,255,255,0.05);
+}
+#patchbay.pb-playing .pb-node {
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 0 18px rgba(255,255,255,0.06);
 }
 
 /* Node header */
@@ -322,15 +337,36 @@ body {
 .pb-node.pb-pad .pb-node-delete,
 .pb-node.pb-master .pb-node-delete { display: none !important; }
 
+.pb-node-edit {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(0,0,0,0.28);
+  color: #d8f9ff;
+  font-size: 11px;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 55;
+  line-height: 1;
+}
+.pb-node:hover .pb-node-edit { display: flex; }
+.pb-node-edit:hover {
+  background: rgba(0,229,255,0.18);
+  border-color: rgba(0,229,255,0.4);
+}
+
 /* Pad nodes */
 .pb-node.pb-pad {
   border-color: rgba(255,45,45,0.4);
   background: linear-gradient(135deg, rgba(255,45,45,0.08), var(--pb-surface));
 }
 .pb-node.pb-pad .pb-node-header { color: var(--pb-red); }
-
-/* Effect nodes */
-.pb-node.pb-fx { }
 
 /* Master node */
 .pb-node.pb-master {
@@ -355,6 +391,9 @@ body {
 }
 .pb-connector.active {
   animation: connectorPulse 1.2s ease-in-out infinite;
+}
+#patchbay.pb-playing .pb-connector {
+  animation: pbConnectorBlink 0.65s ease-in-out infinite;
 }
 
 /* Output connector (right side of node) */
@@ -419,6 +458,18 @@ body {
 @keyframes connectorPulse {
   0%, 100% { box-shadow: 0 0 6px currentColor; }
   50% { box-shadow: 0 0 18px currentColor; }
+}
+@keyframes pbSignalFlow {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -72; }
+}
+@keyframes pbCablePulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+@keyframes pbConnectorBlink {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.65); }
 }
 
 /* ============ PARAMETER EDITOR ============ */

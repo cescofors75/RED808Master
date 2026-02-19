@@ -10271,6 +10271,40 @@ textarea {
     background: linear-gradient(135deg, #00e5ff 0%, #0091ea 100%) !important;
 }
 
+#section-sequencer .seq-btn-export {
+    background: linear-gradient(150deg, rgba(255, 190, 40, 0.96), rgba(194, 116, 0, 0.95)) !important;
+    border-color: rgba(255, 220, 120, 0.72) !important;
+    color: #fff8dc !important;
+    box-shadow: 0 10px 24px rgba(255, 170, 0, 0.33), inset 0 1px 0 rgba(255, 255, 255, 0.28) !important;
+}
+
+#section-sequencer .seq-btn-export:hover {
+    background: linear-gradient(150deg, rgba(255, 206, 72, 0.98), rgba(216, 130, 4, 0.96)) !important;
+    border-color: rgba(255, 235, 150, 0.92) !important;
+    box-shadow: 0 12px 28px rgba(255, 182, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.32) !important;
+}
+
+#section-sequencer .seq-btn-patchbay {
+    background: linear-gradient(150deg, rgba(0, 214, 255, 0.95), rgba(0, 96, 198, 0.95)) !important;
+    border-color: rgba(120, 232, 255, 0.74) !important;
+    color: #e9feff !important;
+    box-shadow: 0 10px 24px rgba(0, 158, 230, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.26) !important;
+}
+
+#section-sequencer .seq-btn-patchbay:hover {
+    background: linear-gradient(150deg, rgba(56, 228, 255, 0.98), rgba(0, 120, 222, 0.96)) !important;
+    border-color: rgba(170, 245, 255, 0.95) !important;
+    box-shadow: 0 12px 28px rgba(0, 186, 255, 0.47), inset 0 1px 0 rgba(255, 255, 255, 0.34) !important;
+}
+
+#section-sequencer .seq-btn-export .seq-btn-label,
+#section-sequencer .seq-btn-export .seq-btn-icon,
+#section-sequencer .seq-btn-patchbay .seq-btn-label,
+#section-sequencer .seq-btn-patchbay .seq-btn-icon {
+    color: inherit;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+
 /* ── Overlay ── */
 .export-overlay {
     position: fixed;

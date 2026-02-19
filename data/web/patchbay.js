@@ -36,6 +36,39 @@ const FX_DEFS = {
 
 const FILTER_TYPE_MAP = { lowpass:1, highpass:2, bandpass:3 };
 
+const FACTORY_PRESETS = [
+  {
+    id: 'tight-bus',
+    name: 'TIGHT BUS',
+    description: 'HPF + COMP para pegada limpia',
+    chain: [
+      { key: 'hpf', fxType: 'highpass', x: 760, y: 540, params: { cutoff: 55, resonance: 0.82 } },
+      { key: 'comp', fxType: 'compressor', x: 1060, y: 540, params: { threshold: 62, ratio: 5 } }
+    ]
+  },
+  {
+    id: 'lofi-crunch',
+    name: 'LOFI CRUNCH',
+    description: 'Bitcrusher + Distortion + Delay',
+    chain: [
+      { key: 'crush', fxType: 'bitcrusher', x: 760, y: 820, params: { bits: 7 } },
+      { key: 'dist', fxType: 'distortion', x: 1060, y: 820, params: { amount: 58, mode: 2 } },
+      { key: 'dly', fxType: 'delay', x: 1360, y: 820, params: { time: 280, feedback: 44, mix: 36 } }
+    ]
+  },
+  {
+    id: 'space-wide',
+    name: 'SPACE WIDE',
+    description: 'BandPass + Phaser + Reverb + Comp',
+    chain: [
+      { key: 'bp', fxType: 'bandpass', x: 760, y: 1100, params: { cutoff: 1450, resonance: 1.1 } },
+      { key: 'ph', fxType: 'phaser', x: 1060, y: 1100, params: { rate: 34, depth: 62, feedback: 28 } },
+      { key: 'rv', fxType: 'echo', x: 1360, y: 1100, params: { time: 240, feedback: 26, mix: 40 } },
+      { key: 'cp', fxType: 'compressor', x: 1660, y: 1100, params: { threshold: 56, ratio: 3.5 } }
+    ]
+  }
+];
+
 const CANVAS_W = 2800;
 const CANVAS_H = 2200;
 const SNAP = 20;
@@ -46,6 +79,7 @@ let cables = [];
 let nextId = 1;
 let ws = null;
 let wsConnected = false;
+let isPlaying = false;
 
 /* Drag state */
 let drag = null;   // { type:'node'|'cable', nodeId, startX, startY, offsetX, offsetY, fromId, fromType }
@@ -121,6 +155,13 @@ function sendCmd(cmd, data) {
 }
 
 function handleWSMessage(msg) {
+  if ((msg.type === 'playState' || msg.type === 'sequencerState' || msg.type === 'status') && typeof msg.playing !== 'undefined') {
+    isPlaying = !!msg.playing;
+    const root = document.getElementById('patchbay');
+    if (root) root.classList.toggle('pb-playing', isPlaying);
+    return;
+  }
+
   /* Update sample names on pads if available */
   if (msg.type === 'sampleLoaded' || msg.type === 'kitLoaded') {
     // Could update pad labels here
@@ -208,6 +249,7 @@ function renderNode(node) {
     }).join('  ·  ');
     el.innerHTML = `
       <button class="pb-node-delete" data-node="${node.id}" onclick="pbDeleteNode('${node.id}')">✕</button>
+      <button class="pb-node-edit" data-node="${node.id}" onclick="pbEditNode('${node.id}')">⚙</button>
       <div class="pb-node-header">${def.icon} ${node.label}</div>
       <div class="pb-node-params">${paramText}</div>
       <div class="pb-connector in" data-node="${node.id}" data-dir="in"></div>
@@ -266,7 +308,7 @@ function renderCables() {
   /* Remove old cable paths */
   svgEl.querySelectorAll('path:not(.cable-preview)').forEach(p => p.remove());
 
-  cables.forEach(cable => {
+  cables.forEach((cable, index) => {
     const fromPos = getConnectorPos(cable.from, 'out');
     const toPos   = getConnectorPos(cable.to, 'in');
     if (!fromPos || !toPos) return;
@@ -279,9 +321,12 @@ function renderCables() {
     path.setAttribute('stroke-linecap', 'round');
     path.setAttribute('filter', 'url(#cableGlow)');
     path.dataset.cableId = cable.id;
+    path.classList.add('pb-cable');
+    path.style.setProperty('--flow-delay', `${(index % 8) * 0.09}s`);
     path.style.pointerEvents = 'stroke';
     path.style.cursor = 'pointer';
     if (selectedCable === cable.id) {
+      path.classList.add('is-selected');
       path.setAttribute('stroke-width', '5');
       path.setAttribute('stroke-dasharray', '8 4');
     }
@@ -314,12 +359,24 @@ function clearPreviewCable() {
 
 /* ──────────── CABLE LOGIC ──────────── */
 function addCable(fromId, toId) {
-  /* Validate: no duplicate */
-  if (cables.find(c => c.from === fromId && c.to === toId)) return null;
+  if (!fromId || !toId) return null;
+  if (fromId === toId) return null;
 
-  /* Get color from source node */
   const fromNode = nodes.find(n => n.id === fromId);
   const toNode = nodes.find(n => n.id === toId);
+  if (!fromNode || !toNode) return null;
+
+  if (fromNode.type === 'master') return null;
+  if (toNode.type === 'pad') return null;
+
+  /* Validate: no duplicate */
+  if (cables.find(c => c.from === fromId && c.to === toId)) return null;
+  if (wouldCreateCycle(fromId, toId)) {
+    alert('Conexión no válida: crearía un bucle infinito en el routing');
+    return null;
+  }
+
+  /* Get color from source node */
   let color = '#ffffff';
   if (fromNode && fromNode.type === 'pad') {
     color = fromNode.color;
@@ -363,7 +420,10 @@ function onCableClick(id) {
 function getTracksForNode(nodeId) {
   /* Find all pads connected upstream to this node */
   const tracks = [];
+  const visited = new Set();
   function walkUp(nid) {
+    if (visited.has(nid)) return;
+    visited.add(nid);
     cables.filter(c => c.to === nid).forEach(c => {
       const fromNode = nodes.find(n => n.id === c.from);
       if (fromNode && fromNode.type === 'pad') {
@@ -375,6 +435,21 @@ function getTracksForNode(nodeId) {
   }
   walkUp(nodeId);
   return tracks;
+}
+
+function hasPath(startId, targetId, visited = new Set()) {
+  if (startId === targetId) return true;
+  if (visited.has(startId)) return false;
+  visited.add(startId);
+  const nextNodes = cables.filter(c => c.from === startId).map(c => c.to);
+  for (const nid of nextNodes) {
+    if (hasPath(nid, targetId, visited)) return true;
+  }
+  return false;
+}
+
+function wouldCreateCycle(fromId, toId) {
+  return hasPath(toId, fromId);
 }
 
 function applyConnection(cable) {
@@ -834,6 +909,22 @@ window.pbSavePreset = function() {
   alert('Preset guardado: ' + name);
 };
 
+window.pbFactoryPresets = function() {
+  document.getElementById('pbMenu').classList.add('hidden');
+  const list = FACTORY_PRESETS.map((p, i) => `${i + 1}. ${p.name} — ${p.description}`).join('\n');
+  const input = prompt('PRESETS DE FÁBRICA:\n\n' + list + '\n\nEscribe número o nombre:');
+  if (!input) return;
+  const key = input.trim().toLowerCase();
+  let preset = FACTORY_PRESETS.find((p, i) => String(i + 1) === key);
+  if (!preset) preset = FACTORY_PRESETS.find(p => p.name.toLowerCase() === key || p.id.toLowerCase() === key);
+  if (!preset) {
+    alert('Preset no encontrado');
+    return;
+  }
+  applyFactoryPreset(preset);
+  alert('Preset de fábrica cargado: ' + preset.name);
+};
+
 window.pbLoadPreset = function() {
   document.getElementById('pbMenu').classList.add('hidden');
   const presets = JSON.parse(localStorage.getItem('pb_presets') || '{}');
@@ -843,6 +934,15 @@ window.pbLoadPreset = function() {
   if (!name || !presets[name]) return;
   importState(presets[name]);
   alert('Preset cargado: ' + name);
+};
+
+window.pbEditNode = function(nodeId) {
+  const node = nodes.find(n => n.id === nodeId);
+  if (!node || node.type !== 'fx') return;
+  const el = document.getElementById('node-' + nodeId);
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  showParamEditor(nodeId, rect.right - 10, rect.top + 8);
 };
 
 window.closeParamEditor = closeParamEditor;
@@ -910,6 +1010,8 @@ function importState(data) {
         el?.querySelectorAll('.pb-connector').forEach(c => c.dataset.node = nd.id);
         el?.querySelector('.pb-node-delete')?.setAttribute('onclick', `pbDeleteNode('${nd.id}')`);
         el?.querySelector('.pb-node-delete')?.setAttribute('data-node', nd.id);
+        el?.querySelector('.pb-node-edit')?.setAttribute('onclick', `pbEditNode('${nd.id}')`);
+        el?.querySelector('.pb-node-edit')?.setAttribute('data-node', nd.id);
       }
     });
   }
@@ -941,6 +1043,47 @@ function loadState() {
   } catch(ex) {
     console.warn('Patchbay: could not load state', ex);
   }
+}
+
+function applyFactoryPreset(preset) {
+  if (!preset || !Array.isArray(preset.chain) || preset.chain.length === 0) return;
+
+  cables.forEach(c => clearConnection(c));
+  cables = [];
+
+  nodes.filter(n => n.type === 'fx').forEach(n => {
+    const el = document.getElementById('node-' + n.id);
+    if (el) el.remove();
+  });
+  nodes = nodes.filter(n => n.type !== 'fx');
+
+  const fxMap = {};
+  preset.chain.forEach(def => {
+    const fxNode = createFxNode(def.fxType, def.x, def.y);
+    if (fxNode && def.params) {
+      Object.assign(fxNode.params, def.params);
+      updateNodeDisplay(fxNode);
+    }
+    if (fxNode) fxMap[def.key] = fxNode.id;
+  });
+
+  const firstFxId = preset.chain.length ? fxMap[preset.chain[0].key] : null;
+  if (firstFxId) {
+    nodes.filter(n => n.type === 'pad').forEach(pad => addCable(pad.id, firstFxId));
+  }
+
+  for (let i = 0; i < preset.chain.length - 1; i++) {
+    const fromId = fxMap[preset.chain[i].key];
+    const toId = fxMap[preset.chain[i + 1].key];
+    if (fromId && toId) addCable(fromId, toId);
+  }
+
+  const lastFxId = preset.chain.length ? fxMap[preset.chain[preset.chain.length - 1].key] : null;
+  if (lastFxId) addCable(lastFxId, 'master');
+
+  renderCables();
+  updateStatus();
+  saveState();
 }
 
 /* ──────────── UTILS ──────────── */
