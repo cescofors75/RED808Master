@@ -256,6 +256,40 @@ body {
     box-shadow: 0 0 12px rgba(255,220,0,0.6);
 }
 
+/* ── Header track selector ─────────────────────────────── */
+.hdr-track-select {
+    background: rgba(0,0,0,0.55);
+    border: 1px solid rgba(255,255,255,0.22);
+    border-radius: 8px;
+    color: #e0e0e0;
+    font-size: 0.78em;
+    font-weight: 700;
+    font-family: inherit;
+    letter-spacing: 1px;
+    padding: 0 8px;
+    cursor: pointer;
+    height: 36px;
+    min-width: 72px;
+    text-transform: uppercase;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    appearance: none;
+    -webkit-appearance: none;
+    text-align: center;
+}
+.hdr-track-select:hover {
+    border-color: rgba(255,255,255,0.45);
+    box-shadow: 0 0 8px rgba(255,255,255,0.1);
+}
+.hdr-track-select:focus {
+    border-color: rgba(180,180,255,0.6);
+    box-shadow: 0 0 10px rgba(150,150,255,0.3);
+}
+.hdr-track-select option {
+    background: #141428;
+    color: #e0e0e0;
+}
+
 /* ── Pad & Volume layout selectors ─────────────────────── */
 .pad-layout-selector,
 .vol-layout-selector {
@@ -1991,17 +2025,16 @@ body:not(.mono-mode) .pad.tremolo-active {
 }
 
 .track-label {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    justify-content: space-between;
-    gap: 0;
+    display: grid;
+    grid-template-columns: 1fr 22px;
+    grid-template-rows: 1fr 1fr;
+    gap: 2px;
     font-size: 10px;
     font-weight: bold;
     border: 2px solid;
     border-radius: 4px;
     background: rgba(0,0,0,0.3);
-    padding: 2px 3px;
+    padding: 2px;
     text-align: center;
     position: relative;
     transition: background 0.3s ease;
@@ -2011,32 +2044,19 @@ body:not(.mono-mode) .pad.tremolo-active {
     white-space: nowrap;
 }
 
-/* Top row: name + filter badge */
-.track-label-name-row {
+/* Nombre instrumento — celda top-left */
+.track-label > span:not(.loop-indicator) {
+    grid-column: 1;
+    grid-row: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 3px;
-    flex: 1;
-    min-height: 0;
-}
-
-/* Bottom row: V M S buttons */
-.track-label-btn-row {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 2px;
-    flex-shrink: 0;
-    padding-bottom: 1px;
-}
-
-.track-label > span {
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8), 0 0 8px rgba(0, 0, 0, 0.6);
-    position: relative;
-    z-index: 1;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6);
     font-size: 10px;
     letter-spacing: 0.5px;
+    z-index: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .track-label.muted {
@@ -2075,10 +2095,11 @@ body:not(.mono-mode) .pad.tremolo-active {
 }
 
 .mute-btn {
-    position: relative;
-    flex-shrink: 0;
-    width: 18px;
-    height: 16px;
+    grid-column: 1;
+    grid-row: 2;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
     padding: 0;
     border: 1.5px solid rgba(255, 100, 100, 0.6);
     border-radius: 3px;
@@ -2095,12 +2116,13 @@ body:not(.mono-mode) .pad.tremolo-active {
     z-index: 2;
 }
 
-/* Volume button replaces mute button */
+/* Volume button — celda top-right */
 .volume-btn {
-    position: relative;
-    flex-shrink: 0;
-    width: 18px;
-    height: 16px;
+    grid-column: 2;
+    grid-row: 1;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
     padding: 0;
     border: 1.5px solid;
     border-radius: 3px;
@@ -2234,12 +2256,13 @@ body:not(.mono-mode) .pad.tremolo-active {
     box-shadow: 0 0 7px var(--red-glow, #e74c3c);
 }
 
-/* Solo button */
+/* Solo button — celda bottom-right */
 .solo-btn {
-    position: relative;
-    flex-shrink: 0;
-    width: 18px;
-    height: 16px;
+    grid-column: 2;
+    grid-row: 2;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
     padding: 0;
     border: 1.5px solid rgba(255, 210, 60, 0.6);
     border-radius: 3px;
@@ -2338,6 +2361,51 @@ body:not(.mono-mode) .pad.tremolo-active {
     position: relative;
     overflow: hidden;
     contain: layout style paint;
+}
+
+/* ── Step filter / FX indicator dots ──────────────────────── */
+.step-filter-dot,
+.step-fx-dot {
+    position: absolute;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 5;
+    display: none;
+}
+/* Only show on active (ON) steps */
+.seq-step.active .step-filter-dot { display: block; }
+.seq-step.active .step-fx-dot     { display: block; }
+
+/* Filter dot — top-right corner, colored by type */
+.step-filter-dot {
+    top: 2px;
+    right: 2px;
+    box-shadow: 0 0 4px currentColor;
+}
+.step-filter-dot[data-ft="1"] { background: #ff6600; color: #ff6600; } /* LP */
+.step-filter-dot[data-ft="2"] { background: #00ccff; color: #00ccff; } /* HP */
+.step-filter-dot[data-ft="3"] { background: #ff00ff; color: #ff00ff; } /* BP */
+.step-filter-dot[data-ft="4"] { background: #aaaaaa; color: #aaaaaa; } /* NT */
+.step-filter-dot[data-ft="5"] { background: #ff4444; color: #ff4444; } /* BS */
+.step-filter-dot[data-ft="6"] { background: #44ff44; color: #44ff44; } /* TB */
+.step-filter-dot[data-ft="7"] { background: #ffaa00; color: #ffaa00; } /* PK */
+.step-filter-dot[data-ft="8"] { background: #aa44ff; color: #aa44ff; } /* PH */
+.step-filter-dot[data-ft="9"] { background: #ff0044; color: #ff0044; } /* RS */
+
+/* FX dot — bottom-right corner, orange */
+.step-fx-dot {
+    bottom: 2px;
+    right: 2px;
+    background: #ff6400;
+    box-shadow: 0 0 4px #ff6400;
+}
+/* When both filter and FX: offset FX dot slightly */
+.seq-step.active .step-filter-dot + .step-fx-dot,
+.seq-step.active .step-fx-dot:not(:only-child) {
+    bottom: 2px;
+    right: 9px;
 }
 
 .seq-step.looping {
@@ -7687,6 +7755,58 @@ body.midi-dialog-open .midi-import-overlay * {
 .pad-fx-clear-btn:hover {
     background: rgba(200, 0, 0, 0.4);
     border-color: rgba(200, 0, 0, 0.7);
+}
+
+/* FX Toggle Button */
+.fx-toggle-btn {
+    width: 100%;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    color: #aaa;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+    letter-spacing: 0.5px;
+}
+.fx-toggle-btn:hover {
+    background: rgba(255,255,255,0.12);
+    border-color: rgba(255,255,255,0.3);
+}
+.fx-toggle-btn.fx-on {
+    background: rgba(0, 200, 120, 0.2);
+    border-color: rgba(0, 200, 120, 0.5);
+    color: #00cc77;
+    box-shadow: 0 0 8px rgba(0,200,120,0.3);
+}
+.fx-toggle-btn.fx-on:hover {
+    background: rgba(0, 200, 120, 0.3);
+}
+
+/* Pitch Preset Buttons */
+.pitch-preset-btn {
+    padding: 5px 4px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 5px;
+    color: #aaa;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.18s;
+    text-align: center;
+}
+.pitch-preset-btn:hover {
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+}
+.pitch-preset-btn.active {
+    background: rgba(80,160,255,0.25);
+    border-color: rgba(80,160,255,0.5);
+    color: #50a0ff;
+    font-weight: 700;
 }
 
 /* PAD FX Badge */

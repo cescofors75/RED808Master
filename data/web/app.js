@@ -42,6 +42,17 @@ let preSoloMuteState = null;    // estado de mutes guardado antes de entrar en s
 let padFilterState = new Array(24).fill(0); // 0 = FILTER_NONE (16 main + 8 xtra)
 let trackFilterState = new Array(16).fill(0); // 0 = FILTER_NONE
 
+// Per-track live FX state (Echo, Flanger, Compressor)
+let trackLiveFxState = new Array(16).fill(null).map(() => ({
+    echo:       { active: false, time: 100, feedback: 40, mix: 50 },
+    flanger:    { active: false, rate: 50, depth: 50, feedback: 30 },
+    compressor: { active: false, threshold: -20, ratio: 4 }
+}));
+// Per-pad live FX (Reverse, Pitch, Stutter — same keys as trackFxEffects)
+let padLiveFxState = new Array(24).fill(null).map(() => ({
+    reverse: false, pitch: 1.0, stutter: false, stutterMs: 100
+}));
+
 // Pad <-> Sequencer sync state (ALWAYS synced)
 const padSeqSyncEnabled = true;
 
@@ -209,6 +220,7 @@ function handleWebSocketMessage(data) {
                     if (data.fx === 'distortion') { trackFxState[data.track].distortion = data.amount; trackFxState[data.track].distMode = data.mode; }
                     if (data.fx === 'bitcrush') trackFxState[data.track].bitcrush = data.value;
                 }
+                updateTrackStepDots(data.track);
             }
             break;
         case 'state':
@@ -231,6 +243,7 @@ function handleWebSocketMessage(data) {
                 data.trackFilters.forEach((filterType, trackIndex) => {
                     if (trackIndex < 16 && trackFilterState[trackIndex] !== filterType) {
                         trackFilterState[trackIndex] = filterType;
+                        updateTrackStepDots(trackIndex);
                     }
                 });
             }
@@ -285,22 +298,10 @@ function handleWebSocketMessage(data) {
                     window.showToast(`✅ Filtro aplicado a ${trackName}`, window.TOAST_TYPES.SUCCESS, 1500);
                 }
                 
-                // Create or update badge on track label
-                const trackLabel = document.querySelector(`.track-label[data-track="${data.track}"]`);
-                if (trackLabel && data.filterType !== undefined) {
-                    // Remove ALL existing badges from this track to avoid duplicates
-                    trackLabel.querySelectorAll('.track-filter-badge').forEach(b => b.remove());
-                    
-                    // Only create badge if filter type is NOT 0 (NONE) and is valid
-                    if (data.filterType > 0 && data.filterType < 10) {
-                        // Create new badge with icon + initials
-                        const badge = document.createElement('div');
-                        badge.className = 'track-filter-badge';
-                        const filterIcons = ['⭕', '🔽', '🔼', '🎯', '🚫', '📊', '📈', '⛰️', '🌀', '💫'];
-                        const filterInitials = ['', 'LP', 'HP', 'BP', 'NT', 'LS', 'HS', 'PK', 'AP', 'RS'];
-                        badge.innerHTML = `${filterIcons[data.filterType]} <span class="badge-initials">${filterInitials[data.filterType]}</span>`;
-                        trackLabel.appendChild(badge);
-                    }
+                // Update step filter dots
+                if (data.filterType !== undefined) {
+                    trackFilterState[data.track] = data.filterType;
+                    updateTrackStepDots(data.track);
                 }
             }
             break;
@@ -310,11 +311,9 @@ function handleWebSocketMessage(data) {
                 window.showToast(`🔄 Filtro eliminado de ${trackName}`, window.TOAST_TYPES.INFO, 1500);
             }
             
-            // Remove ALL badges from track label
-            const trackLabel = document.querySelector(`.track-label[data-track="${data.track}"]`);
-            if (trackLabel) {
-                trackLabel.querySelectorAll('.track-filter-badge').forEach(badge => badge.remove());
-            }
+            // Remove filter dots from steps
+            trackFilterState[data.track] = 0;
+            updateTrackStepDots(data.track);
             break;
         case 'padFilterSet':
             if (data.success && window.showToast) {
@@ -443,9 +442,15 @@ function handleWebSocketMessage(data) {
             break;
 
         case 'trackLiveFx':
-            // Per-track live FX from SLAVE (echo/flanger/compressor)
+            // Per-track live FX from backend (echo/flanger/compressor)
             if (data.track !== undefined && data.fx) {
-                console.log(`[WS] Track ${data.track} live FX: ${data.fx} ${data.active ? 'ON' : 'OFF'}`);
+                const s = trackLiveFxState[data.track];
+                if (s) {
+                    if (data.fx === 'echo')       { s.echo.active = !!data.active; if (data.time !== undefined) s.echo.time = data.time; if (data.feedback !== undefined) s.echo.feedback = data.feedback; if (data.mix !== undefined) s.echo.mix = data.mix; }
+                    if (data.fx === 'flanger')    { s.flanger.active = !!data.active; if (data.rate !== undefined) s.flanger.rate = data.rate; if (data.depth !== undefined) s.flanger.depth = data.depth; if (data.feedback !== undefined) s.flanger.feedback = data.feedback; }
+                    if (data.fx === 'compressor') { s.compressor.active = !!data.active; if (data.threshold !== undefined) s.compressor.threshold = data.threshold; if (data.ratio !== undefined) s.compressor.ratio = data.ratio; }
+                }
+                updateTrackStepDots(data.track);
             }
             break;
 
@@ -1144,18 +1149,22 @@ const DISTORTION_MODES = [
 
 function showPadFxPopup(padIndex, padElement) {
     closePadFxPopup();
-    
     const backdrop = document.createElement('div');
     backdrop.id = 'padFxBackdrop';
     backdrop.className = 'loop-popup-backdrop';
     backdrop.addEventListener('click', closePadFxPopup);
-    
-    const currentFx = padFxState[padIndex] || {};
-    const distortion = currentFx.distortion || 0;
-    const distMode = currentFx.distMode || 0;
-    const bitcrush = currentFx.bitcrush || 16;
-    
-    const padName = padNames[padIndex] || `XTRA ${padIndex - 15}`;
+
+    const cfx  = padFxState[padIndex] || {};
+    const clive = padLiveFxState[padIndex] || {};
+    const dist  = cfx.distortion || 0;
+    const dmode = cfx.distMode || 0;
+    const bits  = cfx.bitcrush || 16;
+    const rev   = !!clive.reverse;
+    const pitch = clive.pitch !== undefined ? clive.pitch : 1.0;
+    const stut  = !!clive.stutter;
+    const stutMs = clive.stutterMs || 100;
+
+    const padName = padNames[padIndex] || `PAD ${padIndex + 1}`;
     const popup = document.createElement('div');
     popup.id = 'padFxModal';
     popup.className = 'pad-fx-modal';
@@ -1169,37 +1178,64 @@ function showPadFxPopup(padIndex, padElement) {
                 <h4>🎸 DISTORTION</h4>
                 <div class="pad-fx-modes">
                     ${DISTORTION_MODES.map(m => `
-                        <button class="loop-type-btn pad-fx-mode-btn ${m.id === distMode ? 'active' : ''}" 
+                        <button class="loop-type-btn pad-fx-mode-btn ${m.id === dmode ? 'active' : ''}"
                                 data-mode="${m.id}" onclick="setPadFxDistMode(${padIndex}, ${m.id})">
                             <span class="loop-type-icon">${m.icon}</span>
                             <span class="loop-type-name">${m.name}</span>
-                        </button>
-                    `).join('')}
+                        </button>`).join('')}
                 </div>
                 <div class="pad-fx-slider-row">
-                    <label>Drive <span id="padFxDriveVal">${distortion}</span>%</label>
-                    <input type="range" id="padFxDrive" min="0" max="100" value="${distortion}" 
+                    <label>Drive <span id="padFxDriveVal">${dist}</span>%</label>
+                    <input type="range" id="padFxDrive" min="0" max="100" value="${dist}"
                            oninput="setPadFxDrive(${padIndex}, this.value)" class="fx-slider">
                 </div>
             </div>
             <div class="pad-fx-section">
                 <h4>📼 BIT CRUSH</h4>
                 <div class="pad-fx-slider-row">
-                    <label>Bits <span id="padFxBitsVal">${bitcrush}</span></label>
-                    <input type="range" id="padFxBits" min="4" max="16" value="${bitcrush}" 
+                    <label>Bits <span id="padFxBitsVal">${bits}</span></label>
+                    <input type="range" id="padFxBits" min="4" max="16" value="${bits}"
                            oninput="setPadFxBits(${padIndex}, this.value)" class="fx-slider">
+                </div>
+            </div>
+            <div class="pad-fx-section">
+                <h4>⏪ REVERSE</h4>
+                <button class="fx-toggle-btn ${rev ? 'fx-on' : ''}" id="padRevBtn"
+                        onclick="setPadFxReverse(${padIndex}, !${rev})">
+                    ${rev ? '⏪ ON' : '▶️ OFF'}
+                </button>
+            </div>
+            <div class="pad-fx-section">
+                <h4>🎵 PITCH SHIFT</h4>
+                <div class="pad-fx-slider-row">
+                    <label>Pitch <span id="padFxPitchVal">${pitch.toFixed(2)}</span>×</label>
+                    <input type="range" id="padFxPitch" min="25" max="200" value="${Math.round(pitch*100)}"
+                           oninput="setPadFxPitch(${padIndex}, this.value/100)" class="fx-slider">
+                </div>
+                <div class="pad-fx-modes" style="grid-template-columns:repeat(4,1fr);margin-top:6px">
+                    ${[0.25,0.5,0.75,1.0,1.25,1.5,2.0].map(v=>`
+                        <button class="pitch-preset-btn ${Math.abs(pitch-v)<0.01?'active':''}"
+                                onclick="setPadFxPitch(${padIndex},${v})">${v}×</button>`).join('')}
+                </div>
+            </div>
+            <div class="pad-fx-section">
+                <h4>🔁 STUTTER</h4>
+                <button class="fx-toggle-btn ${stut ? 'fx-on' : ''}" id="padStutBtn"
+                        onclick="setPadFxStutterToggle(${padIndex}, !${stut})">
+                    ${stut ? '🔁 ON' : '🔁 OFF'}
+                </button>
+                <div class="pad-fx-slider-row" style="margin-top:8px">
+                    <label>Interval <span id="padFxStutVal">${stutMs}</span>ms</label>
+                    <input type="range" id="padFxStutMs" min="20" max="500" value="${stutMs}"
+                           oninput="setPadFxStutterMs(${padIndex}, this.value)" class="fx-slider">
                 </div>
             </div>
             <button class="pad-fx-clear-btn" onclick="clearPadFxAll(${padIndex})">🚫 CLEAR ALL FX</button>
         </div>
     `;
-    
     document.body.appendChild(backdrop);
     document.body.appendChild(popup);
-    requestAnimationFrame(() => {
-        backdrop.classList.add('visible');
-        popup.classList.add('visible');
-    });
+    requestAnimationFrame(() => { backdrop.classList.add('visible'); popup.classList.add('visible'); });
 }
 
 function closePadFxPopup() {
@@ -1260,12 +1296,57 @@ function setPadFxBits(padIndex, value) {
     }
 }
 
+// === PAD FX — Reverse / Pitch / Stutter ===
+function setPadFxReverse(padIndex, val) {
+    if (!padLiveFxState[padIndex]) padLiveFxState[padIndex] = { reverse: false, pitch: 1.0, stutter: false, stutterMs: 100 };
+    padLiveFxState[padIndex].reverse = val;
+    sendWebSocket({ cmd: 'setReverse', pad: padIndex, value: val });
+    updatePadFxIndicator(padIndex);
+    const btn = document.getElementById('padRevBtn');
+    if (btn) { btn.textContent = val ? '⏪ ON' : '▶️ OFF'; btn.classList.toggle('fx-on', val); }
+}
+function setPadFxPitch(padIndex, val) {
+    val = parseFloat(val);
+    if (!padLiveFxState[padIndex]) padLiveFxState[padIndex] = { reverse: false, pitch: 1.0, stutter: false, stutterMs: 100 };
+    padLiveFxState[padIndex].pitch = val;
+    sendWebSocket({ cmd: 'setPitchShift', pad: padIndex, value: val });
+    updatePadFxIndicator(padIndex);
+    const vEl = document.getElementById('padFxPitchVal');
+    if (vEl) vEl.textContent = val.toFixed(2);
+    document.querySelectorAll('#padFxModal .pitch-preset-btn').forEach(b => {
+        b.classList.toggle('active', Math.abs(parseFloat(b.textContent) - val) < 0.01);
+    });
+}
+function setPadFxStutterToggle(padIndex, val) {
+    if (!padLiveFxState[padIndex]) padLiveFxState[padIndex] = { reverse: false, pitch: 1.0, stutter: false, stutterMs: 100 };
+    padLiveFxState[padIndex].stutter = val;
+    const ms = padLiveFxState[padIndex].stutterMs || 100;
+    sendWebSocket({ cmd: 'setStutter', pad: padIndex, active: val, interval: ms });
+    updatePadFxIndicator(padIndex);
+    const btn = document.getElementById('padStutBtn');
+    if (btn) { btn.textContent = val ? '🔁 ON' : '🔁 OFF'; btn.classList.toggle('fx-on', val); }
+}
+function setPadFxStutterMs(padIndex, ms) {
+    ms = parseInt(ms);
+    if (!padLiveFxState[padIndex]) padLiveFxState[padIndex] = { reverse: false, pitch: 1.0, stutter: false, stutterMs: 100 };
+    padLiveFxState[padIndex].stutterMs = ms;
+    const active = padLiveFxState[padIndex].stutter;
+    sendWebSocket({ cmd: 'setStutter', pad: padIndex, active: active, interval: ms });
+    const vEl = document.getElementById('padFxStutVal');
+    if (vEl) vEl.textContent = ms;
+}
+
 function clearPadFxAll(padIndex) {
     padFxState[padIndex] = null;
+    if (padLiveFxState[padIndex]) {
+        padLiveFxState[padIndex] = { reverse: false, pitch: 1.0, stutter: false, stutterMs: 100 };
+    }
     sendWebSocket({ cmd: 'clearPadFX', pad: padIndex });
+    sendWebSocket({ cmd: 'setReverse', pad: padIndex, value: false });
+    sendWebSocket({ cmd: 'setPitchShift', pad: padIndex, value: 1.0 });
+    sendWebSocket({ cmd: 'setStutter', pad: padIndex, active: false, interval: 100 });
     updatePadFxIndicator(padIndex);
     closePadFxPopup();
-    // Sync to track if enabled
     if (padSeqSyncEnabled && padIndex < 16) {
         trackFxState[padIndex] = null;
         sendWebSocket({ cmd: 'clearTrackFX', track: padIndex });
@@ -1273,23 +1354,23 @@ function clearPadFxAll(padIndex) {
 }
 
 function updatePadFxIndicator(padIndex) {
+    const fx   = padFxState[padIndex];
+    const live = padLiveFxState[padIndex];
+    const hasFx = !!(
+        (fx && ((fx.distortion > 0) || (fx.bitcrush !== undefined && fx.bitcrush < 16))) ||
+        (live && (live.reverse || live.pitch !== 1.0 || live.stutter))
+    );
     let pad = document.querySelector(`.pad[data-pad="${padIndex}"]`);
-    // Also check XTRA pads
     if (!pad) {
         const xtraPad = document.querySelector(`.pad-xtra[data-pad-index="${padIndex}"]`);
         if (xtraPad) {
             const fxBtn = xtraPad.querySelector('.xtra-fx');
-            const fx = padFxState[padIndex];
-            const hasFx = fx && ((fx.distortion && fx.distortion > 0) || (fx.bitcrush && fx.bitcrush < 16));
             if (fxBtn) fxBtn.classList.toggle('active', hasFx);
             return;
         }
         return;
     }
     let badge = pad.querySelector('.pad-fx-badge');
-    const fx = padFxState[padIndex];
-    const hasFx = fx && ((fx.distortion && fx.distortion > 0) || (fx.bitcrush && fx.bitcrush < 16));
-    
     if (hasFx) {
         if (!badge) {
             badge = document.createElement('span');
@@ -1303,27 +1384,164 @@ function updatePadFxIndicator(padIndex) {
     }
 }
 
+// === TRACK FX — Reverse / Pitch / Stutter ===
+function setTrackFxReverse(trackIndex, val) {
+    if (!trackFxEffects[trackIndex]) trackFxEffects[trackIndex] = { reverse: false, pitch: 1.0, stutter: false, stutterMs: 100 };
+    trackFxEffects[trackIndex].reverse = val;
+    sendWebSocket({ cmd: 'setReverse', track: trackIndex, value: val });
+    updateTrackStepDots(trackIndex);
+    const btn = document.getElementById('trkRevBtn');
+    if (btn) { btn.textContent = val ? '⏪ ON' : '▶️ OFF'; btn.classList.toggle('fx-on', val); }
+}
+function setTrackFxPitch(trackIndex, val) {
+    val = parseFloat(val);
+    if (!trackFxEffects[trackIndex]) trackFxEffects[trackIndex] = { reverse: false, pitch: 1.0, stutter: false, stutterMs: 100 };
+    trackFxEffects[trackIndex].pitch = val;
+    sendWebSocket({ cmd: 'setPitchShift', track: trackIndex, value: val });
+    updateTrackStepDots(trackIndex);
+    const vEl = document.getElementById('trkFxPitchVal');
+    if (vEl) vEl.textContent = val.toFixed(2);
+    document.querySelectorAll('#padFxModal .pitch-preset-btn').forEach(b => {
+        b.classList.toggle('active', Math.abs(parseFloat(b.textContent) - val) < 0.01);
+    });
+}
+function setTrackFxStutterToggle(trackIndex, val) {
+    if (!trackFxEffects[trackIndex]) trackFxEffects[trackIndex] = { reverse: false, pitch: 1.0, stutter: false, stutterMs: 100 };
+    trackFxEffects[trackIndex].stutter = val;
+    const ms = trackFxEffects[trackIndex].stutterMs || 100;
+    sendWebSocket({ cmd: 'setStutter', track: trackIndex, active: val, interval: ms });
+    updateTrackStepDots(trackIndex);
+    const btn = document.getElementById('trkStutBtn');
+    if (btn) { btn.textContent = val ? '🔁 ON' : '🔁 OFF'; btn.classList.toggle('fx-on', val); }
+}
+function setTrackFxStutterMs(trackIndex, ms) {
+    ms = parseInt(ms);
+    if (!trackFxEffects[trackIndex]) trackFxEffects[trackIndex] = { reverse: false, pitch: 1.0, stutter: false, stutterMs: 100 };
+    trackFxEffects[trackIndex].stutterMs = ms;
+    const active = trackFxEffects[trackIndex].stutter;
+    sendWebSocket({ cmd: 'setStutter', track: trackIndex, active: active, interval: ms });
+    const vEl = document.getElementById('trkFxStutVal');
+    if (vEl) vEl.textContent = ms;
+}
+
+// === TRACK FX — Echo / Flanger / Compressor ===
+function setTrackFxEchoActive(trackIndex, val) {
+    if (!trackLiveFxState[trackIndex]) trackLiveFxState[trackIndex] = { echo: { active: false, time: 100, feedback: 40, mix: 50 }, flanger: { active: false, rate: 50, depth: 50, feedback: 30 }, compressor: { active: false, threshold: -20, ratio: 4 } };
+    trackLiveFxState[trackIndex].echo.active = val;
+    const e = trackLiveFxState[trackIndex].echo;
+    sendWebSocket({ cmd: 'setTrackEcho', track: trackIndex, active: val, time: e.time, feedback: e.feedback, mix: e.mix });
+    updateTrackStepDots(trackIndex);
+    const btn = document.getElementById('trkEchoBtn');
+    if (btn) { btn.textContent = val ? '🔊 ON' : '🔊 OFF'; btn.classList.toggle('fx-on', val); }
+}
+function setTrackFxEchoParam(trackIndex, param, val) {
+    if (!trackLiveFxState[trackIndex]) return;
+    trackLiveFxState[trackIndex].echo[param] = val;
+    const e = trackLiveFxState[trackIndex].echo;
+    sendWebSocket({ cmd: 'setTrackEcho', track: trackIndex, active: e.active, time: e.time, feedback: e.feedback, mix: e.mix });
+    const el = document.getElementById(`trkEcho${param.charAt(0).toUpperCase()+param.slice(1)}Val`);
+    if (el) el.textContent = val;
+}
+function setTrackFxFlangerActive(trackIndex, val) {
+    if (!trackLiveFxState[trackIndex]) trackLiveFxState[trackIndex] = { echo: { active: false, time: 100, feedback: 40, mix: 50 }, flanger: { active: false, rate: 50, depth: 50, feedback: 30 }, compressor: { active: false, threshold: -20, ratio: 4 } };
+    trackLiveFxState[trackIndex].flanger.active = val;
+    const f = trackLiveFxState[trackIndex].flanger;
+    sendWebSocket({ cmd: 'setTrackFlanger', track: trackIndex, active: val, rate: f.rate * 0.1, depth: f.depth / 100, feedback: f.feedback / 100 });
+    updateTrackStepDots(trackIndex);
+    const btn = document.getElementById('trkFlngBtn');
+    if (btn) { btn.textContent = val ? '🌀 ON' : '🌀 OFF'; btn.classList.toggle('fx-on', val); }
+}
+function setTrackFxFlangerParam(trackIndex, param, val) {
+    if (!trackLiveFxState[trackIndex]) return;
+    trackLiveFxState[trackIndex].flanger[param] = val;
+    const f = trackLiveFxState[trackIndex].flanger;
+    sendWebSocket({ cmd: 'setTrackFlanger', track: trackIndex, active: f.active, rate: f.rate * 0.1, depth: f.depth / 100, feedback: f.feedback / 100 });
+    const el = document.getElementById(`trkFlng${param.charAt(0).toUpperCase()+param.slice(1)}Val`);
+    if (el) el.textContent = val;
+}
+function setTrackFxCompActive(trackIndex, val) {
+    if (!trackLiveFxState[trackIndex]) trackLiveFxState[trackIndex] = { echo: { active: false, time: 100, feedback: 40, mix: 50 }, flanger: { active: false, rate: 50, depth: 50, feedback: 30 }, compressor: { active: false, threshold: -20, ratio: 4 } };
+    trackLiveFxState[trackIndex].compressor.active = val;
+    const c = trackLiveFxState[trackIndex].compressor;
+    sendWebSocket({ cmd: 'setTrackCompressor', track: trackIndex, active: val, threshold: c.threshold, ratio: c.ratio });
+    updateTrackStepDots(trackIndex);
+    const btn = document.getElementById('trkCompBtn');
+    if (btn) { btn.textContent = val ? '🗜️ ON' : '🗜️ OFF'; btn.classList.toggle('fx-on', val); }
+}
+function setTrackFxCompParam(trackIndex, param, val) {
+    if (!trackLiveFxState[trackIndex]) return;
+    trackLiveFxState[trackIndex].compressor[param] = val;
+    const c = trackLiveFxState[trackIndex].compressor;
+    sendWebSocket({ cmd: 'setTrackCompressor', track: trackIndex, active: c.active, threshold: c.threshold, ratio: c.ratio });
+    const el = document.getElementById(`trkComp${param.charAt(0).toUpperCase()+param.slice(1)}Val`);
+    if (el) el.textContent = val;
+}
+
+// ── Step filter/fx dot indicators ────────────────────────────────────────────
+function updateTrackStepDots(track) {
+    const filterType = trackFilterState[track] || 0;
+    const fx   = trackFxState[track];
+    const eff  = trackFxEffects[track];
+    const live = trackLiveFxState[track];
+    const hasFx = !!(
+        (fx   && ((fx.distortion > 0) || (fx.bitcrush !== undefined && fx.bitcrush < 16))) ||
+        (eff  && (eff.reverse || (eff.pitch !== undefined && eff.pitch !== 1.0) || eff.stutter)) ||
+        (live && (live.echo.active || live.flanger.active || live.compressor.active))
+    );
+
+    document.querySelectorAll(`.seq-step[data-track="${track}"]`).forEach(stepEl => {
+        // Filter dot — top-right, visible only on active steps (CSS)
+        let fd = stepEl.querySelector('.step-filter-dot');
+        if (filterType > 0) {
+            if (!fd) { fd = document.createElement('i'); fd.className = 'step-filter-dot'; stepEl.appendChild(fd); }
+            fd.dataset.ft = String(filterType);
+        } else if (fd) { fd.remove(); }
+        // FX dot — bottom-right, visible only on active steps (CSS)
+        let xd = stepEl.querySelector('.step-fx-dot');
+        if (hasFx) {
+            if (!xd) { xd = document.createElement('i'); xd.className = 'step-fx-dot'; stepEl.appendChild(xd); }
+        } else if (xd) { xd.remove(); }
+    });
+    // Highlight fxCell buttons to reflect state
+    const fxCell = document.querySelector(`.seq-fx-cell[data-track="${track}"]`);
+    if (fxCell) {
+        const fb = fxCell.querySelector('.seq-filter-btn');
+        const db = fxCell.querySelector('.seq-dist-btn');
+        if (fb) fb.classList.toggle('fx-active', filterType > 0);
+        if (db) db.classList.toggle('fx-active', hasFx);
+    }
+}
+window.updateTrackStepDots = updateTrackStepDots;
+
 // Track FX functions (same concept but for sequencer tracks)
 function showTrackFxPopup(trackIndex) {
-    closePadFxPopup(); // Reuse close
-    
+    closePadFxPopup();
     const backdrop = document.createElement('div');
     backdrop.id = 'padFxBackdrop';
     backdrop.className = 'loop-popup-backdrop';
     backdrop.addEventListener('click', closePadFxPopup);
-    
-    const currentFx = trackFxState[trackIndex] || {};
-    const distortion = currentFx.distortion || 0;
-    const distMode = currentFx.distMode || 0;
-    const bitcrush = currentFx.bitcrush || 16;
-    
+
+    const cfx   = trackFxState[trackIndex] || {};
+    const ceff  = trackFxEffects[trackIndex] || {};
+    const clive = trackLiveFxState[trackIndex] || {};
+    const dist   = cfx.distortion || 0;
+    const dmode  = cfx.distMode || 0;
+    const bits   = cfx.bitcrush || 16;
+    const rev    = !!ceff.reverse;
+    const pitch  = ceff.pitch !== undefined ? ceff.pitch : 1.0;
+    const stut   = !!ceff.stutter;
+    const stutMs = ceff.stutterMs || 100;
+    const echo   = clive.echo   || { active: false, time: 100, feedback: 40, mix: 50 };
+    const flng   = clive.flanger|| { active: false, rate: 50, depth: 50, feedback: 30 };
+    const comp   = clive.compressor || { active: false, threshold: -20, ratio: 4 };
+
     const trackName = padNames[trackIndex] || `Track ${trackIndex + 1}`;
     const popup = document.createElement('div');
     popup.id = 'padFxModal';
     popup.className = 'pad-fx-modal';
     popup.innerHTML = `
         <div class="loop-popup-header">
-            <span class="loop-popup-title">🎸 TRACK FX: ${trackName}</span>
+            <span class="loop-popup-title">🎚️ TRACK FX: ${trackName}</span>
             <button class="loop-popup-close" onclick="closePadFxPopup()">&times;</button>
         </div>
         <div class="pad-fx-content">
@@ -1331,37 +1549,125 @@ function showTrackFxPopup(trackIndex) {
                 <h4>🎸 DISTORTION</h4>
                 <div class="pad-fx-modes">
                     ${DISTORTION_MODES.map(m => `
-                        <button class="loop-type-btn pad-fx-mode-btn ${m.id === distMode ? 'active' : ''}" 
+                        <button class="loop-type-btn pad-fx-mode-btn ${m.id === dmode ? 'active' : ''}"
                                 data-mode="${m.id}" onclick="setTrackFxDistMode(${trackIndex}, ${m.id})">
                             <span class="loop-type-icon">${m.icon}</span>
                             <span class="loop-type-name">${m.name}</span>
-                        </button>
-                    `).join('')}
+                        </button>`).join('')}
                 </div>
                 <div class="pad-fx-slider-row">
-                    <label>Drive <span id="padFxDriveVal">${distortion}</span>%</label>
-                    <input type="range" id="padFxDrive" min="0" max="100" value="${distortion}" 
+                    <label>Drive <span id="padFxDriveVal">${dist}</span>%</label>
+                    <input type="range" id="padFxDrive" min="0" max="100" value="${dist}"
                            oninput="setTrackFxDrive(${trackIndex}, this.value)" class="fx-slider">
                 </div>
             </div>
             <div class="pad-fx-section">
                 <h4>📼 BIT CRUSH</h4>
                 <div class="pad-fx-slider-row">
-                    <label>Bits <span id="padFxBitsVal">${bitcrush}</span></label>
-                    <input type="range" id="padFxBits" min="4" max="16" value="${bitcrush}" 
+                    <label>Bits <span id="padFxBitsVal">${bits}</span></label>
+                    <input type="range" id="padFxBits" min="4" max="16" value="${bits}"
                            oninput="setTrackFxBits(${trackIndex}, this.value)" class="fx-slider">
+                </div>
+            </div>
+            <div class="pad-fx-section">
+                <h4>⏪ REVERSE</h4>
+                <button class="fx-toggle-btn ${rev ? 'fx-on' : ''}" id="trkRevBtn"
+                        onclick="setTrackFxReverse(${trackIndex}, !${rev})">
+                    ${rev ? '⏪ ON' : '▶️ OFF'}
+                </button>
+            </div>
+            <div class="pad-fx-section">
+                <h4>🎵 PITCH SHIFT</h4>
+                <div class="pad-fx-slider-row">
+                    <label>Pitch <span id="trkFxPitchVal">${pitch.toFixed(2)}</span>×</label>
+                    <input type="range" id="trkFxPitch" min="25" max="200" value="${Math.round(pitch*100)}"
+                           oninput="setTrackFxPitch(${trackIndex}, this.value/100)" class="fx-slider">
+                </div>
+                <div class="pad-fx-modes" style="grid-template-columns:repeat(4,1fr);margin-top:6px">
+                    ${[0.25,0.5,0.75,1.0,1.25,1.5,2.0].map(v=>`
+                        <button class="pitch-preset-btn ${Math.abs(pitch-v)<0.01?'active':''}"
+                                onclick="setTrackFxPitch(${trackIndex},${v})">${v}×</button>`).join('')}
+                </div>
+            </div>
+            <div class="pad-fx-section">
+                <h4>🔁 STUTTER</h4>
+                <button class="fx-toggle-btn ${stut ? 'fx-on' : ''}" id="trkStutBtn"
+                        onclick="setTrackFxStutterToggle(${trackIndex}, !${stut})">
+                    ${stut ? '🔁 ON' : '🔁 OFF'}
+                </button>
+                <div class="pad-fx-slider-row" style="margin-top:8px">
+                    <label>Interval <span id="trkFxStutVal">${stutMs}</span>ms</label>
+                    <input type="range" id="trkFxStutMs" min="20" max="500" value="${stutMs}"
+                           oninput="setTrackFxStutterMs(${trackIndex}, this.value)" class="fx-slider">
+                </div>
+            </div>
+            <div class="pad-fx-section">
+                <h4>🔊 ECHO / DELAY</h4>
+                <button class="fx-toggle-btn ${echo.active ? 'fx-on' : ''}" id="trkEchoBtn"
+                        onclick="setTrackFxEchoActive(${trackIndex}, !${echo.active})">
+                    ${echo.active ? '🔊 ON' : '🔊 OFF'}
+                </button>
+                <div class="pad-fx-slider-row" style="margin-top:8px">
+                    <label>Time <span id="trkEchoTimeVal">${echo.time}</span>ms</label>
+                    <input type="range" id="trkEchoTime" min="10" max="750" value="${echo.time}"
+                           oninput="setTrackFxEchoParam(${trackIndex},'time',+this.value)" class="fx-slider">
+                </div>
+                <div class="pad-fx-slider-row">
+                    <label>Feedback <span id="trkEchoFbVal">${echo.feedback}</span>%</label>
+                    <input type="range" id="trkEchoFb" min="0" max="95" value="${echo.feedback}"
+                           oninput="setTrackFxEchoParam(${trackIndex},'feedback',+this.value)" class="fx-slider">
+                </div>
+                <div class="pad-fx-slider-row">
+                    <label>Mix <span id="trkEchoMixVal">${echo.mix}</span>%</label>
+                    <input type="range" id="trkEchoMix" min="0" max="100" value="${echo.mix}"
+                           oninput="setTrackFxEchoParam(${trackIndex},'mix',+this.value)" class="fx-slider">
+                </div>
+            </div>
+            <div class="pad-fx-section">
+                <h4>🌀 FLANGER</h4>
+                <button class="fx-toggle-btn ${flng.active ? 'fx-on' : ''}" id="trkFlngBtn"
+                        onclick="setTrackFxFlangerActive(${trackIndex}, !${flng.active})">
+                    ${flng.active ? '🌀 ON' : '🌀 OFF'}
+                </button>
+                <div class="pad-fx-slider-row" style="margin-top:8px">
+                    <label>Rate <span id="trkFlngRateVal">${flng.rate}</span>×0.1Hz</label>
+                    <input type="range" id="trkFlngRate" min="1" max="50" value="${flng.rate}"
+                           oninput="setTrackFxFlangerParam(${trackIndex},'rate',+this.value)" class="fx-slider">
+                </div>
+                <div class="pad-fx-slider-row">
+                    <label>Depth <span id="trkFlngDepthVal">${flng.depth}</span>%</label>
+                    <input type="range" id="trkFlngDepth" min="0" max="100" value="${flng.depth}"
+                           oninput="setTrackFxFlangerParam(${trackIndex},'depth',+this.value)" class="fx-slider">
+                </div>
+                <div class="pad-fx-slider-row">
+                    <label>Feedback <span id="trkFlngFbVal">${flng.feedback}</span>%</label>
+                    <input type="range" id="trkFlngFb" min="-90" max="90" value="${flng.feedback}"
+                           oninput="setTrackFxFlangerParam(${trackIndex},'feedback',+this.value)" class="fx-slider">
+                </div>
+            </div>
+            <div class="pad-fx-section">
+                <h4>🗜️ COMPRESSOR</h4>
+                <button class="fx-toggle-btn ${comp.active ? 'fx-on' : ''}" id="trkCompBtn"
+                        onclick="setTrackFxCompActive(${trackIndex}, !${comp.active})">
+                    ${comp.active ? '🗜️ ON' : '🗜️ OFF'}
+                </button>
+                <div class="pad-fx-slider-row" style="margin-top:8px">
+                    <label>Threshold <span id="trkCompThVal">${comp.threshold}</span>dB</label>
+                    <input type="range" id="trkCompTh" min="-60" max="0" value="${comp.threshold}"
+                           oninput="setTrackFxCompParam(${trackIndex},'threshold',+this.value)" class="fx-slider">
+                </div>
+                <div class="pad-fx-slider-row">
+                    <label>Ratio <span id="trkCompRatioVal">${comp.ratio}</span>:1</label>
+                    <input type="range" id="trkCompRatio" min="1" max="20" value="${comp.ratio}"
+                           oninput="setTrackFxCompParam(${trackIndex},'ratio',+this.value)" class="fx-slider">
                 </div>
             </div>
             <button class="pad-fx-clear-btn" onclick="clearTrackFxAll(${trackIndex})">🚫 CLEAR ALL FX</button>
         </div>
     `;
-    
     document.body.appendChild(backdrop);
     document.body.appendChild(popup);
-    requestAnimationFrame(() => {
-        backdrop.classList.add('visible');
-        popup.classList.add('visible');
-    });
+    requestAnimationFrame(() => { backdrop.classList.add('visible'); popup.classList.add('visible'); });
 }
 
 function setTrackFxDistMode(trackIndex, mode) {
@@ -1389,6 +1695,7 @@ function setTrackFxDrive(trackIndex, value) {
     const mode = trackFxState[trackIndex].distMode || 0;
     document.getElementById('padFxDriveVal').textContent = val;
     sendWebSocket({ cmd: 'setTrackDistortion', track: trackIndex, amount: val, mode: mode });
+    updateTrackStepDots(trackIndex);
     // Sync to pad if enabled
     if (padSeqSyncEnabled && trackIndex < 16) {
         if (!padFxState[trackIndex]) padFxState[trackIndex] = {};
@@ -1405,6 +1712,7 @@ function setTrackFxBits(trackIndex, value) {
     trackFxState[trackIndex].bitcrush = val;
     document.getElementById('padFxBitsVal').textContent = val;
     sendWebSocket({ cmd: 'setTrackBitCrush', track: trackIndex, value: val });
+    updateTrackStepDots(trackIndex);
     // Sync to pad if enabled
     if (padSeqSyncEnabled && trackIndex < 16) {
         if (!padFxState[trackIndex]) padFxState[trackIndex] = {};
@@ -1416,9 +1724,21 @@ function setTrackFxBits(trackIndex, value) {
 
 function clearTrackFxAll(trackIndex) {
     trackFxState[trackIndex] = null;
+    if (trackFxEffects[trackIndex]) trackFxEffects[trackIndex] = { reverse: false, pitch: 1.0, stutter: false, stutterMs: 100 };
+    if (trackLiveFxState[trackIndex]) trackLiveFxState[trackIndex] = {
+        echo:       { active: false, time: 100, feedback: 40, mix: 50 },
+        flanger:    { active: false, rate: 50, depth: 50, feedback: 30 },
+        compressor: { active: false, threshold: -20, ratio: 4 }
+    };
     sendWebSocket({ cmd: 'clearTrackFX', track: trackIndex });
+    sendWebSocket({ cmd: 'setReverse', track: trackIndex, value: false });
+    sendWebSocket({ cmd: 'setPitchShift', track: trackIndex, value: 1.0 });
+    sendWebSocket({ cmd: 'setStutter', track: trackIndex, active: false, interval: 100 });
+    sendWebSocket({ cmd: 'setTrackEcho', track: trackIndex, active: false, time: 100, feedback: 40, mix: 50 });
+    sendWebSocket({ cmd: 'setTrackFlanger', track: trackIndex, active: false, rate: 0.5, depth: 0, feedback: 0 });
+    sendWebSocket({ cmd: 'setTrackCompressor', track: trackIndex, active: false, threshold: -20, ratio: 4 });
+    updateTrackStepDots(trackIndex);
     closePadFxPopup();
-    // Sync to pad if enabled
     if (padSeqSyncEnabled && trackIndex < 16) {
         padFxState[trackIndex] = null;
         sendWebSocket({ cmd: 'clearPadFX', pad: trackIndex });
@@ -1432,10 +1752,24 @@ window.showTrackFxPopup = showTrackFxPopup;
 window.setPadFxDistMode = setPadFxDistMode;
 window.setPadFxDrive = setPadFxDrive;
 window.setPadFxBits = setPadFxBits;
+window.setPadFxReverse = setPadFxReverse;
+window.setPadFxPitch = setPadFxPitch;
+window.setPadFxStutterToggle = setPadFxStutterToggle;
+window.setPadFxStutterMs = setPadFxStutterMs;
 window.clearPadFxAll = clearPadFxAll;
 window.setTrackFxDistMode = setTrackFxDistMode;
 window.setTrackFxDrive = setTrackFxDrive;
 window.setTrackFxBits = setTrackFxBits;
+window.setTrackFxReverse = setTrackFxReverse;
+window.setTrackFxPitch = setTrackFxPitch;
+window.setTrackFxStutterToggle = setTrackFxStutterToggle;
+window.setTrackFxStutterMs = setTrackFxStutterMs;
+window.setTrackFxEchoActive = setTrackFxEchoActive;
+window.setTrackFxEchoParam = setTrackFxEchoParam;
+window.setTrackFxFlangerActive = setTrackFxFlangerActive;
+window.setTrackFxFlangerParam = setTrackFxFlangerParam;
+window.setTrackFxCompActive = setTrackFxCompActive;
+window.setTrackFxCompParam = setTrackFxCompParam;
 window.clearTrackFxAll = clearTrackFxAll;
 
 // Update pad filter indicator visual
@@ -1854,11 +2188,11 @@ function createSequencer() {
         loopIndicator.className = 'loop-indicator';
         loopIndicator.textContent = 'LOOP';
         
-        label.appendChild(volumeBtn);
-        label.appendChild(muteBtn);
-        label.appendChild(soloBtn);
-        label.appendChild(name);
-        label.appendChild(loopIndicator);
+        label.appendChild(name);          // grid row1 col1
+        label.appendChild(volumeBtn);       // grid row1 col2
+        label.appendChild(muteBtn);         // grid row2 col1
+        label.appendChild(soloBtn);         // grid row2 col2
+        label.appendChild(loopIndicator);   // absolute overlay
         label.style.borderColor = trackColors[track];
         
         // Set initial background with color and alpha based on volume
@@ -4052,25 +4386,10 @@ function applyFilterPreset(filterType, cutoffFreq, customResonance, customGain) 
             );
         }
         
-        // Create or update badge on track label
-        const trackLabel = document.querySelector(`.track-label[data-track="${track}"]`);
-        if (trackLabel) {
-            trackLabel.querySelectorAll('.track-filter-badge').forEach(b => b.remove());
-            
-            if (filterType > 0 && filterType < 10) {
-                const badge = document.createElement('div');
-                badge.className = 'track-filter-badge';
-                const filterInitials = ['', 'LP', 'HP', 'BP', 'NT', 'BS', 'TB', 'PK', 'PH', 'RS'];
-                badge.innerHTML = `${filterIcons[filterType]} <span class="badge-initials">${filterInitials[filterType]}</span>`;
-                badge.style.borderColor = filterColors[filterType];
-                badge.style.boxShadow = `0 0 6px ${filterColors[filterType]}40`;
-                trackLabel.appendChild(badge);
-                // Pulse animation on apply
-                trackLabel.classList.add('filter-applied-pulse');
-                setTimeout(() => trackLabel.classList.remove('filter-applied-pulse'), 600);
-            }
-        }
-        
+        // Update step filter dots
+        trackFilterState[track] = filterType;
+        updateTrackStepDots(track);
+
         return;
     }
     
@@ -5881,9 +6200,15 @@ function _setupWaveformMarkers(modal, canvas, state) {
     const volSlider = document.getElementById('hdrVolPopupSlider');
     const volVal    = document.getElementById('hdrVolPopupValue');
     const volLabel  = document.getElementById('hdrVolPopupLabel');
+    const trackSel  = document.getElementById('hdrTrackSelect');
     const trackNames16 = ['BD','SD','CH','OH','CY','CP','RS','CB','LT','MT','HT','MA','CL','HC','MC','LC'];
 
     function getSelectedTrack() {
+        // Primero el selector del header
+        if (trackSel) {
+            const v = parseInt(trackSel.value);
+            if (!isNaN(v) && v >= 0) return v;
+        }
         if (typeof window.lastSelectedPad === 'number') return window.lastSelectedPad;
         const selEl = document.querySelector('.pad.selected, .pad-active-selected, .pad[data-selected="true"]');
         if (selEl) {
@@ -5891,6 +6216,36 @@ function _setupWaveformMarkers(modal, canvas, state) {
             if (!isNaN(idx) && idx >= 0) return idx;
         }
         return -1;
+    }
+
+    // ── Sync selector → estado M/S ──
+    function refreshBtnStates(t) {
+        if (muteBtn) {
+            const muted = typeof trackMutedState !== 'undefined' ? !!trackMutedState[t] : false;
+            muteBtn.classList.toggle('active', muted);
+        }
+        if (soloBtn) {
+            const isSolo = typeof trackSoloState !== 'undefined' && trackSoloState === t;
+            soloBtn.classList.toggle('active', isSolo);
+        }
+    }
+
+    if (trackSel) {
+        trackSel.addEventListener('change', () => {
+            const t = parseInt(trackSel.value);
+            if (t >= 0) {
+                window.lastSelectedPad = t;
+                refreshBtnStates(t);
+            }
+        });
+        // API pública para que otros módulos sincronicen el selector
+        window.updateHdrTrackSelect = function(trackIdx) {
+            if (trackIdx >= 0 && trackIdx < 16) {
+                trackSel.value = trackIdx;
+                window.lastSelectedPad = trackIdx;
+                refreshBtnStates(trackIdx);
+            }
+        };
     }
 
     // ── V button ──

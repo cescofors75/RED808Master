@@ -4,10 +4,20 @@
 // Static callback wrapper
 static MIDIController* s_midiInstance = nullptr;
 
-// Transfer callback (requerido por USB Host)
+// Transfer callback — se llama cuando USB Host completa una lectura
 static void transferCallback(usb_transfer_t* transfer) {
-  // Este callback se llama cuando se completa el transfer
-  // No hacemos nada aquí porque procesamos los datos en el main loop
+  if (!transfer || !transfer->context) return;
+  MIDIController* ctrl = static_cast<MIDIController*>(transfer->context);
+
+  if (transfer->status == USB_TRANSFER_STATUS_COMPLETED && transfer->actual_num_bytes > 0) {
+    ctrl->handleMIDIData(transfer->data_buffer, transfer->actual_num_bytes);
+  }
+
+  // Re-submit para lectura continua
+  if (transfer->status != USB_TRANSFER_STATUS_CANCELED &&
+      transfer->status != USB_TRANSFER_STATUS_STALL) {
+    usb_host_transfer_submit(transfer);
+  }
 }
 
 MIDIController::MIDIController() 
@@ -366,46 +376,46 @@ bool MIDIController::openMidiDevice(uint8_t deviceAddress) {
   }
   Serial.println("[MIDI] === End interface list ===");
   
-  // Buscar interfaz compatible (versión que funcionaba)
-  interfaceNum = -1;  // Usar variable miembro, no local
+  // ── Buscar interfaz compatible (prioridad: MIDI Streaming > CDC > Vendor) ──
+  interfaceNum = -1;
   offset = 0;
-  
+  int cdcInterface    = -1;
+  int vendorInterface = -1;
+  int anyInterface    = -1;
+
   while (offset < totalLength) {
     desc = (const usb_standard_desc_t*)((uint8_t*)configDesc + offset);
-    
+
     if (desc->bDescriptorType == USB_B_DESCRIPTOR_TYPE_INTERFACE) {
       const usb_intf_desc_t* intfDesc = (const usb_intf_desc_t*)desc;
-      
-      // CDC Data: Class=0x0A
-      if (intfDesc->bInterfaceClass == 0x0A) {
+
+      // Clase 0x01 Audio, Subclase 0x03 MIDI Streaming — Arturia, Roland, Korg...
+      if (intfDesc->bInterfaceClass == 0x01 && intfDesc->bInterfaceSubClass == 0x03) {
         interfaceNum = intfDesc->bInterfaceNumber;
-        Serial.printf("[MIDI] ✓ Found CDC Data interface: %d\n", interfaceNum);
+        Serial.printf("[MIDI] ✓ Found USB MIDI Streaming interface: %d\n", interfaceNum);
         break;
       }
-      
-      // Vendor Specific: Class=0xFF (lo que está enviando ahora el device)
-      if (intfDesc->bInterfaceClass == 0xFF) {
-        interfaceNum = intfDesc->bInterfaceNumber;
-        Serial.printf("[MIDI] ✓ Found Vendor Specific interface: %d\n", interfaceNum);
-        break;
-      }
+      // CDC Data 0x0A
+      if (intfDesc->bInterfaceClass == 0x0A && cdcInterface < 0)
+        cdcInterface = intfDesc->bInterfaceNumber;
+      // Vendor Specific 0xFF
+      if (intfDesc->bInterfaceClass == 0xFF && vendorInterface < 0)
+        vendorInterface = intfDesc->bInterfaceNumber;
+      // Cualquiera con endpoints
+      if (intfDesc->bNumEndpoints > 0 && anyInterface < 0)
+        anyInterface = intfDesc->bInterfaceNumber;
     }
-    
+
     offset += desc->bLength;
   }
-  
-  // Si no encontramos nada, usar la interfaz 0 como fallback
-  if (interfaceNum < 0) {
-    Serial.println("[MIDI] ⚠️  No standard interface, using interface 0");
-    interfaceNum = 0;
-  }
-  
-  if (interfaceNum < 0) {
-    Serial.println("[MIDI] ❌ No compatible interface found");
-    usb_host_device_close(clientHandle, deviceHandle);
-    deviceHandle = nullptr;
-    return false;
-  }
+
+  // Fallback en orden de preferencia
+  if (interfaceNum < 0) interfaceNum = cdcInterface;
+  if (interfaceNum < 0) interfaceNum = vendorInterface;
+  if (interfaceNum < 0) interfaceNum = anyInterface;
+  if (interfaceNum < 0) interfaceNum = 0; // último recurso
+
+  Serial.printf("[MIDI] Using interface: %d\n", interfaceNum);
   
   // Claim the interface
   err = usb_host_interface_claim(clientHandle, deviceHandle, interfaceNum, 0);
@@ -518,45 +528,25 @@ void MIDIController::closeMidiDevice() {
 
 void MIDIController::readMidiData() {
   if (!midiTransfer || !deviceHandle) return;
-  
-  // Setup transfer
-  midiTransfer->device_handle = deviceHandle;
+
+  // Solo enviar si el transfer NO está ya en vuelo
+  // (el callback se encarga de re-submitear automáticamente)
+  static bool transferSubmitted = false;
+  if (transferSubmitted) return;
+
+  midiTransfer->device_handle    = deviceHandle;
   midiTransfer->bEndpointAddress = midiEndpointAddress;
-  midiTransfer->callback = transferCallback; // Ahora con callback
-  midiTransfer->context = this;
-  midiTransfer->num_bytes = midiMaxPacketSize;
-  midiTransfer->timeout_ms = 10;
-  
-  // Submit transfer
+  midiTransfer->callback         = transferCallback;
+  midiTransfer->context          = this;
+  midiTransfer->num_bytes        = midiMaxPacketSize;
+  midiTransfer->timeout_ms       = 0; // 0 = sin timeout, lectura continua
+
   esp_err_t err = usb_host_transfer_submit(midiTransfer);
-  if (err != ESP_OK) {
-    return; // No data available or error
-  }
-  
-  // Wait for completion (synchronous mode)
-  vTaskDelay(pdMS_TO_TICKS(1)); // Small delay for transfer to complete
-  
-  // Check if transfer completed
-  if (midiTransfer->status == USB_TRANSFER_STATUS_COMPLETED && 
-      midiTransfer->actual_num_bytes > 0) {
-    
-    uint8_t* data = midiTransfer->data_buffer;
-    size_t numBytes = midiTransfer->actual_num_bytes;
-    
-    // Debug: mostrar datos raw recibidos
-    static uint32_t lastDebugPrint = 0;
-    if (millis() - lastDebugPrint > 500) {
-      Serial.printf("[MIDI] Received %d bytes: ", numBytes);
-      for (size_t i = 0; i < min(numBytes, (size_t)16); i++) {
-        Serial.printf("%02X ", data[i]);
-      }
-      Serial.println();
-      lastDebugPrint = millis();
-    }
-    
-    // Procesar como MIDI raw (3 bytes por mensaje)
-    // El device envía: [status byte] [data1] [data2]
-    handleMIDIData(data, numBytes);
+  if (err == ESP_OK) {
+    transferSubmitted = true;
+    Serial.println("[MIDI] ✓ Continuous read transfer submitted");
+  } else {
+    Serial.printf("[MIDI] ⚠️ Transfer submit failed: %s\n", esp_err_to_name(err));
   }
 }
 

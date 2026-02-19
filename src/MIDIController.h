@@ -82,8 +82,10 @@ public:
   uint32_t getTotalMessagesReceived() const { return totalMessages; }
   uint32_t getMessagesPerSecond() const { return messagesPerSecond; }
 
+  // Called from static transfer callback (must be public)
+  void handleMIDIData(const uint8_t* data, size_t length);
+
 private:
-  static void usbHostTask(void* arg);
   static void clientEventCallback(const usb_host_client_event_msg_t* eventMsg, void* arg);
   
   void handleMIDIData(const uint8_t* data, size_t length);
