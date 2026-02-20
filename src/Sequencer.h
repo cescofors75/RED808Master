@@ -21,6 +21,22 @@ enum LoopType {
   LOOP_ARRHYTHMIC = 3    // Random timing
 };
 
+// -----------------------------------------------------------------------
+// PatternData — all large per-step arrays in one heap-block (PSRAM).
+// Kept OUTSIDE the Sequencer class so the class BSS is small.
+// Allocated with ps_calloc() in Sequencer::Sequencer().
+// -----------------------------------------------------------------------
+struct PatternData {
+  bool    steps[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+  uint8_t velocities[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+  uint8_t noteLenDivs[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+  uint8_t probabilities[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+  uint8_t ratchets[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+  bool    stepVolumeLockEnabled[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+  uint8_t stepVolumeLockValue[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+};
+// sizeof(PatternData) ≈ 229 KB  →  allocated from 8 MB PSRAM, not DRAM
+
 class Sequencer {
 public:
   Sequencer();
@@ -55,6 +71,21 @@ public:
   void setStepNoteLen(int track, int step, uint8_t div);
   uint8_t getStepNoteLen(int track, int step);
   uint8_t getStepNoteLen(int pattern, int track, int step);
+
+  // Probability and ratchet per step
+  void setStepProbability(int track, int step, uint8_t probability);
+  void setStepProbability(int pattern, int track, int step, uint8_t probability);
+  uint8_t getStepProbability(int track, int step);
+  uint8_t getStepProbability(int pattern, int track, int step);
+  void setStepRatchet(int track, int step, uint8_t ratchet);
+  void setStepRatchet(int pattern, int track, int step, uint8_t ratchet);
+  uint8_t getStepRatchet(int track, int step);
+  uint8_t getStepRatchet(int pattern, int track, int step);
+
+  // Humanize (global)
+  void setHumanize(uint8_t timingMs, uint8_t velocityAmount);
+  uint8_t getHumanizeTimingMs();
+  uint8_t getHumanizeVelocityAmount();
 
   // Parameter locks per step (currently volume lock)
   void setStepVolumeLock(int track, int step, bool enabled, uint8_t volume);
@@ -108,12 +139,8 @@ public:
   void setPatternChangeCallback(PatternChangeCallback callback);
   
 private:
-  // Pattern data: [pattern][track][step]
-  bool steps[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
-  uint8_t velocities[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
-  uint8_t noteLenDivs[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN]; // 1=full,2=half,4=quarter,8=eighth
-  bool stepVolumeLockEnabled[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
-  uint8_t stepVolumeLockValue[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+  // Pattern data: all stored in PSRAM (PatternData* pd)
+  PatternData* pd;
   
   bool playing;
   int currentPattern;
@@ -121,6 +148,9 @@ private:
   float tempo; // BPM
   uint32_t lastStepTime;
   uint32_t stepInterval; // microseconds
+  uint32_t nextStepInterval;
+  uint8_t humanizeTimingMs;
+  uint8_t humanizeVelocityAmount;
   bool trackMuted[MAX_TRACKS];
   uint8_t trackVolume[MAX_TRACKS]; // Volume per track (0-150)
   

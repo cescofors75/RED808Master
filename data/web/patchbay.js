@@ -20,11 +20,20 @@ const PAD_COLORS = [
   '#7c4dff','#ea80fc','#ff4081','#f50057',
   '#ff1744','#d500f9','#651fff','#00e676'
 ];
+const INITIAL_SOURCE_COUNT = 0;
 
 const FX_DEFS = {
-  lowpass:    { label:'LOW PASS',    color:'cyan',   icon:'⏣', params:[ {id:'cutoff', label:'Cutoff', min:20, max:20000, def:1000, unit:'Hz', log:true}, {id:'resonance', label:'Res', min:0.1, max:20, def:0.707, step:0.01} ] },
-  highpass:   { label:'HI PASS',     color:'cyan',   icon:'⏣', params:[ {id:'cutoff', label:'Cutoff', min:20, max:20000, def:1000, unit:'Hz', log:true}, {id:'resonance', label:'Res', min:0.1, max:20, def:0.707, step:0.01} ] },
-  bandpass:   { label:'BAND PASS',   color:'blue',   icon:'⏣', params:[ {id:'cutoff', label:'Cutoff', min:20, max:20000, def:1000, unit:'Hz', log:true}, {id:'resonance', label:'Q', min:0.1, max:20, def:1, step:0.01} ] },
+  // ── FILTERS ── (cutoff clamped 100–16000 Hz en firmware; resonance clamped 0.5–20; gain clamped ±12 dB)
+  lowpass:    { label:'LOW PASS',    color:'cyan',   icon:'⏣', params:[ {id:'cutoff', label:'Cutoff', min:100, max:16000, def:1000, unit:'Hz', log:true}, {id:'resonance', label:'Res', min:0.5, max:20, def:0.707, step:0.01} ] },
+  highpass:   { label:'HI PASS',     color:'cyan',   icon:'⏣', params:[ {id:'cutoff', label:'Cutoff', min:100, max:16000, def:1000, unit:'Hz', log:true}, {id:'resonance', label:'Res', min:0.5, max:20, def:0.707, step:0.01} ] },
+  bandpass:   { label:'BAND PASS',   color:'blue',   icon:'⏣', params:[ {id:'cutoff', label:'Cutoff', min:100, max:16000, def:1000, unit:'Hz', log:true}, {id:'resonance', label:'Q', min:0.5, max:20, def:1, step:0.01} ] },
+  notch:     { label:'NOTCH',     color:'silver',  icon:'⏣', params:[ {id:'cutoff', label:'Cutoff', min:100, max:16000, def:800,  unit:'Hz', log:true}, {id:'resonance', label:'Q',   min:0.5, max:20, def:1,     step:0.01} ] },
+  allpass:   { label:'ALL PASS',  color:'slate',   icon:'⏣', params:[ {id:'cutoff', label:'Freq',   min:100, max:16000, def:1000, unit:'Hz', log:true}, {id:'resonance', label:'Q',   min:0.5, max:20, def:0.707, step:0.01} ] },
+  peaking:   { label:'PEAKING',   color:'amber',   icon:'⏣', params:[ {id:'cutoff', label:'Freq',   min:100, max:16000, def:1000, unit:'Hz', log:true}, {id:'resonance', label:'Q',   min:0.5, max:20, def:1,     step:0.01}, {id:'gain', label:'Gain', min:-12, max:12, def:6, unit:'dB', step:0.5} ] },
+  lowshelf:  { label:'LO SHELF',  color:'lime',    icon:'⏣', params:[ {id:'cutoff', label:'Freq',   min:100, max:5000,  def:200,  unit:'Hz', log:true}, {id:'gain', label:'Gain', min:-12, max:12, def:6, unit:'dB', step:0.5} ] },
+  highshelf: { label:'HI SHELF',  color:'lavender',icon:'⏣', params:[ {id:'cutoff', label:'Freq',   min:200,max:16000, def:8000, unit:'Hz', log:true}, {id:'gain', label:'Gain', min:-12, max:12, def:6, unit:'dB', step:0.5} ] },
+  resonant:  { label:'RESONANT',  color:'hotpink', icon:'⏣', params:[ {id:'cutoff', label:'Cutoff', min:100, max:16000, def:800,  unit:'Hz', log:true}, {id:'resonance', label:'Res', min:0.5, max:20, def:5,     step:0.1}  ] },
+  // ── FX ──
   echo:       { label:'REVERB',      color:'orange', icon:'◎', params:[ {id:'time', label:'Time', min:10, max:750, def:200, unit:'ms'}, {id:'feedback', label:'Feedback', min:0, max:95, def:40, unit:'%'}, {id:'mix', label:'Mix', min:0, max:100, def:50, unit:'%'} ] },
   delay:      { label:'DELAY',       color:'yellow', icon:'◉', params:[ {id:'time', label:'Time', min:10, max:750, def:300, unit:'ms'}, {id:'feedback', label:'Feedback', min:0, max:95, def:50, unit:'%'}, {id:'mix', label:'Mix', min:0, max:100, def:50, unit:'%'} ] },
   bitcrusher: { label:'BITCRUSHER',  color:'purple', icon:'▦', params:[ {id:'bits', label:'Bit Depth', min:1, max:16, def:8, step:1} ] },
@@ -34,7 +43,7 @@ const FX_DEFS = {
   phaser:     { label:'PHASER',      color:'violet', icon:'◐', params:[ {id:'rate', label:'Rate', min:0, max:100, def:30, unit:'%'}, {id:'depth', label:'Depth', min:0, max:100, def:50, unit:'%'}, {id:'feedback', label:'Feedback', min:0, max:90, def:40, unit:'%'} ] }
 };
 
-const FILTER_TYPE_MAP = { lowpass:1, highpass:2, bandpass:3 };
+const FILTER_TYPE_MAP = { lowpass:1, highpass:2, bandpass:3, notch:4, allpass:5, peaking:6, lowshelf:7, highshelf:8, resonant:9 };
 
 const FACTORY_PRESETS = [
   {
@@ -94,6 +103,15 @@ let sceneQuantizeEnabled = true;
 let pendingSceneState = null;
 let pendingSceneLabel = '';
 let trackVolumes = new Array(16).fill(100);
+let trackPeaks = new Array(16).fill(0);
+const throttledCmdTimers = new Map();
+const queuedWsPayloads = [];
+let wsFlushTimer = null;
+let lastWsSendTs = 0;
+const WS_MIN_SEND_GAP_MS = 12;
+const WS_MAX_QUEUE = 240;
+const WS_BOOT_SYNC_DELAY_MS = 34;
+const WS_BOOT_SYNC_MAX_CABLES = 48;
 let activeMacroScene = 'A';
 let macroScenes = {
   A: [45, 35, 55, 40],
@@ -107,9 +125,97 @@ let drag = null;   // { type:'node'|'cable', nodeId, startX, startY, offsetX, of
 let previewPath = null;
 let selectedCable = null;
 let editingNode = null;
+let activeTool = 'patch'; // 'patch' | 'hand' | 'select'
+const selectedNodeIds = new Set();
 
 /* DOM refs */
-let svgEl, nodesEl, canvasEl, worldEl;
+let svgEl, nodesEl, canvasEl, worldEl, selectionBoxEl;
+
+function setPBMenuOpen(open) {
+  const menu = document.getElementById('pbMenu');
+  const backdrop = document.getElementById('pbMenuBackdrop');
+  if (!menu || !backdrop) return;
+  menu.classList.toggle('hidden', !open);
+  backdrop.classList.toggle('hidden', !open);
+}
+
+function updateToolButtons() {
+  const handBtn = document.getElementById('pbToolHandBtn');
+  const selectBtn = document.getElementById('pbToolSelectBtn');
+  if (handBtn) handBtn.classList.toggle('is-active', activeTool === 'hand');
+  if (selectBtn) selectBtn.classList.toggle('is-active', activeTool === 'select');
+
+  if (canvasEl) {
+    canvasEl.classList.toggle('pb-tool-hand', activeTool === 'hand');
+    canvasEl.classList.toggle('pb-tool-select', activeTool === 'select');
+  }
+}
+
+function clearNodeSelection() {
+  selectedNodeIds.clear();
+  renderNodeSelection();
+}
+
+function renderNodeSelection() {
+  if (!nodesEl) return;
+  nodesEl.querySelectorAll('.pb-node').forEach(el => {
+    const nodeId = el.dataset.nodeId;
+    el.classList.toggle('is-selected', selectedNodeIds.has(nodeId));
+  });
+}
+
+function selectNodesInWorldRect(x1, y1, x2, y2, additive = false) {
+  if (!additive) selectedNodeIds.clear();
+
+  const left = Math.min(x1, x2);
+  const right = Math.max(x1, x2);
+  const top = Math.min(y1, y2);
+  const bottom = Math.max(y1, y2);
+
+  nodes.forEach(node => {
+    const width = node.type === 'pad' || node.type === 'fx' || node.type === 'master' || node.type === 'bus' ? 170 : 170;
+    const height = node.type === 'pad' ? 72 : 80;
+    const intersects = !(node.x + width < left || node.x > right || node.y + height < top || node.y > bottom);
+    if (intersects) selectedNodeIds.add(node.id);
+  });
+
+  renderNodeSelection();
+}
+
+function showSelectionBoxWorldRect(x1, y1, x2, y2) {
+  if (!selectionBoxEl) return;
+  const left = Math.min(x1, x2);
+  const right = Math.max(x1, x2);
+  const top = Math.min(y1, y2);
+  const bottom = Math.max(y1, y2);
+
+  const vx = left * viewZoom - canvasEl.scrollLeft;
+  const vy = top * viewZoom - canvasEl.scrollTop;
+  const vw = Math.max(1, (right - left) * viewZoom);
+  const vh = Math.max(1, (bottom - top) * viewZoom);
+
+  selectionBoxEl.style.display = 'block';
+  selectionBoxEl.style.left = `${vx}px`;
+  selectionBoxEl.style.top = `${vy}px`;
+  selectionBoxEl.style.width = `${vw}px`;
+  selectionBoxEl.style.height = `${vh}px`;
+}
+
+function hideSelectionBox() {
+  if (!selectionBoxEl) return;
+  selectionBoxEl.style.display = 'none';
+}
+
+function setActiveTool(nextTool) {
+  const target = (nextTool === 'hand' || nextTool === 'select') ? nextTool : 'patch';
+  activeTool = (activeTool === target) ? 'patch' : target;
+
+  if (activeTool !== 'select') {
+    clearNodeSelection();
+    hideSelectionBox();
+  }
+  updateToolButtons();
+}
 
 /* ──────────── INIT ──────────── */
 function init() {
@@ -117,6 +223,9 @@ function init() {
   nodesEl = document.getElementById('pbNodes');
   canvasEl= document.getElementById('pbCanvas');
   worldEl = document.getElementById('pbWorld');
+  selectionBoxEl = document.getElementById('pbSelectionBox');
+  updateToolButtons();
+  renderNodeSelection();
 
   /* Set canvas size */
   nodesEl.style.width  = CANVAS_W + 'px';
@@ -134,8 +243,8 @@ function init() {
   loadMacroScenes();
   initMacroPanel();
 
-  /* Create initial pad nodes */
-  for (let i = 0; i < 16; i++) {
+  /* Create initial sampler sources */
+  for (let i = 0; i < Math.min(INITIAL_SOURCE_COUNT, TRACK_NAMES.length); i++) {
     createPadNode(i, 60, 60 + i * 120);
   }
   /* Create Master Out */
@@ -143,8 +252,8 @@ function init() {
   createBusNode('bus-a', 'BUS A', CANVAS_W - 560, 380, 'teal');
   createBusNode('bus-b', 'BUS B', CANVAS_W - 560, 640, 'violet');
 
-  /* Load saved state */
-  loadState();
+  /* Do not autoload patch topology: start from a clean PATH canvas */
+  refreshSourcePicker();
 
   /* Events */
   canvasEl.addEventListener('pointerdown', onPointerDown);
@@ -162,6 +271,159 @@ function init() {
   updateStatus();
 }
 
+function parsePadTrackId(nodeId) {
+  if (typeof nodeId !== 'string' || !nodeId.startsWith('pad-')) return -1;
+  const track = parseInt(nodeId.slice(4), 10);
+  if (!Number.isInteger(track) || track < 0 || track >= TRACK_NAMES.length) return -1;
+  return track;
+}
+
+function getMissingPadTracks() {
+  const used = new Set(nodes.filter(n => n.type === 'pad').map(n => n.track));
+  const missing = [];
+  for (let track = 0; track < TRACK_NAMES.length; track++) {
+    if (!used.has(track)) missing.push(track);
+  }
+  return missing;
+}
+
+function getActivePadTracks() {
+  return nodes
+    .filter(n => n.type === 'pad')
+    .map(n => n.track)
+    .filter(track => Number.isInteger(track) && track >= 0 && track < TRACK_NAMES.length)
+    .sort((a, b) => a - b);
+}
+
+function getNextPadSlotY() {
+  const padNodes = nodes.filter(n => n.type === 'pad');
+  if (!padNodes.length) return 60;
+  const maxY = padNodes.reduce((acc, node) => Math.max(acc, node.y), 60);
+  return snap(maxY + 120);
+}
+
+function refreshSourcePicker() {
+  const picker = document.getElementById('pbSourcePicker');
+  const activePicker = document.getElementById('pbActiveSourcePicker');
+  if (!picker) return;
+
+  const addBtn = document.getElementById('pbAddSourceBtn');
+  const removeBtn = document.getElementById('pbRemoveSourceBtn');
+  const addAllBtn = document.getElementById('pbAddAllSourcesBtn');
+  const countEl = document.getElementById('pbSourceCount');
+  const missing = getMissingPadTracks();
+  const activeTracks = getActivePadTracks();
+  const activeCount = activeTracks.length;
+
+  picker.innerHTML = '';
+  if (missing.length) {
+    missing.forEach(track => {
+      const opt = document.createElement('option');
+      opt.value = String(track);
+      opt.textContent = `PAD ${track + 1} · ${TRACK_LABELS[track] || TRACK_NAMES[track]}`;
+      picker.appendChild(opt);
+    });
+  } else {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'All sampler sources added';
+    picker.appendChild(opt);
+  }
+
+  const disabled = !missing.length;
+  picker.disabled = disabled;
+  if (addBtn) addBtn.disabled = disabled;
+  if (addAllBtn) addAllBtn.disabled = disabled;
+
+  if (activePicker) {
+    activePicker.innerHTML = '';
+    if (activeTracks.length) {
+      activeTracks.forEach(track => {
+        const opt = document.createElement('option');
+        opt.value = String(track);
+        opt.textContent = `PAD ${track + 1} · ${TRACK_LABELS[track] || TRACK_NAMES[track]}`;
+        activePicker.appendChild(opt);
+      });
+      activePicker.disabled = false;
+    } else {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'No active sampler sources';
+      activePicker.appendChild(opt);
+      activePicker.disabled = true;
+    }
+  }
+
+  if (removeBtn) removeBtn.disabled = !activeTracks.length;
+  if (countEl) countEl.textContent = `${activeCount}/${TRACK_NAMES.length}`;
+}
+
+function addPadSource(track) {
+  const parsedTrack = Number(track);
+  if (!Number.isInteger(parsedTrack) || parsedTrack < 0 || parsedTrack >= TRACK_NAMES.length) return false;
+  if (nodes.find(n => n.type === 'pad' && n.track === parsedTrack)) return false;
+
+  createPadNode(parsedTrack, 60, getNextPadSlotY());
+  updateStatus();
+  saveState();
+  refreshSourcePicker();
+  return true;
+}
+
+function removePadSource(track) {
+  const parsedTrack = Number(track);
+  if (!Number.isInteger(parsedTrack) || parsedTrack < 0 || parsedTrack >= TRACK_NAMES.length) return false;
+
+  const padNode = nodes.find(n => n.type === 'pad' && n.track === parsedTrack);
+  if (!padNode) return false;
+
+  const relatedCables = cables.filter(c => c.from === padNode.id || c.to === padNode.id);
+  relatedCables.forEach(cable => clearConnection(cable));
+  cables = cables.filter(c => c.from !== padNode.id && c.to !== padNode.id);
+
+  const nodeEl = document.getElementById('node-' + padNode.id);
+  if (nodeEl) nodeEl.remove();
+  nodes = nodes.filter(n => n.id !== padNode.id);
+  selectedNodeIds.delete(padNode.id);
+  renderNodeSelection();
+
+  if (selectedCable && !cables.find(c => c.id === selectedCable)) {
+    selectedCable = null;
+  }
+
+  renderCables();
+  updateStatus();
+  saveState();
+  refreshSourcePicker();
+  return true;
+}
+
+function ensurePadNodesForState(data) {
+  const requiredTracks = new Set();
+
+  if (Array.isArray(data?.padPositions)) {
+    data.padPositions.forEach(pp => {
+      const track = parsePadTrackId(pp?.id);
+      if (track >= 0) requiredTracks.add(track);
+    });
+  }
+
+  if (Array.isArray(data?.cables)) {
+    data.cables.forEach(cd => {
+      const fromTrack = parsePadTrackId(cd?.from);
+      const toTrack = parsePadTrackId(cd?.to);
+      if (fromTrack >= 0) requiredTracks.add(fromTrack);
+      if (toTrack >= 0) requiredTracks.add(toTrack);
+    });
+  }
+
+  requiredTracks.forEach(track => {
+    if (!nodes.find(n => n.type === 'pad' && n.track === track)) {
+      createPadNode(track, 60, 60 + track * 120);
+    }
+  });
+}
+
 /* ──────────── WEBSOCKET ──────────── */
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -169,24 +431,109 @@ function connectWS() {
   ws.onopen = () => {
     wsConnected = true;
     document.getElementById('pbWsStatus').classList.add('connected');
-    /* Resend all active effects */
-    cables.forEach(c => applyConnection(c));
+    flushWsQueue();
+    syncConnectionsAfterReconnect();
     sendCmd('getTrackVolumes', {});
   };
   ws.onclose = () => {
     wsConnected = false;
     document.getElementById('pbWsStatus').classList.remove('connected');
+    queuedWsPayloads.length = 0;
+    if (wsFlushTimer) {
+      clearTimeout(wsFlushTimer);
+      wsFlushTimer = null;
+    }
     setTimeout(connectWS, 3000);
   };
   ws.onerror = () => ws.close();
   ws.onmessage = (e) => {
+    if (e.data instanceof ArrayBuffer) {
+      ingestAudioLevelBuffer(new Uint8Array(e.data));
+      return;
+    }
+    if (typeof e.data !== 'string') return;
     try { handleWSMessage(JSON.parse(e.data)); } catch(ex) {}
   };
 }
 
+/* Reset all per-track FX in firmware to match an empty patchbay canvas.
+   Sent staggered to avoid WS burst on reconnect. */
+function resetFirmwareFX() {
+  for (let t = 0; t < 16; t++) {
+    const track = t;
+    const delay = t * WS_BOOT_SYNC_DELAY_MS;
+    setTimeout(() => {
+      sendCmd('clearTrackFilter',   { track });
+      sendCmd('clearTrackFX',       { track });
+      sendCmd('setTrackEcho',       { track, active: false, time: 200, feedback: 40, mix: 50 });
+      sendCmd('setTrackFlanger',    { track, active: false, rate: 30, depth: 50, feedback: 40 });
+      sendCmd('setTrackCompressor', { track, active: false, threshold: 60, ratio: 4 });
+    }, delay);
+  }
+  /* Also reset master-level FX that might be stale */
+  setTimeout(() => sendCmd('setPhaserActive', { value: false }), 16 * WS_BOOT_SYNC_DELAY_MS);
+  console.log('[PATCH] Firmware FX reset enviado (canvas vacío).');
+}
+
+function syncConnectionsAfterReconnect() {
+  if (!Array.isArray(cables) || cables.length === 0) {
+    /* Canvas vacío — resetea estado FX del firmware para que coincida */
+    resetFirmwareFX();
+    return;
+  }
+  const total = cables.length;
+  const count = Math.min(total, WS_BOOT_SYNC_MAX_CABLES);
+  for (let i = 0; i < count; i++) {
+    setTimeout(() => applyConnection(cables[i]), i * WS_BOOT_SYNC_DELAY_MS);
+  }
+  if (total > count) {
+    console.warn(`[PATCH] Sync limitado: ${count}/${total} cables para evitar sobrecarga del ESP32`);
+  }
+}
+
+function flushWsQueue() {
+  wsFlushTimer = null;
+  if (!ws || ws.readyState !== 1) return;
+  if (!queuedWsPayloads.length) return;
+
+  const now = performance.now();
+  const elapsed = now - lastWsSendTs;
+  if (elapsed < WS_MIN_SEND_GAP_MS) {
+    wsFlushTimer = setTimeout(flushWsQueue, WS_MIN_SEND_GAP_MS - elapsed);
+    return;
+  }
+
+  const payload = queuedWsPayloads.shift();
+  ws.send(payload);
+  lastWsSendTs = performance.now();
+
+  if (queuedWsPayloads.length) {
+    wsFlushTimer = setTimeout(flushWsQueue, WS_MIN_SEND_GAP_MS);
+  }
+}
+
 function sendCmd(cmd, data) {
   if (!ws || ws.readyState !== 1) return;
-  ws.send(JSON.stringify(Object.assign({ cmd }, data)));
+  const payload = JSON.stringify(Object.assign({ cmd }, data));
+
+  if (queuedWsPayloads.length >= WS_MAX_QUEUE) {
+    queuedWsPayloads.shift();
+  }
+  queuedWsPayloads.push(payload);
+
+  if (!wsFlushTimer) {
+    flushWsQueue();
+  }
+}
+
+function sendCmdThrottled(key, cmd, data, delay = 70) {
+  const prev = throttledCmdTimers.get(key);
+  if (prev) clearTimeout(prev);
+  const tid = setTimeout(() => {
+    throttledCmdTimers.delete(key);
+    sendCmd(cmd, data);
+  }, Math.max(0, delay));
+  throttledCmdTimers.set(key, tid);
 }
 
 function getMacroSliderValues() {
@@ -244,16 +591,16 @@ function applyMacroValue(index, value) {
   const v = Math.max(0, Math.min(100, value));
   if (index === 1) {
     const cutoff = Math.round(200 + (v / 100) * 11800);
-    sendCmd('setFilterCutoff', { value: cutoff });
+    sendCmdThrottled('macro:m1', 'setFilterCutoff', { value: cutoff }, 60);
   } else if (index === 2) {
-    sendCmd('setDelayActive', { value: v > 0 });
-    sendCmd('setDelayMix', { value: v });
+    sendCmdThrottled('macro:m2:active', 'setDelayActive', { value: v > 0 }, 80);
+    sendCmdThrottled('macro:m2:mix', 'setDelayMix', { value: v }, 80);
   } else if (index === 3) {
     const threshold = -50 + (v / 100) * 44;
-    sendCmd('setCompressorActive', { value: v > 0 });
-    sendCmd('setCompressorThreshold', { value: threshold });
+    sendCmdThrottled('macro:m3:active', 'setCompressorActive', { value: v > 0 }, 90);
+    sendCmdThrottled('macro:m3:thr', 'setCompressorThreshold', { value: threshold }, 90);
   } else if (index === 4) {
-    sendCmd('setSidechainPro', {
+    sendCmdThrottled('macro:m4:sidechain', 'setSidechainPro', {
       active: v > 0,
       source: 0,
       destinations: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
@@ -261,7 +608,7 @@ function applyMacroValue(index, value) {
       attack: 6,
       release: 180,
       knee: 0.45
-    });
+    }, 130);
   }
 }
 
@@ -274,6 +621,8 @@ function applyMacroSceneValues(values) {
 }
 
 function initMacroPanel() {
+  // Only initialise UI — do NOT send WS commands on page load.
+  // applyMacroSceneValues() will be called explicitly by the user via pbSelectMacroScene/pbLoadMacroScene.
   setMacroSliderValues(macroScenes[activeMacroScene]);
   updateMacroSceneButtons();
 
@@ -287,8 +636,7 @@ function initMacroPanel() {
       saveMacroScenes();
     });
   }
-
-  applyMacroSceneValues(macroScenes[activeMacroScene]);
+  // Do NOT call applyMacroSceneValues here — avoid sending sidechain/FX commands on every page load.
 }
 
 window.pbSelectMacroScene = function(scene) {
@@ -366,6 +714,17 @@ function handleWSMessage(msg) {
   if (msg.type === 'sampleLoaded' || msg.type === 'kitLoaded') {
     // Could update pad labels here
   }
+
+  /* Per-track filter feedback — warn if firmware rejected (max 8 active) */
+  if (msg.type === 'trackFilterSet' && msg.success === false) {
+    const statusEl = document.getElementById('pbStatus');
+    if (statusEl) {
+      statusEl.textContent = '⚠ Límite: máx 8 filtros de track activos simultáneos';
+      statusEl.style.color = '#ff8a50';
+      setTimeout(() => { statusEl.style.color = ''; updateStatus(); }, 4000);
+    }
+    console.warn('[PATCH] setTrackFilter rechazado por firmware (límite 8 activos)');
+  }
 }
 
 function applyTempoVisuals() {
@@ -415,6 +774,15 @@ function ingestTrackVolumes(volumes) {
     if (typeof volumes[i] !== 'undefined') {
       trackVolumes[i] = clampTrackVolume(volumes[i]);
     }
+  }
+  renderCables();
+}
+
+function ingestAudioLevelBuffer(buf) {
+  if (!buf || buf.length < 18) return;
+  if (buf[0] !== 0xAA) return;
+  for (let i = 0; i < 16; i++) {
+    trackPeaks[i] = Math.max(0, Math.min(1, (buf[i + 1] || 0) / 255));
   }
   renderCables();
 }
@@ -495,6 +863,9 @@ function renderNode(node) {
   el.dataset.nodeId = node.id;
   el.style.left = node.x + 'px';
   el.style.top  = node.y + 'px';
+  if (selectedNodeIds.has(node.id)) {
+    el.classList.add('is-selected');
+  }
 
   if (node.type === 'pad') {
     el.classList.add('pb-pad');
@@ -638,10 +1009,20 @@ function getCableAverageVolume(cable) {
   return sum / tracks.length;
 }
 
+function getCableAveragePeak(cable) {
+  const tracks = getCableSourceTracks(cable);
+  if (!tracks.length) return -1;
+  const sum = tracks.reduce((acc, track) => acc + (trackPeaks[track] || 0), 0);
+  return sum / tracks.length;
+}
+
 function getCableLevelNorm(cable) {
   const avg = getCableAverageVolume(cable);
-  if (avg < 0) return 0.5;
-  return Math.max(0, Math.min(1, avg / 127));
+  const p = getCableAveragePeak(cable);
+  if (avg < 0 && p < 0) return 0.5;
+  const volNorm = avg < 0 ? 0.5 : Math.max(0, Math.min(1, avg / 127));
+  const peakNorm = p < 0 ? 0.0 : Math.max(0, Math.min(1, p));
+  return Math.max(0, Math.min(1, volNorm * 0.35 + peakNorm * 0.65));
 }
 
 function getCableHeatColor(baseHex, levelNorm) {
@@ -758,13 +1139,8 @@ function removeCable(id) {
 }
 
 function onCableClick(id) {
-  if (selectedCable === id) {
-    removeCable(id);
-    selectedCable = null;
-  } else {
-    selectedCable = id;
-    renderCables();
-  }
+  selectedCable = (selectedCable === id) ? null : id;
+  renderCables();
 }
 
 /* ──────────── EFFECT APPLICATION ──────────── */
@@ -814,21 +1190,20 @@ function applyConnection(cable) {
 
 function clearConnection(cable) {
   const toNode = nodes.find(n => n.id === cable.to);
+  if (!toNode || toNode.type !== 'fx') return;
+
   const fromNode = nodes.find(n => n.id === cable.from);
+  const tracksToRemove = [];
 
-  if (toNode && toNode.type === 'fx' && fromNode && fromNode.type === 'pad') {
-    clearFxFromTrack(fromNode.track, toNode);
+  if (fromNode && fromNode.type === 'pad') {
+    /* Direct pad → fx cable */
+    tracksToRemove.push(fromNode.track);
+  } else if (fromNode) {
+    /* fx → fx (or bus → fx) cable: propagate upstream to find all pad tracks */
+    tracksToRemove.push(...getTracksForNode(cable.from));
   }
 
-  /* If an FX node loses all input connections, clear its effect on all previously connected tracks */
-  if (toNode && toNode.type === 'fx') {
-    /* Check if any other cables still connect to this FX */
-    const remainingInputs = cables.filter(c => c.to === toNode.id && c.id !== cable.id);
-    if (remainingInputs.length === 0) {
-      // All tracks that were connected need to be cleared
-      // But since we removed the cable already, use fromNode info
-    }
-  }
+  tracksToRemove.forEach(track => clearFxFromTrack(track, toNode));
 }
 
 function applyFxToTrack(track, fxNode) {
@@ -839,7 +1214,15 @@ function applyFxToTrack(track, fxNode) {
     case 'lowpass':
     case 'highpass':
     case 'bandpass':
+    case 'notch':
+    case 'allpass':
+    case 'resonant':
       sendCmd('setTrackFilter', { track, filterType: FILTER_TYPE_MAP[ft], cutoff: p.cutoff, resonance: p.resonance || p['Q'] || 0.707 });
+      break;
+    case 'peaking':
+    case 'lowshelf':
+    case 'highshelf':
+      sendCmd('setTrackFilter', { track, filterType: FILTER_TYPE_MAP[ft], cutoff: p.cutoff, resonance: p.resonance || 1, gain: p.gain || 0 });
       break;
     case 'bitcrusher':
       sendCmd('setTrackBitCrush', { track, value: Math.round(p.bits) });
@@ -873,6 +1256,12 @@ function clearFxFromTrack(track, fxNode) {
     case 'lowpass':
     case 'highpass':
     case 'bandpass':
+    case 'notch':
+    case 'allpass':
+    case 'peaking':
+    case 'lowshelf':
+    case 'highshelf':
+    case 'resonant':
       sendCmd('clearTrackFilter', { track });
       break;
     case 'bitcrusher':
@@ -900,6 +1289,7 @@ function showParamEditor(nodeId, anchorX, anchorY) {
   const node = nodes.find(n => n.id === nodeId);
   if (!node || node.type !== 'fx') return;
   editingNode = nodeId;
+  let _realtimeFxTimer = null; // shared debounce timer for all sliders in this editor
 
   const def = FX_DEFS[node.fxType];
   const editor = document.getElementById('pbParamEditor');
@@ -945,8 +1335,12 @@ function showParamEditor(nodeId, anchorX, anchorY) {
         const dv = p.log ? Math.round(v) : (Number.isInteger(step) ? Math.round(v) : (Math.round(v*100)/100));
         document.getElementById('pv-' + p.id).textContent = dv + unit;
         updateNodeDisplay(node);
+        /* Realtime audio update — throttled 35 ms to avoid WS flood */
+        if (_realtimeFxTimer) clearTimeout(_realtimeFxTimer);
+        _realtimeFxTimer = setTimeout(() => { _realtimeFxTimer = null; resendFxNode(node); }, 35);
       });
       range.addEventListener('change', () => {
+        if (_realtimeFxTimer) { clearTimeout(_realtimeFxTimer); _realtimeFxTimer = null; }
         resendFxNode(node);
         saveState();
       });
@@ -979,7 +1373,7 @@ function resendFxNode(fxNode) {
 }
 
 function getColorHex(name) {
-  const m = {cyan:'#00e5ff',orange:'#ff9100',yellow:'#ffd600',purple:'#b388ff',pink:'#ff4081',green:'#69f0ae',teal:'#26c6da',violet:'#ea80fc',blue:'#448aff',gold:'#ffd700'};
+  const m = {cyan:'#00e5ff',orange:'#ff9100',yellow:'#ffd600',purple:'#b388ff',pink:'#ff4081',green:'#69f0ae',teal:'#26c6da',violet:'#ea80fc',blue:'#448aff',gold:'#ffd700',silver:'#aab0c0',slate:'#78909c',amber:'#ffab40',lime:'#c6ff00',lavender:'#ce93d8',hotpink:'#f06292'};
   return m[name] || '#fff';
 }
 
@@ -1000,6 +1394,73 @@ function onPointerDown(e) {
   if (selectedCable && !t.closest('[data-cable-id]')) {
     selectedCable = null;
     renderCables();
+  }
+
+  if (activeTool === 'hand') {
+    if (t.closest('#pbViewControls')) return;
+    e.preventDefault();
+    drag = {
+      type: 'pan',
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startScrollLeft: canvasEl.scrollLeft,
+      startScrollTop: canvasEl.scrollTop
+    };
+    canvasEl.setPointerCapture(e.pointerId);
+    return;
+  }
+
+  if (activeTool === 'select') {
+    if (t.closest('#pbViewControls')) return;
+    if (t.classList.contains('pb-connector') || t.classList.contains('pb-node-delete') || t.classList.contains('pb-node-edit')) return;
+
+    const nodeEl = t.closest('.pb-node');
+    const isNodeTarget = nodeEl && !t.classList.contains('pb-connector') && !t.classList.contains('pb-node-delete') && !t.classList.contains('pb-node-edit');
+    if (isNodeTarget) {
+      e.preventDefault();
+      const nodeId = nodeEl.dataset.nodeId;
+      if (e.shiftKey) {
+        if (selectedNodeIds.has(nodeId)) selectedNodeIds.delete(nodeId);
+        else selectedNodeIds.add(nodeId);
+      } else if (!selectedNodeIds.has(nodeId)) {
+        selectedNodeIds.clear();
+        selectedNodeIds.add(nodeId);
+      }
+      renderNodeSelection();
+
+      const pos = getCanvasPos(e);
+      const selectedNodes = Array.from(selectedNodeIds)
+        .map(id => nodes.find(n => n.id === id))
+        .filter(Boolean);
+      selectedNodes.forEach(node => {
+        const el = document.getElementById('node-' + node.id);
+        if (el) el.classList.add('dragging');
+      });
+      drag = {
+        type: 'multi-node',
+        startX: pos.x,
+        startY: pos.y,
+        moved: false,
+        origins: selectedNodes.map(node => ({ id: node.id, x: node.x, y: node.y }))
+      };
+      canvasEl.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    e.preventDefault();
+    const pos = getCanvasPos(e);
+    drag = {
+      type: 'select-box',
+      startX: pos.x,
+      startY: pos.y,
+      currentX: pos.x,
+      currentY: pos.y,
+      additive: !!e.shiftKey
+    };
+    if (!drag.additive) clearNodeSelection();
+    showSelectionBoxWorldRect(pos.x, pos.y, pos.x, pos.y);
+    canvasEl.setPointerCapture(e.pointerId);
+    return;
   }
 
   /* Connector drag → cable creation */
@@ -1031,6 +1492,45 @@ function onPointerDown(e) {
 function onPointerMove(e) {
   if (!drag) return;
   e.preventDefault();
+
+  if (drag.type === 'pan') {
+    const dx = e.clientX - drag.startClientX;
+    const dy = e.clientY - drag.startClientY;
+    canvasEl.scrollLeft = drag.startScrollLeft - dx;
+    canvasEl.scrollTop = drag.startScrollTop - dy;
+    return;
+  }
+
+  if (drag.type === 'select-box') {
+    const pos = getCanvasPos(e);
+    drag.currentX = pos.x;
+    drag.currentY = pos.y;
+    showSelectionBoxWorldRect(drag.startX, drag.startY, pos.x, pos.y);
+    selectNodesInWorldRect(drag.startX, drag.startY, pos.x, pos.y, drag.additive);
+    return;
+  }
+
+  if (drag.type === 'multi-node') {
+    const pos = getCanvasPos(e);
+    const dx = pos.x - drag.startX;
+    const dy = pos.y - drag.startY;
+    drag.moved = true;
+
+    drag.origins.forEach(origin => {
+      const node = nodes.find(n => n.id === origin.id);
+      if (!node) return;
+      node.x = snap(Math.max(0, Math.min(CANVAS_W - 170, origin.x + dx)));
+      node.y = snap(Math.max(0, Math.min(CANVAS_H - 80, origin.y + dy)));
+      const el = document.getElementById('node-' + node.id);
+      if (el) {
+        el.style.left = node.x + 'px';
+        el.style.top = node.y + 'px';
+      }
+    });
+    renderCables();
+    return;
+  }
+
   const pos = getCanvasPos(e);
 
   if (drag.type === 'node') {
@@ -1088,6 +1588,22 @@ function onPointerUp(e) {
     }
   }
 
+  else if (drag.type === 'multi-node') {
+    drag.origins.forEach(origin => {
+      const el = document.getElementById('node-' + origin.id);
+      if (el) el.classList.remove('dragging');
+    });
+    if (drag.moved) saveState();
+  }
+
+  else if (drag.type === 'select-box') {
+    hideSelectionBox();
+  }
+
+  else if (drag.type === 'pan') {
+    /* no-op */
+  }
+
   else if (drag.type === 'cable') {
     clearPreviewCable();
     clearHighlights();
@@ -1143,22 +1659,30 @@ function clearHighlights() {
 
 /* ──────────── KEYBOARD ──────────── */
 function onKeyDown(e) {
+  const tag = (e.target?.tagName || '').toUpperCase();
+  const isFormField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+  if (isFormField) return;
+
   if (e.key === 'Delete' || e.key === 'Backspace') {
     if (selectedCable) {
+      e.preventDefault();
       removeCable(selectedCable);
       selectedCable = null;
+      renderCables();
     }
   }
   if (e.key === 'Escape') {
     closeParamEditor();
     selectedCable = null;
+    clearNodeSelection();
+    hideSelectionBox();
     renderCables();
   }
 }
 
 function onDocClick(e) {
   if (!e.target.closest('#pbMenu') && !e.target.closest('#pbMenuBtn')) {
-    document.getElementById('pbMenu').classList.add('hidden');
+    setPBMenuOpen(false);
   }
   if (!e.target.closest('#pbPresetPanel') && !e.target.closest('#pbMenu')) {
     const panel = document.getElementById('pbPresetPanel');
@@ -1174,11 +1698,18 @@ window.goBack = function() {
 };
 
 window.togglePBMenu = function() {
-  document.getElementById('pbMenu').classList.toggle('hidden');
+  const menu = document.getElementById('pbMenu');
+  if (!menu) return;
+  const willOpen = menu.classList.contains('hidden');
+  if (willOpen) {
+    const preset = document.getElementById('pbPresetPanel');
+    if (preset) preset.classList.add('hidden');
+  }
+  setPBMenuOpen(willOpen);
 };
 
 window.pbAddEffect = function(fxType) {
-  document.getElementById('pbMenu').classList.add('hidden');
+  setPBMenuOpen(false);
   /* Place new node at center of visible viewport */
   const r = canvasEl.getBoundingClientRect();
   const cx = canvasEl.scrollLeft + r.width / 2 - 85 + Math.random() * 80 - 40;
@@ -1191,8 +1722,45 @@ window.pbAddEffect = function(fxType) {
   }
 };
 
+window.pbAddSelectedSource = function() {
+  const picker = document.getElementById('pbSourcePicker');
+  if (!picker || picker.disabled) return;
+  const track = parseInt(picker.value, 10);
+  if (!Number.isInteger(track)) return;
+  addPadSource(track);
+};
+
+window.pbRemoveSelectedSource = function() {
+  const picker = document.getElementById('pbActiveSourcePicker');
+  if (!picker || picker.disabled) return;
+  const track = parseInt(picker.value, 10);
+  if (!Number.isInteger(track)) return;
+  removePadSource(track);
+};
+
+window.pbAddAllSources = function() {
+  const missing = getMissingPadTracks();
+  if (!missing.length) return;
+  missing.forEach(track => {
+    if (!nodes.find(n => n.type === 'pad' && n.track === track)) {
+      createPadNode(track, 60, getNextPadSlotY());
+    }
+  });
+  updateStatus();
+  saveState();
+  refreshSourcePicker();
+};
+
 window.pbZoomIn = function() {
   setZoom(viewZoom + 0.12);
+};
+
+window.pbToggleHandTool = function() {
+  setActiveTool('hand');
+};
+
+window.pbToggleSelectTool = function() {
+  setActiveTool('select');
 };
 
 window.pbZoomOut = function() {
@@ -1255,32 +1823,38 @@ window.pbDeleteNode = function(nodeId) {
 
   /* Remove node */
   nodes = nodes.filter(n => n.id !== nodeId);
+  selectedNodeIds.delete(nodeId);
   const el = document.getElementById('node-' + nodeId);
   if (el) el.remove();
 
+  renderNodeSelection();
   renderCables();
   updateStatus();
   saveState();
 };
 
 window.pbClearAll = function() {
-  document.getElementById('pbMenu').classList.add('hidden');
+  setPBMenuOpen(false);
   /* Clear all cables */
   cables.forEach(c => clearConnection(c));
   cables = [];
-  /* Remove FX nodes */
-  nodes.filter(n => n.type === 'fx').forEach(n => {
+  /* Remove PAD + FX nodes, keep master/buses */
+  nodes.filter(n => n.type === 'fx' || n.type === 'pad').forEach(n => {
     const el = document.getElementById('node-' + n.id);
     if (el) el.remove();
   });
-  nodes = nodes.filter(n => n.type !== 'fx');
+  nodes = nodes.filter(n => n.type !== 'fx' && n.type !== 'pad');
+  clearNodeSelection();
   renderCables();
   updateStatus();
+  refreshSourcePicker();
   saveState();
+  /* Reset firmware FX state to match the now-empty canvas */
+  resetFirmwareFX();
 };
 
 window.pbResetLayout = function() {
-  document.getElementById('pbMenu').classList.add('hidden');
+  setPBMenuOpen(false);
   /* Reset pad positions */
   nodes.filter(n => n.type === 'pad').forEach((n, i) => {
     n.x = 60; n.y = 60 + i * 120;
@@ -1311,7 +1885,7 @@ window.pbResetLayout = function() {
 };
 
 window.pbAutoRoute = function() {
-  document.getElementById('pbMenu').classList.add('hidden');
+  setPBMenuOpen(false);
   /* Auto: each pad → master out */
   nodes.filter(n => n.type === 'pad').forEach(pad => {
     if (!cables.find(c => c.from === pad.id && c.to === 'master')) {
@@ -1321,7 +1895,7 @@ window.pbAutoRoute = function() {
 };
 
 window.pbBuildChain = function() {
-  document.getElementById('pbMenu').classList.add('hidden');
+  setPBMenuOpen(false);
   const fxNodes = nodes.filter(n => n.type === 'fx').sort((a, b) => (a.x - b.x) || (a.y - b.y));
   if (fxNodes.length === 0) return;
 
@@ -1341,7 +1915,7 @@ window.pbBuildChain = function() {
 };
 
 window.pbOrganizeNodes = function() {
-  document.getElementById('pbMenu').classList.add('hidden');
+  setPBMenuOpen(false);
   const fxNodes = nodes.filter(n => n.type === 'fx').sort((a, b) => (a.x - b.x) || (a.y - b.y));
   fxNodes.forEach((node, idx) => {
     const col = idx % 4;
@@ -1371,7 +1945,7 @@ window.pbOrganizeNodes = function() {
 };
 
 window.pbToggleSignalDemo = function() {
-  document.getElementById('pbMenu').classList.add('hidden');
+  setPBMenuOpen(false);
   signalDemoMode = !signalDemoMode;
   updatePlayingVisualState();
 };
@@ -1394,7 +1968,7 @@ window.pbLoadPreset = function() {
 };
 
 window.pbOpenPresetPanel = function() {
-  document.getElementById('pbMenu').classList.add('hidden');
+  setPBMenuOpen(false);
   const panel = document.getElementById('pbPresetPanel');
   if (!panel) return;
   renderPresetPanel();
@@ -1443,6 +2017,8 @@ function exportState() {
 }
 
 function importState(data) {
+  clearNodeSelection();
+
   /* Clear everything */
   cables.forEach(c => clearConnection(c));
   cables = [];
@@ -1451,6 +2027,8 @@ function importState(data) {
     if (el) el.remove();
   });
   nodes = nodes.filter(n => n.type !== 'fx');
+
+  ensurePadNodesForState(data);
 
   /* Restore pad positions */
   if (data.padPositions) {
@@ -1519,6 +2097,7 @@ function importState(data) {
 
   renderCables();
   updateStatus();
+  refreshSourcePicker();
 }
 
 function saveState() {
@@ -1738,6 +2317,42 @@ function getUserPresets() {
   return {};
 }
 
+function getPresetMeta() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('pb_preset_meta') || '{}');
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch(ex) {}
+  return {};
+}
+
+function setPresetMeta(meta) {
+  try {
+    localStorage.setItem('pb_preset_meta', JSON.stringify(meta || {}));
+  } catch(ex) {}
+}
+
+function getPresetSearchTerm() {
+  const input = document.getElementById('pbPresetSearchInput');
+  return (input?.value || '').trim().toLowerCase();
+}
+
+function isFavOnlyEnabled() {
+  const cb = document.getElementById('pbPresetFavOnly');
+  return !!cb?.checked;
+}
+
+function matchesPresetFilter(name, description, tags, favorite) {
+  if (isFavOnlyEnabled() && !favorite) return false;
+  const term = getPresetSearchTerm();
+  if (!term) return true;
+  const hay = `${name || ''} ${description || ''} ${tags || ''}`.toLowerCase();
+  return hay.includes(term);
+}
+
+window.pbRefreshPresetBrowser = function() {
+  renderPresetPanel();
+};
+
 function setUserPresets(presets) {
   localStorage.setItem('pb_presets', JSON.stringify(presets || {}));
 }
@@ -1746,11 +2361,17 @@ function renderPresetPanel() {
   const factoryList = document.getElementById('pbFactoryPresetList');
   const userList = document.getElementById('pbUserPresetList');
   if (!factoryList || !userList) return;
+  const meta = getPresetMeta();
 
   factoryList.innerHTML = '';
   FACTORY_PRESETS.forEach((preset) => {
+    const pmeta = meta[`factory:${preset.id}`] || {};
+    const tags = pmeta.tags || '';
+    const favorite = !!pmeta.favorite;
+    if (!matchesPresetFilter(preset.name, preset.description, tags, favorite)) return;
     const card = document.createElement('article');
     card.className = 'pb-preset-card';
+    const stars = '★'.repeat(Math.max(0, Math.min(5, parseInt(pmeta.rating || 0, 10)))) || '☆☆☆☆☆';
     card.innerHTML = `
       <div class="pb-preset-card-head">
         <span class="pb-preset-name">${preset.name}</span>
@@ -1759,16 +2380,57 @@ function renderPresetPanel() {
         </div>
       </div>
       <div class="pb-preset-desc">${preset.description}</div>
+      <div class="pb-preset-desc">${favorite ? '⭐ ' : ''}${stars} ${tags ? '· ' + tags : ''}</div>
+      <div class="pb-preset-meta">
+        <button class="pb-fav">${favorite ? '★' : '☆'}</button>
+        <select class="pb-rating">
+          <option value="0">0★</option><option value="1">1★</option><option value="2">2★</option>
+          <option value="3">3★</option><option value="4">4★</option><option value="5">5★</option>
+        </select>
+        <input class="pb-tags" type="text" maxlength="42" placeholder="tags" value="${tags}">
+      </div>
     `;
+    const key = `factory:${preset.id}`;
+    const ratingSel = card.querySelector('.pb-rating');
+    if (ratingSel) ratingSel.value = String(parseInt(pmeta.rating || 0, 10));
     card.querySelector('.pb-load')?.addEventListener('click', () => {
       applyFactoryPreset(preset);
+    });
+    card.querySelector('.pb-fav')?.addEventListener('click', () => {
+      const m = getPresetMeta();
+      const cur = m[key] || {};
+      cur.favorite = !cur.favorite;
+      m[key] = cur;
+      setPresetMeta(m);
+      renderPresetPanel();
+    });
+    card.querySelector('.pb-rating')?.addEventListener('change', (ev) => {
+      const m = getPresetMeta();
+      const cur = m[key] || {};
+      cur.rating = Math.max(0, Math.min(5, parseInt(ev.target.value || '0', 10) || 0));
+      m[key] = cur;
+      setPresetMeta(m);
+      renderPresetPanel();
+    });
+    card.querySelector('.pb-tags')?.addEventListener('change', (ev) => {
+      const m = getPresetMeta();
+      const cur = m[key] || {};
+      cur.tags = String(ev.target.value || '').trim();
+      m[key] = cur;
+      setPresetMeta(m);
+      renderPresetPanel();
     });
     factoryList.appendChild(card);
   });
 
   userList.innerHTML = '';
   const userPresets = getUserPresets();
-  const names = Object.keys(userPresets).sort((a, b) => a.localeCompare(b));
+  const names = Object.keys(userPresets)
+    .filter((name) => {
+      const pmeta = meta[`user:${name}`] || {};
+      return matchesPresetFilter(name, 'Preset usuario', pmeta.tags || '', !!pmeta.favorite);
+    })
+    .sort((a, b) => a.localeCompare(b));
   if (names.length === 0) {
     const empty = document.createElement('article');
     empty.className = 'pb-preset-card';
@@ -1778,6 +2440,10 @@ function renderPresetPanel() {
   }
 
   names.forEach((name) => {
+    const pmeta = meta[`user:${name}`] || {};
+    const tags = pmeta.tags || '';
+    const favorite = !!pmeta.favorite;
+    const stars = '★'.repeat(Math.max(0, Math.min(5, parseInt(pmeta.rating || 0, 10)))) || '☆☆☆☆☆';
     const card = document.createElement('article');
     card.className = 'pb-preset-card';
     card.innerHTML = `
@@ -1788,15 +2454,54 @@ function renderPresetPanel() {
           <button class="pb-delete">Borrar</button>
         </div>
       </div>
-      <div class="pb-preset-desc">Preset usuario</div>
+      <div class="pb-preset-desc">Preset usuario ${favorite ? '⭐' : ''} ${stars}</div>
+      <div class="pb-preset-desc">${tags ? 'tags: ' + tags : ''}</div>
+      <div class="pb-preset-meta">
+        <button class="pb-fav">${favorite ? '★' : '☆'}</button>
+        <select class="pb-rating">
+          <option value="0">0★</option><option value="1">1★</option><option value="2">2★</option>
+          <option value="3">3★</option><option value="4">4★</option><option value="5">5★</option>
+        </select>
+        <input class="pb-tags" type="text" maxlength="42" placeholder="tags" value="${tags}">
+      </div>
     `;
+    const key = `user:${name}`;
+    const ratingSel = card.querySelector('.pb-rating');
+    if (ratingSel) ratingSel.value = String(parseInt(pmeta.rating || 0, 10));
     card.querySelector('.pb-load')?.addEventListener('click', () => {
       scheduleSceneStateApply(userPresets[name], name);
+    });
+    card.querySelector('.pb-fav')?.addEventListener('click', () => {
+      const m = getPresetMeta();
+      const cur = m[key] || {};
+      cur.favorite = !cur.favorite;
+      m[key] = cur;
+      setPresetMeta(m);
+      renderPresetPanel();
+    });
+    card.querySelector('.pb-rating')?.addEventListener('change', (ev) => {
+      const m = getPresetMeta();
+      const cur = m[key] || {};
+      cur.rating = Math.max(0, Math.min(5, parseInt(ev.target.value || '0', 10) || 0));
+      m[key] = cur;
+      setPresetMeta(m);
+      renderPresetPanel();
+    });
+    card.querySelector('.pb-tags')?.addEventListener('change', (ev) => {
+      const m = getPresetMeta();
+      const cur = m[key] || {};
+      cur.tags = String(ev.target.value || '').trim();
+      m[key] = cur;
+      setPresetMeta(m);
+      renderPresetPanel();
     });
     card.querySelector('.pb-delete')?.addEventListener('click', () => {
       const presets = getUserPresets();
       delete presets[name];
       setUserPresets(presets);
+      const m = getPresetMeta();
+      delete m[key];
+      setPresetMeta(m);
       renderPresetPanel();
     });
     userList.appendChild(card);

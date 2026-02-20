@@ -2,6 +2,10 @@
 CONFIG_ESP_COREDUMP_ENABLE_TO_NONE=y
 CONFIG_ESP_COREDUMP_ENABLE=n
 
+# PSRAM: allow placing BSS variables in external RAM
+# Required for EXT_RAM_BSS_ATTR usage in main.cpp (large Sequencer arrays)
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+
 # WiFi Stability Settings
 CONFIG_ESP_WIFI_SOFTAP_BEACON_MAX_LEN=752
 CONFIG_ESP_WIFI_MGMT_SBUF_NUM=32

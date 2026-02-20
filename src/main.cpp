@@ -38,6 +38,8 @@
 #define AP_PASSWORD "red808esp32"
 
 // --- OBJETOS GLOBALES ---
+// NOTE: Sequencer's large pattern arrays (~229 KB) are allocated from PSRAM
+// via ps_calloc() inside the Sequencer constructor — see Sequencer.cpp.
 AudioEngine audioEngine;
 SampleManager sampleManager;
 KitManager kitManager;

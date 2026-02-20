@@ -70,6 +70,8 @@ static void populateStateDocument(DynamicJsonDocument& doc) {
   doc["psramFree"] = sampleManager.getFreePSRAM();
   doc["songMode"] = sequencer.isSongMode();
   doc["songLength"] = sequencer.getSongLength();
+  doc["humanizeTimingMs"] = sequencer.getHumanizeTimingMs();
+  doc["humanizeVelocity"] = sequencer.getHumanizeVelocityAmount();
   doc["heap"] = ESP.getFreeHeap();
 
   JsonArray loopActive = doc.createNestedArray("loopActive");
@@ -989,8 +991,11 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
     AwsFrameInfo *info = (AwsFrameInfo*)arg;
     
     // --- Frame reassembly for fragmented WebSocket messages ---
+    // NOTE: static vars are per-task (single network task on ESP32), but we track
+    // the client id to detect cross-client fragment interleaving and discard safely.
     static uint8_t* _wsReassemblyBuf = nullptr;
-    static size_t _wsReassemblySize = 0;
+    static size_t   _wsReassemblySize = 0;
+    static uint32_t _wsReassemblyClientId = 0xFFFFFFFF;
     bool _wsFreeAfter = false;
     
     // Safe buffer variables (used for WS_TEXT to avoid data[len]=0 overflow)
@@ -1000,13 +1005,30 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
     if (!(info->final && info->index == 0 && info->len == len)) {
       // Fragmented frame - reassemble chunks into complete message
       if (info->index == 0) {
-        if (_wsReassemblyBuf) { free(_wsReassemblyBuf); _wsReassemblyBuf = nullptr; }
+        // If a different client already owns the buffer, discard it to avoid corruption
+        if (_wsReassemblyBuf && _wsReassemblyClientId != client->id()) {
+          Serial.printf("[WS] Reassembly conflict: client %u vs %u — discarding old buf\n",
+                        _wsReassemblyClientId, client->id());
+          free(_wsReassemblyBuf);
+          _wsReassemblyBuf = nullptr;
+        } else if (_wsReassemblyBuf) {
+          free(_wsReassemblyBuf); _wsReassemblyBuf = nullptr;
+        }
+        if (ESP.getFreeHeap() < (uint32_t)(info->len + 4096)) {
+          Serial.printf("[WS] HEAP too low for reassembly: need %u, free %d\n",
+                        info->len, ESP.getFreeHeap());
+          return;
+        }
         _wsReassemblyBuf = (uint8_t*)malloc(info->len + 2); // +2 for null terminator safety
         if (!_wsReassemblyBuf) {
           Serial.printf("[WS] ALLOC FAIL reassembly: %u bytes\n", info->len);
           return;
         }
         _wsReassemblySize = info->len;
+        _wsReassemblyClientId = client->id();
+      } else if (_wsReassemblyClientId != client->id()) {
+        // Mid-frame data from wrong client — discard silently
+        return;
       }
       if (_wsReassemblyBuf && info->index + len <= _wsReassemblySize) {
         memcpy(_wsReassemblyBuf + info->index, data, len);
@@ -1125,7 +1147,18 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
           
           if (cmd == "getPattern") {
             int pattern = sequencer.getCurrentPattern();
-            DynamicJsonDocument responseDoc(7168);  // ~5KB for steps + vels + noteLens
+            // 6 data structures × 16 tracks × 16 steps — needs ~13-15KB ArduinoJson pool
+            if (ESP.getFreeHeap() < 35000) {
+              Serial.printf("[getPattern] Low heap %d, skipping\n", ESP.getFreeHeap());
+              StaticJsonDocument<64> err; err["type"] = "error"; err["msg"] = "low_heap";
+              String errStr; serializeJson(err, errStr);
+              if (isClientReady(client)) client->text(errStr);
+              if (safeFreeNeeded) free(safeData);
+              if (_wsFreeAfter && _wsReassemblyBuf) { free(_wsReassemblyBuf); _wsReassemblyBuf = nullptr; }
+              return;
+            }
+            yield();
+            DynamicJsonDocument responseDoc(16384);  // 6 structures × 16×16 values needs 13-15KB
             responseDoc["type"] = "pattern";
             responseDoc["index"] = pattern;
             
@@ -1164,6 +1197,22 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
                 } else {
                   trackLocks.add(-1);
                 }
+              }
+            }
+
+            JsonObject probabilitiesObj = responseDoc.createNestedObject("probabilities");
+            for (int track = 0; track < 16; track++) {
+              JsonArray trackProb = probabilitiesObj.createNestedArray(String(track));
+              for (int step = 0; step < 16; step++) {
+                trackProb.add(sequencer.getStepProbability(track, step));
+              }
+            }
+
+            JsonObject ratchetsObj = responseDoc.createNestedObject("ratchets");
+            for (int track = 0; track < 16; track++) {
+              JsonArray trackRat = ratchetsObj.createNestedArray(String(track));
+              for (int step = 0; step < 16; step++) {
+                trackRat.add(sequencer.getStepRatchet(track, step));
               }
             }
             
@@ -1585,13 +1634,27 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int pattern = doc["index"];
     sequencer.selectPattern(pattern);
     
-    // Protect against low heap — skip state broadcast, send only pattern
-    if (ESP.getFreeHeap() > 30000) {
+    // Only broadcast state if heap is comfortably above the combined allocation spike
+    // (broadcastSequencerState ~8-13KB) + (patternDoc ~14KB) = ~22-27KB peak
+    if (ESP.getFreeHeap() > 50000) {
       broadcastSequencerState();
+      yield(); // Let broadcastSequencerState String free before patternDoc alloc
+    } else if (ESP.getFreeHeap() > 35000) {
+      // Heap tight — send only a compact state notification, skip full broadcast
+      StaticJsonDocument<128> minState;
+      minState["type"] = "patternSelected";
+      minState["pattern"] = pattern;
+      String ms; serializeJson(minState, ms);
+      if (ws) ws->textAll(ms);
     }
     
-    // Enviar datos del patrón (matriz de steps) — use 6KB (actually needs ~4KB)
-    DynamicJsonDocument patternDoc(6144);
+    if (ESP.getFreeHeap() < 30000) {
+      Serial.printf("[selectPattern] Heap too low (%d), skipping pattern data\n", ESP.getFreeHeap());
+      return;
+    }
+    yield();
+    // 5 data structures × 16 tracks × 16 steps — needs ~11-13KB ArduinoJson pool
+    DynamicJsonDocument patternDoc(14336);
     patternDoc["type"] = "pattern";
     patternDoc["index"] = pattern;
     
@@ -1619,6 +1682,22 @@ void WebInterface::processCommand(const JsonDocument& doc) {
         } else {
           trackLocks.add(-1);
         }
+      }
+    }
+
+    JsonObject probabilitiesObj = patternDoc.createNestedObject("probabilities");
+    for (int track = 0; track < 16; track++) {
+      JsonArray trackProb = probabilitiesObj.createNestedArray(String(track));
+      for (int step = 0; step < 16; step++) {
+        trackProb.add(sequencer.getStepProbability(track, step));
+      }
+    }
+
+    JsonObject ratchetsObj = patternDoc.createNestedObject("ratchets");
+    for (int track = 0; track < 16; track++) {
+      JsonArray trackRat = ratchetsObj.createNestedArray(String(track));
+      for (int step = 0; step < 16; step++) {
+        trackRat.add(sequencer.getStepRatchet(track, step));
       }
     }
     
@@ -2607,6 +2686,67 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     responseDoc["step"] = step;
     responseDoc["enabled"] = enabled;
     responseDoc["volume"] = constrain(volume, 0, 150);
+    String output;
+    serializeJson(responseDoc, output);
+    if (ws) ws->textAll(output);
+  }
+  else if (cmd == "setStepProbability") {
+    int track = doc["track"];
+    int step = doc["step"];
+    int probability = doc.containsKey("probability") ? doc["probability"].as<int>() : 100;
+    if (track < 0 || track >= 16 || step < 0 || step >= 16) return;
+
+    if (doc.containsKey("pattern")) {
+      int pattern = doc["pattern"].as<int>();
+      if (pattern >= 0 && pattern < MAX_PATTERNS) {
+        sequencer.setStepProbability(pattern, track, step, probability);
+      }
+    } else {
+      sequencer.setStepProbability(track, step, probability);
+    }
+
+    StaticJsonDocument<160> responseDoc;
+    responseDoc["type"] = "stepProbabilitySet";
+    responseDoc["track"] = track;
+    responseDoc["step"] = step;
+    responseDoc["probability"] = constrain(probability, 0, 100);
+    String output;
+    serializeJson(responseDoc, output);
+    if (ws) ws->textAll(output);
+  }
+  else if (cmd == "setStepRatchet") {
+    int track = doc["track"];
+    int step = doc["step"];
+    int ratchet = doc.containsKey("ratchet") ? doc["ratchet"].as<int>() : 1;
+    if (track < 0 || track >= 16 || step < 0 || step >= 16) return;
+
+    if (doc.containsKey("pattern")) {
+      int pattern = doc["pattern"].as<int>();
+      if (pattern >= 0 && pattern < MAX_PATTERNS) {
+        sequencer.setStepRatchet(pattern, track, step, ratchet);
+      }
+    } else {
+      sequencer.setStepRatchet(track, step, ratchet);
+    }
+
+    StaticJsonDocument<160> responseDoc;
+    responseDoc["type"] = "stepRatchetSet";
+    responseDoc["track"] = track;
+    responseDoc["step"] = step;
+    responseDoc["ratchet"] = constrain(ratchet, 1, 4);
+    String output;
+    serializeJson(responseDoc, output);
+    if (ws) ws->textAll(output);
+  }
+  else if (cmd == "setHumanize") {
+    int timing = doc.containsKey("timing") ? doc["timing"].as<int>() : 0;
+    int velocity = doc.containsKey("velocity") ? doc["velocity"].as<int>() : 0;
+    sequencer.setHumanize(timing, velocity);
+
+    StaticJsonDocument<160> responseDoc;
+    responseDoc["type"] = "humanizeSet";
+    responseDoc["timing"] = sequencer.getHumanizeTimingMs();
+    responseDoc["velocity"] = sequencer.getHumanizeVelocityAmount();
     String output;
     serializeJson(responseDoc, output);
     if (ws) ws->textAll(output);

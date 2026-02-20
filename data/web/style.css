@@ -2438,10 +2438,12 @@ body:not(.mono-mode) .pad.tremolo-active {
 
 /* ===== SEQUENCER FX COLUMN ===== */
 .seq-fx-cell {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 2px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    justify-items: stretch;
+    gap: 3px;
     height: 44px;
     background: rgba(30, 30, 40, 0.7);
     border: 1px solid rgba(255, 255, 255, 0.15);
@@ -2450,8 +2452,8 @@ body:not(.mono-mode) .pad.tremolo-active {
 }
 
 .seq-fx-btn {
-    width: 18px;
-    height: 18px;
+    width: 100%;
+    height: 100%;
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 3px;
     background: rgba(0, 0, 0, 0.5);
@@ -2464,6 +2466,10 @@ body:not(.mono-mode) .pad.tremolo-active {
     justify-content: center;
     padding: 0;
     transition: all 0.15s;
+}
+
+.seq-render-wide {
+    grid-column: 1 / span 2;
 }
 
 .seq-fx-btn:hover {
@@ -9449,22 +9455,24 @@ body.midi-dialog-open .midi-import-overlay * {
 
 #section-sequencer .sequencer-grid {
     min-width: 960px;
-    grid-template-columns: 88px repeat(16, minmax(38px, 1fr)) 58px;
+    grid-template-columns: 106px repeat(16, minmax(38px, 1fr)) 86px;
     gap: 4px;
 }
 
 #section-sequencer .track-label {
-    height: 48px;
-    border-radius: 9px;
+    height: 54px;
+    border-radius: 12px;
     border-width: 1px;
-    padding: 4px;
+    padding: 5px;
+    grid-template-columns: 1fr 30px;
+    gap: 4px;
     background: linear-gradient(160deg, rgba(255, 255, 255, 0.08), rgba(12, 12, 16, 0.95));
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1),
                 0 3px 10px rgba(0, 0, 0, 0.4);
 }
 
 #section-sequencer .track-label > span:not(.loop-indicator) {
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.7px;
     font-weight: 800;
 }
@@ -9473,19 +9481,56 @@ body.midi-dialog-open .midi-import-overlay * {
 #section-sequencer .mute-btn,
 #section-sequencer .solo-btn,
 #section-sequencer .seq-fx-btn {
-    border-radius: 6px;
+    min-width: 28px;
+    min-height: 22px;
+    border-radius: 8px;
     border-width: 1px;
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 800;
+    letter-spacing: 0.4px;
+    backdrop-filter: blur(2px);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12),
                 0 2px 6px rgba(0, 0, 0, 0.28);
 }
 
+#section-sequencer .volume-btn:hover,
+#section-sequencer .mute-btn:hover,
+#section-sequencer .solo-btn:hover,
+#section-sequencer .seq-fx-btn:hover {
+    transform: translateY(-1px) scale(1.03);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16),
+                0 8px 14px rgba(0, 0, 0, 0.34);
+}
+
 #section-sequencer .seq-fx-cell {
-    height: 48px;
-    border-radius: 9px;
+    height: 58px;
+    border-radius: 12px;
     border-width: 1px;
+    gap: 4px;
+    padding: 4px;
     background: linear-gradient(160deg, rgba(36, 36, 44, 0.75), rgba(14, 14, 20, 0.9));
+}
+
+#section-sequencer .seq-render-wide {
+    grid-column: 1 / span 2;
+}
+
+#section-sequencer .seq-filter-btn {
+    color: #ffd27d;
+    border-color: rgba(255, 180, 80, 0.55);
+    background: linear-gradient(160deg, rgba(255, 160, 64, 0.25), rgba(24, 16, 8, 0.75));
+}
+
+#section-sequencer .seq-dist-btn {
+    color: #9ed8ff;
+    border-color: rgba(80, 190, 255, 0.55);
+    background: linear-gradient(160deg, rgba(60, 160, 255, 0.24), rgba(10, 18, 28, 0.75));
+}
+
+#section-sequencer .seq-render-btn {
+    color: #ff9f9f;
+    border-color: rgba(255, 100, 100, 0.55);
+    background: linear-gradient(160deg, rgba(255, 90, 90, 0.24), rgba(28, 10, 10, 0.75));
 }
 
 #section-sequencer .seq-step {

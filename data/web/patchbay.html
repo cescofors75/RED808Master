@@ -12,25 +12,33 @@
   <header id="pbHeader">
     <button class="pb-hdr-btn" onclick="goBack()" title="Volver">✕</button>
     <h1>RED808 <span>PATCHBAY</span></h1>
-    <button class="pb-hdr-btn" id="pbMenuBtn" onclick="togglePBMenu()" title="Menú">⋯</button>
+    <button class="pb-hdr-btn" id="pbMenuBtn" onclick="togglePBMenu()" title="Workspace">☰</button>
     <div id="pbMenu" class="pb-menu hidden">
+      <div class="pb-menu-title">Workspace</div>
       <button onclick="pbClearAll()">🗑 Borrar todo</button>
       <button onclick="pbResetLayout()">📐 Reset layout</button>
       <button onclick="pbAutoRoute()">⚡ Auto-route</button>
       <button onclick="pbBuildChain()">🧬 Encadenar FX</button>
       <button onclick="pbOrganizeNodes()">🧭 Organizar nodos</button>
       <button onclick="pbToggleSignalDemo()">🎬 Demo señal</button>
+
+      <div class="pb-menu-title">Live</div>
       <button id="pbHeatToggleBtn" onclick="pbToggleHeatMode()">🌡 Heat ON</button>
+      <button id="pbQuantizeBtn" onclick="pbToggleSceneQuantize()">⏱ Quantize ON</button>
+
+      <div class="pb-menu-title">Snapshots</div>
       <button onclick="pbSaveSnapshot('A')">📸 Guardar Snap A</button>
       <button onclick="pbLoadSnapshot('A')">🎯 Cargar Snap A</button>
       <button onclick="pbSaveSnapshot('B')">📸 Guardar Snap B</button>
       <button onclick="pbLoadSnapshot('B')">🎯 Cargar Snap B</button>
-      <button id="pbQuantizeBtn" onclick="pbToggleSceneQuantize()">⏱ Quantize ON</button>
-      <button onclick="pbOpenPresetPanel()">🧩 Presets</button>
+
+      <div class="pb-menu-title">Presets</div>
+      <button onclick="pbOpenPresetPanel()">🧩 Abrir browser</button>
       <button onclick="pbSavePreset()">💾 Guardar preset</button>
       <button onclick="pbLoadPreset()">📂 Cargar preset</button>
     </div>
   </header>
+  <div id="pbMenuBackdrop" class="hidden" onclick="togglePBMenu()"></div>
 
   <!-- Toolbar -->
   <div id="pbToolbar">
@@ -38,19 +46,48 @@
       <span class="pb-logo"><b>R</b><b>E</b><b>D</b><em>8</em><em>0</em><em>8</em></span>
       <span class="pb-subtitle">SIGNAL PATCH</span>
     </div>
-    <div class="pb-fx-buttons">
-      <button class="pb-add-btn" data-fx="lowpass" onclick="pbAddEffect('lowpass')">+ LOW PASS</button>
-      <button class="pb-add-btn" data-fx="highpass" onclick="pbAddEffect('highpass')">+ HI PASS</button>
-      <button class="pb-add-btn" data-fx="bandpass" onclick="pbAddEffect('bandpass')">+ BAND PASS</button>
-      <button class="pb-add-btn" data-fx="echo" onclick="pbAddEffect('echo')">+ REVERB</button>
-      <button class="pb-add-btn" data-fx="delay" onclick="pbAddEffect('delay')">+ DELAY</button>
-      <button class="pb-add-btn" data-fx="bitcrusher" onclick="pbAddEffect('bitcrusher')">+ BITCRUSHER</button>
-      <button class="pb-add-btn" data-fx="distortion" onclick="pbAddEffect('distortion')">+ DISTORTION</button>
-      <button class="pb-add-btn" data-fx="compressor" onclick="pbAddEffect('compressor')">+ COMPRESSOR</button>
-      <button class="pb-add-btn" data-fx="flanger" onclick="pbAddEffect('flanger')">+ FLANGER</button>
-      <button class="pb-add-btn" data-fx="phaser" onclick="pbAddEffect('phaser')">+ PHASER</button>
+    <div class="pb-fx-buttons" aria-label="Biblioteca de FX">
+      <div class="pb-source-bar" aria-label="Fuentes de sampler">
+        <span class="pb-source-title">SOURCES <b id="pbSourceCount">0/16</b></span>
+        <select id="pbSourcePicker" class="pb-source-picker" aria-label="Seleccionar sampler"></select>
+        <button id="pbAddSourceBtn" class="pb-source-btn" onclick="pbAddSelectedSource()">+ SOURCE</button>
+        <select id="pbActiveSourcePicker" class="pb-source-picker" aria-label="Seleccionar fuente activa"></select>
+        <button id="pbRemoveSourceBtn" class="pb-source-btn pb-source-btn-remove" onclick="pbRemoveSelectedSource()">- SOURCE</button>
+        <button id="pbAddAllSourcesBtn" class="pb-source-btn" onclick="pbAddAllSources()">+ ALL</button>
+      </div>
+      <div class="pb-fx-group">
+        <div class="pb-fx-group-head">
+          <span class="pb-fx-group-title">FILTERS</span>
+          <span class="pb-fx-group-subtitle">Track tone shaping</span>
+        </div>
+        <div class="pb-fx-group-btns">
+          <button class="pb-add-btn" data-fx="lowpass"   onclick="pbAddEffect('lowpass')">LP</button>
+          <button class="pb-add-btn" data-fx="highpass"  onclick="pbAddEffect('highpass')">HP</button>
+          <button class="pb-add-btn" data-fx="bandpass"  onclick="pbAddEffect('bandpass')">BP</button>
+          <button class="pb-add-btn" data-fx="notch"     onclick="pbAddEffect('notch')">NOTCH</button>
+          <button class="pb-add-btn" data-fx="allpass"   onclick="pbAddEffect('allpass')">ALLP</button>
+          <button class="pb-add-btn" data-fx="peaking"   onclick="pbAddEffect('peaking')">PEAK</button>
+          <button class="pb-add-btn" data-fx="lowshelf"  onclick="pbAddEffect('lowshelf')">LOSHELF</button>
+          <button class="pb-add-btn" data-fx="highshelf" onclick="pbAddEffect('highshelf')">HISHELF</button>
+          <button class="pb-add-btn" data-fx="resonant"  onclick="pbAddEffect('resonant')">RESO</button>
+        </div>
+      </div>
+      <div class="pb-fx-group">
+        <div class="pb-fx-group-head">
+          <span class="pb-fx-group-title">FX</span>
+          <span class="pb-fx-group-subtitle">Dynamics & ambience</span>
+        </div>
+        <div class="pb-fx-group-btns">
+          <button class="pb-add-btn" data-fx="echo"        onclick="pbAddEffect('echo')">REVERB</button>
+          <button class="pb-add-btn" data-fx="delay"       onclick="pbAddEffect('delay')">DELAY</button>
+          <button class="pb-add-btn" data-fx="bitcrusher"  onclick="pbAddEffect('bitcrusher')">BITCRUSH</button>
+          <button class="pb-add-btn" data-fx="distortion"  onclick="pbAddEffect('distortion')">DIST</button>
+          <button class="pb-add-btn" data-fx="compressor"  onclick="pbAddEffect('compressor')">COMP</button>
+          <button class="pb-add-btn" data-fx="flanger"     onclick="pbAddEffect('flanger')">FLANGER</button>
+          <button class="pb-add-btn" data-fx="phaser"      onclick="pbAddEffect('phaser')">PHASER</button>
+        </div>
+      </div>
     </div>
-    <div class="pb-help">DRAG <span class="dot out"></span> TO CONNECT · CLICK WIRE TO REMOVE · DRAG NODE TO MOVE</div>
     <div id="pbMacroPanel">
       <div class="pb-macro-head">
         <span>MACROS</span>
@@ -72,17 +109,21 @@
         <button onclick="pbLoadMacroScene()">Cargar escena</button>
       </div>
     </div>
+    <div class="pb-help">DRAG <span class="dot out"></span> TO CONNECT · CLICK WIRE TO SELECT · SUPR/BACKSPACE TO REMOVE · DRAG NODE TO MOVE</div>
   </div>
 
   <!-- Canvas area -->
   <div id="pbCanvas">
     <div id="pbViewControls">
+      <button id="pbToolHandBtn" onclick="pbToggleHandTool()" title="Mover grid (mano)">✋</button>
+      <button id="pbToolSelectBtn" onclick="pbToggleSelectTool()" title="Selección múltiple">▭</button>
       <button onclick="pbZoomOut()" title="Zoom -">−</button>
       <span id="pbZoomValue">100%</span>
       <button onclick="pbZoomIn()" title="Zoom +">+</button>
       <button onclick="pbZoomReset()" title="Reset zoom">1:1</button>
       <button id="pbGridToggleBtn" onclick="pbToggleGrid()" title="Mostrar/Ocultar cuadrícula">GRID</button>
     </div>
+    <div id="pbSelectionBox" aria-hidden="true"></div>
     <div id="pbWorld">
       <svg id="pbSVG">
         <defs>
@@ -117,6 +158,10 @@
     <div class="pb-preset-save">
       <input id="pbPresetNameInput" type="text" placeholder="Nombre preset usuario..." maxlength="48">
       <button onclick="pbSavePresetFromPanel()">Guardar</button>
+    </div>
+    <div class="pb-preset-browser-tools">
+      <input id="pbPresetSearchInput" type="text" placeholder="Buscar por nombre, tag o descripción..." oninput="pbRefreshPresetBrowser()">
+      <label><input id="pbPresetFavOnly" type="checkbox" onchange="pbRefreshPresetBrowser()">⭐ Favoritos</label>
     </div>
     <div class="pb-preset-sections">
       <section>

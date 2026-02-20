@@ -2284,7 +2284,7 @@ function createSequencer() {
         const trackFxBtn = document.createElement('button');
         trackFxBtn.className = 'seq-fx-btn seq-dist-btn';
         trackFxBtn.title = 'Distortion & BitCrush';
-        trackFxBtn.textContent = '🎸';
+        trackFxBtn.textContent = 'FX';
         trackFxBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             showTrackFxPopup(track);
@@ -2295,7 +2295,7 @@ function createSequencer() {
 
         // Render button – renders track to WAV inline
         const renderBtn = document.createElement('button');
-        renderBtn.className = 'seq-fx-btn seq-render-btn';
+        renderBtn.className = 'seq-fx-btn seq-render-btn seq-render-wide';
         renderBtn.title = 'Render track to WAV';
         renderBtn.textContent = 'R';
         renderBtn.dataset.track = track;
