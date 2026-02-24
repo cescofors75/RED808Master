@@ -146,11 +146,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // WebSocket Connection
 function initWebSocket() {
-    const wsUrl = `ws://${window.location.hostname}/ws`;
+    const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl = `${wsScheme}://${window.location.host}/ws`;
+    console.log('[WS] Connecting to', wsUrl);
     ws = new WebSocket(wsUrl);
     window.ws = ws; // Expose for midi-import.js
     
     ws.onopen = () => {
+        console.log('[WS] Connected', wsUrl);
         isConnected = true;
         updateStatus(true);
         syncLedMonoMode();
@@ -161,6 +164,7 @@ function initWebSocket() {
     };
     
     ws.onclose = () => {
+        console.warn('[WS] Closed, retrying in 3s', wsUrl);
         isConnected = false;
         updateStatus(false);
         setTimeout(initWebSocket, 3000);
@@ -2080,6 +2084,15 @@ function formatBytes(bytes) {
 }
 
 function triggerPad(padIndex) {
+    console.log('[PAD] triggerPad()', padIndex, 'ws=', ws ? ws.readyState : 'null');
+
+    // DIAG: enviar también por HTTP siempre para descartar fallo WS
+    fetch('/api/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `pad=${encodeURIComponent(padIndex)}`
+    }).catch((err) => console.error('[PAD] /api/trigger failed', err));
+
     // Enviar al ESP32 (Protocolo Binario para baja latencia)
     if (ws && ws.readyState === WebSocket.OPEN) {
         const data = new Uint8Array(3);

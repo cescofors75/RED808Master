@@ -7,6 +7,97 @@
 #include "SPIMaster.h"
 
 // ═══════════════════════════════════════════════════════
+// SPI DEBUG — Activar/desactivar logs por Serial
+// ═══════════════════════════════════════════════════════
+#define SPI_DEBUG_ENABLED   true   // <<< cambiar a false para silenciar
+#define SPI_DEBUG_PEAKS     false  // peaks cada 50ms = mucho spam
+#define SPI_DEBUG_SAMPLE    false  // chunks de sample transfer
+
+static const char* spiCmdName(uint8_t cmd) {
+    switch(cmd) {
+        case 0x01: return "TRIG_SEQ";
+        case 0x02: return "TRIG_LIVE";
+        case 0x03: return "TRIG_STOP";
+        case 0x04: return "STOP_ALL";
+        case 0x05: return "TRIG_SC";
+        case 0x10: return "VOL_MASTER";
+        case 0x11: return "VOL_SEQ";
+        case 0x12: return "VOL_LIVE";
+        case 0x13: return "VOL_TRACK";
+        case 0x14: return "PITCH_LIVE";
+        case 0x20: return "FILT_SET";
+        case 0x21: return "FILT_CUT";
+        case 0x22: return "FILT_RES";
+        case 0x23: return "FILT_BIT";
+        case 0x24: return "FILT_DIST";
+        case 0x25: return "FILT_DMOD";
+        case 0x26: return "FILT_SR";
+        case 0x30: return "DLY_ACT";
+        case 0x31: return "DLY_TIME";
+        case 0x32: return "DLY_FB";
+        case 0x33: return "DLY_MIX";
+        case 0x34: return "PH_ACT";
+        case 0x35: return "PH_RATE";
+        case 0x36: return "PH_DEPTH";
+        case 0x37: return "PH_FB";
+        case 0x38: return "FL_ACT";
+        case 0x39: return "FL_RATE";
+        case 0x3A: return "FL_DEPTH";
+        case 0x3B: return "FL_FB";
+        case 0x3C: return "FL_MIX";
+        case 0x3D: return "CMP_ACT";
+        case 0x3E: return "CMP_THR";
+        case 0x3F: return "CMP_RAT";
+        case 0x40: return "CMP_ATK";
+        case 0x41: return "CMP_REL";
+        case 0x42: return "CMP_MKP";
+        case 0x50: return "TK_FILT";
+        case 0x51: return "TK_CLR_F";
+        case 0x52: return "TK_DIST";
+        case 0x53: return "TK_BITCR";
+        case 0x54: return "TK_ECHO";
+        case 0x55: return "TK_FLANG";
+        case 0x56: return "TK_COMP";
+        case 0x57: return "TK_CLR_L";
+        case 0x58: return "TK_CLR_F";
+        case 0x70: return "PD_FILT";
+        case 0x71: return "PD_CLR_F";
+        case 0x72: return "PD_DIST";
+        case 0x73: return "PD_BITCR";
+        case 0x74: return "PD_LOOP";
+        case 0x75: return "PD_REV";
+        case 0x76: return "PD_PITCH";
+        case 0x77: return "PD_STUTT";
+        case 0x78: return "PD_SCRAT";
+        case 0x79: return "PD_TURNT";
+        case 0x7A: return "PD_CLR";
+        case 0x90: return "SC_SET";
+        case 0x91: return "SC_CLR";
+        case 0xA0: return "SMPL_BEG";
+        case 0xA1: return "SMPL_DAT";
+        case 0xA2: return "SMPL_END";
+        case 0xA3: return "SMPL_UNL";
+        case 0xA4: return "SMPL_UNA";
+        case 0xE0: return "GET_STAT";
+        case 0xE1: return "GET_PEAK";
+        case 0xE2: return "GET_CPU";
+        case 0xE3: return "GET_VOIC";
+        case 0xEE: return "PING";
+        case 0xEF: return "RESET";
+        case 0xF0: return "BULK_TRG";
+        case 0xF1: return "BULK_FX";
+        default:   return "???";
+    }
+}
+
+static bool shouldLogCmd(uint8_t cmd) {
+    if (!SPI_DEBUG_ENABLED) return false;
+    if (cmd == CMD_GET_PEAKS && !SPI_DEBUG_PEAKS) return false;
+    if (cmd == CMD_SAMPLE_DATA && !SPI_DEBUG_SAMPLE) return false;
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════
 // FILTER PRESETS (static, for UI compatibility)
 // ═══════════════════════════════════════════════════════
 static const FilterPreset filterPresets[] = {
@@ -31,7 +122,8 @@ static const FilterPreset filterPresets[] = {
 // CONSTRUCTOR / DESTRUCTOR
 // ═══════════════════════════════════════════════════════
 
-SPIMaster::SPIMaster() : spi(nullptr), seqNumber(0), spiErrorCount(0), stm32Connected(false) {
+SPIMaster::SPIMaster() : spi(nullptr), seqNumber(0), spiErrorCount(0), stm32Connected(false), spiMutex(nullptr) {
+    spiMutex = xSemaphoreCreateMutex();
     // Initialize cached state
     cachedMasterVolume = 100;
     cachedSeqVolume = 10;
@@ -156,6 +248,24 @@ bool SPIMaster::sendCommand(uint8_t cmd, const void* payload, uint16_t payloadLe
     header.sequence = seqNumber++;
     header.checksum = (payload && payloadLen > 0) ? crc16((const uint8_t*)payload, payloadLen) : 0;
     
+    if (shouldLogCmd(cmd)) {
+        Serial.printf("[SPI TX] #%03d %-9s cmd=0x%02X len=%d crc=0x%04X\n",
+                      header.sequence, spiCmdName(cmd), cmd, payloadLen, header.checksum);
+        // Print first bytes of payload for debugging
+        if (payload && payloadLen > 0 && payloadLen <= 16) {
+            Serial.print("         data: ");
+            for (int i = 0; i < payloadLen && i < 16; i++)
+                Serial.printf("%02X ", ((const uint8_t*)payload)[i]);
+            Serial.println();
+        }
+    }
+    
+    // Acquire SPI mutex (thread safety Core0 ↔ Core1)
+    if (xSemaphoreTake(spiMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
+        Serial.printf("[SPI] MUTEX TIMEOUT cmd=0x%02X\n", cmd);
+        return false;
+    }
+    
     csLow();
     spi->beginTransaction(SPISettings(STM32_SPI_CLOCK, MSBFIRST, SPI_MODE0));
     
@@ -169,6 +279,8 @@ bool SPIMaster::sendCommand(uint8_t cmd, const void* payload, uint16_t payloadLe
     
     spi->endTransaction();
     csHigh();
+    
+    xSemaphoreGive(spiMutex);
     
     // SYNC pulse to notify STM32
     syncPulse();
@@ -185,6 +297,17 @@ bool SPIMaster::sendAndReceive(uint8_t cmd, const void* payload, uint16_t payloa
     header.length = payloadLen;
     header.sequence = seqNumber++;
     header.checksum = (payload && payloadLen > 0) ? crc16((const uint8_t*)payload, payloadLen) : 0;
+    
+    if (shouldLogCmd(cmd)) {
+        Serial.printf("[SPI TX] #%03d %-9s cmd=0x%02X len=%d (espera resp %d bytes)\n",
+                      header.sequence, spiCmdName(cmd), cmd, payloadLen, responseLen);
+    }
+    
+    // Acquire SPI mutex (thread safety Core0 ↔ Core1)
+    if (xSemaphoreTake(spiMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
+        Serial.printf("[SPI] MUTEX TIMEOUT cmd=0x%02X (sendAndReceive)\n", cmd);
+        return false;
+    }
     
     csLow();
     spi->beginTransaction(SPISettings(STM32_SPI_CLOCK, MSBFIRST, SPI_MODE0));
@@ -212,12 +335,23 @@ bool SPIMaster::sendAndReceive(uint8_t cmd, const void* payload, uint16_t payloa
             spi->transferBytes(nullptr, (uint8_t*)response, respHeader.length);
         }
         success = true;
+        if (shouldLogCmd(cmd)) {
+            Serial.printf("[SPI RX] #%03d %-9s OK len=%d\n",
+                          respHeader.sequence, spiCmdName(cmd), respHeader.length);
+        }
     } else {
         spiErrorCount++;
+        if (shouldLogCmd(cmd)) {
+            Serial.printf("[SPI RX] #%03d %-9s FAIL magic=0x%04X len=%d (err_total=%d)\n",
+                          header.sequence, spiCmdName(cmd), respHeader.magic, 
+                          respHeader.length, spiErrorCount);
+        }
     }
     
     spi->endTransaction();
     csHigh();
+    
+    xSemaphoreGive(spiMutex);
     
     return success;
 }

@@ -10,6 +10,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include "protocol.h"
+#include <freertos/semphr.h>
 
 // Audio constants (shared with STM32)
 #define SAMPLE_RATE 44100
@@ -272,6 +273,9 @@ private:
     // Status cache
     uint8_t cachedActiveVoices;
     float cachedCpuLoad;
+    
+    // SPI mutex for thread safety (Core0 triggers vs Core1 process)
+    SemaphoreHandle_t spiMutex;
     
     // SPI low-level
     bool sendCommand(uint8_t cmd, const void* payload, uint16_t payloadLen);

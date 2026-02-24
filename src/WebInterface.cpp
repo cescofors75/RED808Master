@@ -486,7 +486,19 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   server->on("/api/trigger", HTTP_POST, [](AsyncWebServerRequest *request){
     if (request->hasParam("pad", true)) {
       int pad = request->getParam("pad", true)->value().toInt();
+      Serial.printf("[API] /api/trigger POST pad=%d\n", pad);
       triggerPadWithLED(pad, 127);  // Enciende LED RGB
+      request->send(200, "text/plain", "OK");
+    } else {
+      request->send(400, "text/plain", "Missing pad parameter");
+    }
+  });
+
+  server->on("/api/trigger", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (request->hasParam("pad")) {
+      int pad = request->getParam("pad")->value().toInt();
+      Serial.printf("[API] /api/trigger GET pad=%d\n", pad);
+      triggerPadWithLED(pad, 127);
       request->send(200, "text/plain", "OK");
     } else {
       request->send(400, "text/plain", "Missing pad parameter");
@@ -1070,8 +1082,15 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
       }
     }
       
+    Serial.printf("[WS DATA] opcode=%u len=%u final=%u idx=%u total=%u\n",
+                  (unsigned)info->opcode, (unsigned)len,
+                  (unsigned)info->final, (unsigned)info->index, (unsigned)info->len);
+
     // 1. MANEJO DE BINARIO (Baja latencia para Triggers)
     if (info->opcode == WS_BINARY) {
+      Serial.printf("[WS BIN] len=%d data:", len);
+      for (size_t i = 0; i < len && i < 8; i++) Serial.printf(" %02X", data[i]);
+      Serial.println();
       // Protocolo: [0x90, PAD, VEL]
       if (len == 3 && data[0] == 0x90) {
          int pad = data[1];
