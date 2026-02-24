@@ -309,28 +309,31 @@ bool SPIMaster::sendAndReceive(uint8_t cmd, const void* payload, uint16_t payloa
         return false;
     }
     
+    // ── PHASE 1: enviar comando ──────────────────────────
     csLow();
     spi->beginTransaction(SPISettings(STM32_SPI_CLOCK, MSBFIRST, SPI_MODE0));
-    
-    // Send header
     spi->transferBytes((uint8_t*)&header, nullptr, sizeof(SPIPacketHeader));
-    
-    // Send payload
     if (payload && payloadLen > 0) {
         spi->transferBytes((const uint8_t*)payload, nullptr, payloadLen);
     }
-    
-    // Small delay for STM32 to prepare response
-    delayMicroseconds(10);
-    
-    // Read response header
+    spi->endTransaction();
+    csHigh();   // <-- CS HIGH: NSS rising edge dispara la ISR del STM32
+
+    // Dar tiempo al STM32 para parsear el comando y cargar su TX buffer.
+    // A 2MHz 8 bytes = ~32us; con 500us el STM32 tiene más que suficiente.
+    delayMicroseconds(500);
+
+    // ── PHASE 2: leer respuesta ──────────────────────────
     SPIPacketHeader respHeader;
     memset(&respHeader, 0, sizeof(respHeader));
+
+    csLow();
+    spi->beginTransaction(SPISettings(STM32_SPI_CLOCK, MSBFIRST, SPI_MODE0));
     spi->transferBytes(nullptr, (uint8_t*)&respHeader, sizeof(SPIPacketHeader));
     
     bool success = false;
     if (respHeader.magic == SPI_MAGIC_RESP && respHeader.length <= responseLen) {
-        // Read response payload
+        // Leer payload de respuesta
         if (respHeader.length > 0 && response) {
             spi->transferBytes(nullptr, (uint8_t*)response, respHeader.length);
         }
@@ -342,9 +345,16 @@ bool SPIMaster::sendAndReceive(uint8_t cmd, const void* payload, uint16_t payloa
     } else {
         spiErrorCount++;
         if (shouldLogCmd(cmd)) {
-            Serial.printf("[SPI RX] #%03d %-9s FAIL magic=0x%04X len=%d (err_total=%d)\n",
-                          header.sequence, spiCmdName(cmd), respHeader.magic, 
-                          respHeader.length, spiErrorCount);
+            // Volcar los 8 bytes raw para diagnóstico STM32
+            const uint8_t* raw = (const uint8_t*)&respHeader;
+            Serial.printf("[SPI RX] #%03d %-9s FAIL magic=0x%02X cmd=0x%02X len=%d seq=%d (err_total=%d)\n",
+                          header.sequence, spiCmdName(cmd),
+                          respHeader.magic, respHeader.cmd,
+                          respHeader.length, respHeader.sequence,
+                          spiErrorCount);
+            Serial.printf("         raw: %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                          raw[0], raw[1], raw[2], raw[3],
+                          raw[4], raw[5], raw[6], raw[7]);
         }
     }
     

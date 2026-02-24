@@ -33,8 +33,8 @@
 #define STM32_SPI_IRQ    14   // STM32 → ESP32: data ready / request
 #endif
 
-// SPI Speed (40 MHz max for short wires)
-#define STM32_SPI_CLOCK  20000000  // Start conservative at 20 MHz
+// SPI Speed test mode (bring-up STM32 slave): 2 MHz
+#define STM32_SPI_CLOCK  2000000
 
 // Audio constants (mirrored from old AudioEngine for compatibility)
 static constexpr int MAX_AUDIO_TRACKS = 16;

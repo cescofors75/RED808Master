@@ -31,6 +31,8 @@ let sampleCounts = {};
 let keyboardPadsActive = {};
 let keyboardHoldTimers = {};
 let keyboardTremoloState = {};
+let lastPadTriggerMs = new Array(24).fill(0);
+const PAD_TEST_MIN_TRIGGER_MS = 80;
 
 // Pad hold timers for long press detection
 let padHoldTimers = {};
@@ -2084,14 +2086,15 @@ function formatBytes(bytes) {
 }
 
 function triggerPad(padIndex) {
-    console.log('[PAD] triggerPad()', padIndex, 'ws=', ws ? ws.readyState : 'null');
+    const now = performance.now();
+    if (padIndex >= 0 && padIndex < lastPadTriggerMs.length) {
+        if (now - lastPadTriggerMs[padIndex] < PAD_TEST_MIN_TRIGGER_MS) {
+            return;
+        }
+        lastPadTriggerMs[padIndex] = now;
+    }
 
-    // DIAG: enviar también por HTTP siempre para descartar fallo WS
-    fetch('/api/trigger', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `pad=${encodeURIComponent(padIndex)}`
-    }).catch((err) => console.error('[PAD] /api/trigger failed', err));
+    console.log('[PAD] triggerPad()', padIndex, 'ws=', ws ? ws.readyState : 'null');
 
     // Enviar al ESP32 (Protocolo Binario para baja latencia)
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -2100,6 +2103,13 @@ function triggerPad(padIndex) {
         data[1] = padIndex;
         data[2] = 127;  // Velocity
         ws.send(data);
+    } else {
+        // Fallback por HTTP si WS no está conectado
+        fetch('/api/trigger', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `pad=${encodeURIComponent(padIndex)}`
+        }).catch((err) => console.error('[PAD] /api/trigger failed', err));
     }
 }
 

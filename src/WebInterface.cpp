@@ -611,12 +611,18 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     doc["memoryUsed"] = sampleManager.getTotalMemoryUsed();
     
     // Info MIDI USB
-    MIDIDeviceInfo midiInfo = midiController->getDeviceInfo();
-    doc["midiConnected"] = midiInfo.connected;
-    if (midiInfo.connected) {
-      doc["midiDevice"] = midiInfo.deviceName;
-      doc["midiVendorId"] = String(midiInfo.vendorId, HEX);
-      doc["midiProductId"] = String(midiInfo.productId, HEX);
+    if (midiController) {
+      MIDIDeviceInfo midiInfo = midiController->getDeviceInfo();
+      doc["midiEnabled"] = true;
+      doc["midiConnected"] = midiInfo.connected;
+      if (midiInfo.connected) {
+        doc["midiDevice"] = midiInfo.deviceName;
+        doc["midiVendorId"] = String(midiInfo.vendorId, HEX);
+        doc["midiProductId"] = String(midiInfo.productId, HEX);
+      }
+    } else {
+      doc["midiEnabled"] = false;
+      doc["midiConnected"] = false;
     }
     
     // Uptime
@@ -640,6 +646,11 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   
   // MIDI Mapping endpoints
   server->on("/api/midi/mapping", HTTP_GET, [this](AsyncWebServerRequest *request){
+    if (!midiController) {
+      request->send(503, "application/json", "{\"error\":\"MIDI disabled\"}");
+      return;
+    }
+
     StaticJsonDocument<2048> doc;
     JsonArray mappings = doc.createNestedArray("mappings");
     
@@ -660,6 +671,11 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   
   server->on("/api/midi/mapping", HTTP_POST, [this](AsyncWebServerRequest *request){}, NULL,
     [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+      if (!midiController) {
+        request->send(503, "application/json", "{\"error\":\"MIDI disabled\"}");
+        return;
+      }
+
       StaticJsonDocument<512> doc;
       DeserializationError error = deserializeJson(doc, data, len);
       

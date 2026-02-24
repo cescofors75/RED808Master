@@ -34,6 +34,9 @@
 #define AP_SSID     "RED808"
 #define AP_PASSWORD "red808esp32"
 
+// USB MIDI HOST (desactivar temporalmente para aislar problemas de arranque/web)
+#define ENABLE_USB_MIDI false
+
 // --- OBJETOS GLOBALES ---
 // NOTE: Sequencer's large pattern arrays (~229 KB) are allocated from PSRAM
 // via ps_calloc() inside the Sequencer constructor — see Sequencer.cpp.
@@ -115,6 +118,7 @@ void showReadyLED() {
 volatile uint8_t ledBrightness = 0;
 volatile bool ledFading = false;
 volatile bool ledMonoMode = false;
+volatile bool midiUsbActive = false;
 
 void setLedMonoMode(bool enabled) {
     ledMonoMode = enabled;
@@ -142,7 +146,9 @@ void systemTask(void *pvParameters) {
     while (true) {
         webInterface.update();
         webInterface.handleUdp();
-        midiController.update();
+        if (midiUsbActive) {
+            midiController.update();
+        }
         
         // Fade out del LED después de trigger
         if (ledFading && millis() - lastLedUpdate > 20) {
@@ -518,26 +524,32 @@ void setup() {
 
     // --- MIDI USB HOST ---
     Serial.println("\n[STEP 6] Initializing MIDI USB...");
-    if (midiController.begin()) {
-        webInterface.setMIDIController(&midiController);
-        
-        midiController.setMessageCallback([](const MIDIMessage& msg) {
-            webInterface.broadcastMIDIMessage(msg);
-            if (msg.type == MIDI_NOTE_ON && msg.data2 > 0) {
-                int8_t pad = midiController.getMappedPad(msg.data1);
-                if (pad >= 0 && pad < 8) {
-                    triggerPadWithLED(pad, msg.data2);
+    if (ENABLE_USB_MIDI) {
+        if (midiController.begin()) {
+            midiUsbActive = true;
+            webInterface.setMIDIController(&midiController);
+            
+            midiController.setMessageCallback([](const MIDIMessage& msg) {
+                webInterface.broadcastMIDIMessage(msg);
+                if (msg.type == MIDI_NOTE_ON && msg.data2 > 0) {
+                    int8_t pad = midiController.getMappedPad(msg.data1);
+                    if (pad >= 0 && pad < 8) {
+                        triggerPadWithLED(pad, msg.data2);
+                    }
                 }
-            }
-        });
-        
-        midiController.setDeviceCallback([](bool connected, const MIDIDeviceInfo& info) {
-            webInterface.broadcastMIDIDeviceStatus(connected, info);
-        });
-        
-        Serial.println("MIDI USB Host ready");
+            });
+            
+            midiController.setDeviceCallback([](bool connected, const MIDIDeviceInfo& info) {
+                webInterface.broadcastMIDIDeviceStatus(connected, info);
+            });
+            
+            Serial.println("MIDI USB Host ready");
+        } else {
+            Serial.println("MIDI init failed - continuing");
+        }
     } else {
-        Serial.println("MIDI init failed - continuing");
+        midiUsbActive = false;
+        Serial.println("MIDI USB Host DISABLED (ENABLE_USB_MIDI=false)");
     }
 
     // --- DUAL-CORE TASKS ---
