@@ -9,7 +9,7 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <FS.h>
-#include "AudioEngine.h"
+#include "SPIMaster.h"
 
 #define MAX_SAMPLES 24  // 16 sequencer + 8 XTRA pads
 #define MAX_SAMPLE_SIZE (2 * 1024 * 1024) // 2MB per sample (suficiente para samples largos)

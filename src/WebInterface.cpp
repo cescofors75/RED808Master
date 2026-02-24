@@ -4,7 +4,7 @@
  */
 
 #include "WebInterface.h"
-#include "AudioEngine.h"
+#include "SPIMaster.h"
 #include "Sequencer.h"
 #include "KitManager.h"
 #include "SampleManager.h"
@@ -14,7 +14,7 @@
 // Timeout para clientes UDP (30 segundos sin actividad)
 #define UDP_CLIENT_TIMEOUT 30000
 
-extern AudioEngine audioEngine;
+extern SPIMaster spiMaster;
 extern Sequencer sequencer;
 extern KitManager kitManager;
 extern SampleManager sampleManager;
@@ -63,8 +63,8 @@ static void populateStateDocument(DynamicJsonDocument& doc) {
   doc["tempo"] = sequencer.getTempo();
   doc["pattern"] = sequencer.getCurrentPattern();
   doc["step"] = sequencer.getCurrentStep();
-  doc["sequencerVolume"] = audioEngine.getSequencerVolume();
-  doc["liveVolume"] = audioEngine.getLiveVolume();
+  doc["sequencerVolume"] = spiMaster.getSequencerVolume();
+  doc["liveVolume"] = spiMaster.getLiveVolume();
   doc["samplesLoaded"] = sampleManager.getLoadedSamplesCount();
   doc["memoryUsed"] = sampleManager.getTotalMemoryUsed();
   doc["psramFree"] = sampleManager.getFreePSRAM();
@@ -109,14 +109,14 @@ static void populateStateDocument(DynamicJsonDocument& doc) {
   // Send pad filter states (for live pads)
   JsonArray padFilters = doc.createNestedArray("padFilters");
   for (int pad = 0; pad < 16; pad++) {
-    FilterType filterType = audioEngine.getPadFilter(pad);
+    FilterType filterType = spiMaster.getPadFilter(pad);
     padFilters.add((int)filterType);
   }
   
   // Send track filter states (for sequencer tracks)
   JsonArray trackFilters = doc.createNestedArray("trackFilters");
   for (int track = 0; track < 16; track++) {
-    FilterType filterType = audioEngine.getTrackFilter(track);
+    FilterType filterType = spiMaster.getTrackFilter(track);
     trackFilters.add((int)filterType);
   }
 }
@@ -1494,14 +1494,14 @@ void WebInterface::update() {
       levelBuf[0] = 0xAA;  // Magic byte: audio levels message
       
       float peaks[16];
-      audioEngine.getTrackPeaks(peaks, 16);
+      spiMaster.getTrackPeaks(peaks, 16);
       for (int i = 0; i < 16; i++) {
         float p = peaks[i];
         if (p < 0.0f) p = 0.0f;
         if (p > 1.0f) p = 1.0f;
         levelBuf[i + 1] = (uint8_t)(p * 255.0f);
       }
-      float mp = audioEngine.getMasterPeak();
+      float mp = spiMaster.getMasterPeak();
       if (mp < 0.0f) mp = 0.0f;
       if (mp > 1.0f) mp = 1.0f;
       levelBuf[17] = (uint8_t)(mp * 255.0f);
@@ -1871,12 +1871,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     yield();
     
     if (track >= 16) {
-      // XTRA pads (16-23): continuous audio loop via AudioEngine
-      bool newState = !audioEngine.isPadLooping(track);
-      audioEngine.setPadLoop(track, newState);
+      // XTRA pads (16-23): continuous audio loop via SPIMaster → STM32
+      bool newState = !spiMaster.isPadLooping(track);
+      spiMaster.setPadLoop(track, newState);
       // If enabling loop, also trigger the sample so it starts playing
       if (newState) {
-        audioEngine.triggerSampleLive(track, 127);
+        spiMaster.triggerSampleLive(track, 127);
       }
       
       StaticJsonDocument<192> responseDoc;
@@ -1955,7 +1955,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setFilter") {
     int type = doc["type"];
-    audioEngine.setFilterType((FilterType)type);
+    spiMaster.setFilterType((FilterType)type);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "filterType"; resp["value"] = type;
     String out; serializeJson(resp, out);
@@ -1963,7 +1963,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setFilterCutoff") {
     float cutoff = doc["value"];
-    audioEngine.setFilterCutoff(cutoff);
+    spiMaster.setFilterCutoff(cutoff);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "filterCutoff"; resp["value"] = cutoff;
     String out; serializeJson(resp, out);
@@ -1971,7 +1971,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setFilterResonance") {
     float resonance = doc["value"];
-    audioEngine.setFilterResonance(resonance);
+    spiMaster.setFilterResonance(resonance);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "filterResonance"; resp["value"] = resonance;
     String out; serializeJson(resp, out);
@@ -1979,7 +1979,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setBitCrush") {
     int bits = doc["value"];
-    audioEngine.setBitDepth(bits);
+    spiMaster.setBitDepth(bits);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "bitCrush"; resp["value"] = bits;
     String out; serializeJson(resp, out);
@@ -1987,7 +1987,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setDistortion") {
     float amount = doc["value"];
-    audioEngine.setDistortion(amount);
+    spiMaster.setDistortion(amount);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "distortion"; resp["value"] = amount;
     String out; serializeJson(resp, out);
@@ -1995,7 +1995,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setDistortionMode") {
     int mode = doc["value"];
-    audioEngine.setDistortionMode((DistortionMode)mode);
+    spiMaster.setDistortionMode((DistortionMode)mode);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "distortionMode"; resp["value"] = mode;
     String out; serializeJson(resp, out);
@@ -2003,7 +2003,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setSampleRate") {
     int rate = doc["value"];
-    audioEngine.setSampleRateReduction(rate);
+    spiMaster.setSampleRateReduction(rate);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "sampleRate"; resp["value"] = rate;
     String out; serializeJson(resp, out);
@@ -2012,7 +2012,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   // ============= NEW: Master Effects Commands =============
   else if (cmd == "setDelayActive") {
     bool active = doc["value"];
-    audioEngine.setDelayActive(active);
+    spiMaster.setDelayActive(active);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "delayActive"; resp["value"] = active;
     String out; serializeJson(resp, out);
@@ -2020,7 +2020,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setDelayTime") {
     float ms = doc["value"];
-    audioEngine.setDelayTime(ms);
+    spiMaster.setDelayTime(ms);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "delayTime"; resp["value"] = ms;
     String out; serializeJson(resp, out);
@@ -2028,7 +2028,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setDelayFeedback") {
     float fb = doc["value"];
-    audioEngine.setDelayFeedback(fb / 100.0f);
+    spiMaster.setDelayFeedback(fb / 100.0f);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "delayFeedback"; resp["value"] = fb;
     String out; serializeJson(resp, out);
@@ -2036,7 +2036,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setDelayMix") {
     float mix = doc["value"];
-    audioEngine.setDelayMix(mix / 100.0f);
+    spiMaster.setDelayMix(mix / 100.0f);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "delayMix"; resp["value"] = mix;
     String out; serializeJson(resp, out);
@@ -2044,7 +2044,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setPhaserActive") {
     bool active = doc["value"];
-    audioEngine.setPhaserActive(active);
+    spiMaster.setPhaserActive(active);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "phaserActive"; resp["value"] = active;
     String out; serializeJson(resp, out);
@@ -2052,7 +2052,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setPhaserRate") {
     float rate = doc["value"];
-    audioEngine.setPhaserRate(rate / 100.0f);
+    spiMaster.setPhaserRate(rate / 100.0f);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "phaserRate"; resp["value"] = rate;
     String out; serializeJson(resp, out);
@@ -2060,7 +2060,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setPhaserDepth") {
     float depth = doc["value"];
-    audioEngine.setPhaserDepth(depth / 100.0f);
+    spiMaster.setPhaserDepth(depth / 100.0f);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "phaserDepth"; resp["value"] = depth;
     String out; serializeJson(resp, out);
@@ -2068,7 +2068,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setPhaserFeedback") {
     float fb = doc["value"];
-    audioEngine.setPhaserFeedback(fb / 100.0f);
+    spiMaster.setPhaserFeedback(fb / 100.0f);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "phaserFeedback"; resp["value"] = fb;
     String out; serializeJson(resp, out);
@@ -2076,7 +2076,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setFlangerActive") {
     bool active = doc["value"];
-    audioEngine.setFlangerActive(active);
+    spiMaster.setFlangerActive(active);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "flangerActive"; resp["value"] = active;
     String out; serializeJson(resp, out);
@@ -2084,7 +2084,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setFlangerRate") {
     float rate = doc["value"];
-    audioEngine.setFlangerRate(rate / 100.0f);
+    spiMaster.setFlangerRate(rate / 100.0f);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "flangerRate"; resp["value"] = rate;
     String out; serializeJson(resp, out);
@@ -2092,7 +2092,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setFlangerDepth") {
     float depth = doc["value"];
-    audioEngine.setFlangerDepth(depth / 100.0f);
+    spiMaster.setFlangerDepth(depth / 100.0f);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "flangerDepth"; resp["value"] = depth;
     String out; serializeJson(resp, out);
@@ -2100,7 +2100,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setFlangerFeedback") {
     float fb = doc["value"];
-    audioEngine.setFlangerFeedback(fb / 100.0f);
+    spiMaster.setFlangerFeedback(fb / 100.0f);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "flangerFeedback"; resp["value"] = fb;
     String out; serializeJson(resp, out);
@@ -2108,7 +2108,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setFlangerMix") {
     float mix = doc["value"];
-    audioEngine.setFlangerMix(mix / 100.0f);
+    spiMaster.setFlangerMix(mix / 100.0f);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "flangerMix"; resp["value"] = mix;
     String out; serializeJson(resp, out);
@@ -2116,7 +2116,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setCompressorActive") {
     bool active = doc["value"];
-    audioEngine.setCompressorActive(active);
+    spiMaster.setCompressorActive(active);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "compressorActive"; resp["value"] = active;
     String out; serializeJson(resp, out);
@@ -2124,7 +2124,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setCompressorThreshold") {
     float thresh = doc["value"];
-    audioEngine.setCompressorThreshold(thresh);
+    spiMaster.setCompressorThreshold(thresh);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "compressorThreshold"; resp["value"] = thresh;
     String out; serializeJson(resp, out);
@@ -2132,7 +2132,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setCompressorRatio") {
     float ratio = doc["value"];
-    audioEngine.setCompressorRatio(ratio);
+    spiMaster.setCompressorRatio(ratio);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "compressorRatio"; resp["value"] = ratio;
     String out; serializeJson(resp, out);
@@ -2140,7 +2140,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setCompressorAttack") {
     float attack = doc["value"];
-    audioEngine.setCompressorAttack(attack);
+    spiMaster.setCompressorAttack(attack);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "compressorAttack"; resp["value"] = attack;
     String out; serializeJson(resp, out);
@@ -2148,7 +2148,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setCompressorRelease") {
     float release = doc["value"];
-    audioEngine.setCompressorRelease(release);
+    spiMaster.setCompressorRelease(release);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "compressorRelease"; resp["value"] = release;
     String out; serializeJson(resp, out);
@@ -2156,7 +2156,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setCompressorMakeupGain") {
     float gain = doc["value"];
-    audioEngine.setCompressorMakeupGain(gain);
+    spiMaster.setCompressorMakeupGain(gain);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "compressorMakeupGain"; resp["value"] = gain;
     String out; serializeJson(resp, out);
@@ -2168,7 +2168,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     float amount = doc["amount"];
     int mode = doc.containsKey("mode") ? (int)doc["mode"] : 0;
     if (pad >= 0 && pad < 24) {
-      audioEngine.setPadDistortion(pad, amount, (DistortionMode)mode);
+      spiMaster.setPadDistortion(pad, amount, (DistortionMode)mode);
       StaticJsonDocument<128> resp;
       resp["type"] = "padFxSet";
       resp["pad"] = pad;
@@ -2183,7 +2183,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int pad = doc["pad"];
     int bits = doc["value"];
     if (pad >= 0 && pad < 24) {
-      audioEngine.setPadBitCrush(pad, bits);
+      spiMaster.setPadBitCrush(pad, bits);
       StaticJsonDocument<128> resp;
       resp["type"] = "padFxSet";
       resp["pad"] = pad;
@@ -2196,7 +2196,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "clearPadFX") {
     int pad = doc["pad"];
     if (pad >= 0 && pad < 24) {
-      audioEngine.clearPadFX(pad);
+      spiMaster.clearPadFX(pad);
       StaticJsonDocument<96> resp;
       resp["type"] = "padFxCleared";
       resp["pad"] = pad;
@@ -2209,7 +2209,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     float amount = doc["amount"];
     int mode = doc.containsKey("mode") ? (int)doc["mode"] : 0;
     if (track >= 0 && track < 16) {
-      audioEngine.setTrackDistortion(track, amount, (DistortionMode)mode);
+      spiMaster.setTrackDistortion(track, amount, (DistortionMode)mode);
       StaticJsonDocument<128> resp;
       resp["type"] = "trackFxSet";
       resp["track"] = track;
@@ -2224,7 +2224,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int track = doc["track"];
     int bits = doc["value"];
     if (track >= 0 && track < 16) {
-      audioEngine.setTrackBitCrush(track, bits);
+      spiMaster.setTrackBitCrush(track, bits);
       StaticJsonDocument<128> resp;
       resp["type"] = "trackFxSet";
       resp["track"] = track;
@@ -2237,7 +2237,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "clearTrackFX") {
     int track = doc["track"];
     if (track >= 0 && track < 16) {
-      audioEngine.clearTrackFX(track);
+      spiMaster.clearTrackFX(track);
       StaticJsonDocument<96> resp;
       resp["type"] = "trackFxCleared";
       resp["track"] = track;
@@ -2255,7 +2255,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     if (doc.containsKey("track")) {
       int track = doc["track"];
       if (track >= 0 && track < 16) {
-        audioEngine.setReverseSample(track, value);
+        spiMaster.setReverseSample(track, value);
         resp["track"] = track;
         String out; serializeJson(resp, out);
         if (ws) ws->textAll(out);
@@ -2263,7 +2263,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     } else if (doc.containsKey("pad")) {
       int pad = doc["pad"];
       if (pad >= 0 && pad < 24) {
-        audioEngine.setReverseSample(pad, value);
+        spiMaster.setReverseSample(pad, value);
         resp["pad"] = pad;
         String out; serializeJson(resp, out);
         if (ws) ws->textAll(out);
@@ -2280,7 +2280,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     if (doc.containsKey("track")) {
       int track = doc["track"];
       if (track >= 0 && track < 16) {
-        audioEngine.setTrackPitchShift(track, value);
+        spiMaster.setTrackPitchShift(track, value);
         resp["track"] = track;
         String out; serializeJson(resp, out);
         if (ws) ws->textAll(out);
@@ -2288,7 +2288,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     } else if (doc.containsKey("pad")) {
       int pad = doc["pad"];
       if (pad >= 0 && pad < 24) {
-        audioEngine.setTrackPitchShift(pad, value);
+        spiMaster.setTrackPitchShift(pad, value);
         resp["pad"] = pad;
         String out; serializeJson(resp, out);
         if (ws) ws->textAll(out);
@@ -2307,7 +2307,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     if (doc.containsKey("track")) {
       int track = doc["track"];
       if (track >= 0 && track < 16) {
-        audioEngine.setStutter(track, value, interval);
+        spiMaster.setStutter(track, value, interval);
         resp["track"] = track;
         String out; serializeJson(resp, out);
         if (ws) ws->textAll(out);
@@ -2315,7 +2315,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     } else if (doc.containsKey("pad")) {
       int pad = doc["pad"];
       if (pad >= 0 && pad < 24) {
-        audioEngine.setStutter(pad, value, interval);
+        spiMaster.setStutter(pad, value, interval);
         resp["pad"] = pad;
         String out; serializeJson(resp, out);
         if (ws) ws->textAll(out);
@@ -2331,7 +2331,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       float depth = doc.containsKey("depth") ? (float)doc["depth"] : 0.85f;
       float filter = doc.containsKey("filter") ? (float)doc["filter"] : 4000.0f;
       float crackle = doc.containsKey("crackle") ? (float)doc["crackle"] : 0.25f;
-      audioEngine.setScratchParams(track, value, rate, depth, filter, crackle);
+      spiMaster.setScratchParams(track, value, rate, depth, filter, crackle);
       Serial.printf("[WS] Scratch %s -> Track %d (rate:%.1f depth:%.2f filter:%.0f crackle:%.2f)\n",
                     value ? "ON" : "OFF", track, rate, depth, filter, crackle);
     }
@@ -2348,7 +2348,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       int backspinSpeed = doc.containsKey("backspinSpeed") ? (int)doc["backspinSpeed"] : 450;
       float transformRate = doc.containsKey("transformRate") ? (float)doc["transformRate"] : 11.0f;
       float vinylNoise = doc.containsKey("vinylNoise") ? (float)doc["vinylNoise"] : 0.35f;
-      audioEngine.setTurntablismParams(track, value, autoMode, mode, brakeSpeed, backspinSpeed, transformRate, vinylNoise);
+      spiMaster.setTurntablismParams(track, value, autoMode, mode, brakeSpeed, backspinSpeed, transformRate, vinylNoise);
       Serial.printf("[WS] Turntablism %s -> Track %d (auto:%d mode:%d brake:%d backspin:%d tRate:%.1f noise:%.2f)\n",
                     value ? "ON" : "OFF", track, autoMode, mode, brakeSpeed, backspinSpeed, transformRate, vinylNoise);
     }
@@ -2372,12 +2372,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
         feedback = doc.containsKey("feedback") ? doc["feedback"].as<float>() : 40.0f;
         mix = doc.containsKey("mix") ? doc["mix"].as<float>() : 50.0f;
       }
-      audioEngine.setTrackEcho(track, active, time, feedback, mix);
+      spiMaster.setTrackEcho(track, active, time, feedback, mix);
       StaticJsonDocument<256> resp;
       resp["type"] = "trackLiveFx";
       resp["track"] = track;
       resp["fx"] = "echo";
-      resp["active"] = audioEngine.getTrackEchoActive(track);
+      resp["active"] = spiMaster.getTrackEchoActive(track);
       resp["time"] = time;
       resp["feedback"] = feedback;
       resp["mix"] = mix;
@@ -2402,12 +2402,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
         depth = doc.containsKey("depth") ? doc["depth"].as<float>() : 50.0f;
         feedback = doc.containsKey("feedback") ? doc["feedback"].as<float>() : 30.0f;
       }
-      audioEngine.setTrackFlanger(track, active, rate, depth, feedback);
+      spiMaster.setTrackFlanger(track, active, rate, depth, feedback);
       StaticJsonDocument<256> resp;
       resp["type"] = "trackLiveFx";
       resp["track"] = track;
       resp["fx"] = "flanger";
-      resp["active"] = audioEngine.getTrackFlangerActive(track);
+      resp["active"] = spiMaster.getTrackFlangerActive(track);
       resp["rate"] = rate;
       resp["depth"] = depth;
       resp["feedback"] = feedback;
@@ -2430,12 +2430,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
         threshold = doc.containsKey("threshold") ? doc["threshold"].as<float>() : -20.0f;
         ratio = doc.containsKey("ratio") ? doc["ratio"].as<float>() : 4.0f;
       }
-      audioEngine.setTrackCompressor(track, active, threshold, ratio);
+      spiMaster.setTrackCompressor(track, active, threshold, ratio);
       StaticJsonDocument<256> resp;
       resp["type"] = "trackLiveFx";
       resp["track"] = track;
       resp["fx"] = "compressor";
-      resp["active"] = audioEngine.getTrackCompressorActive(track);
+      resp["active"] = spiMaster.getTrackCompressorActive(track);
       resp["threshold"] = threshold;
       resp["ratio"] = ratio;
       String out; serializeJson(resp, out);
@@ -2459,7 +2459,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       }
     }
 
-    audioEngine.setSidechain(active, source, mask, amountPct / 100.0f, attackMs, releaseMs, knee);
+    spiMaster.setSidechain(active, source, mask, amountPct / 100.0f, attackMs, releaseMs, knee);
 
     StaticJsonDocument<256> resp;
     resp["type"] = "sidechainState";
@@ -2476,7 +2476,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "clearTrackLiveFX") {
     int track = doc["track"];
     if (track >= 0 && track < 16) {
-      audioEngine.clearTrackLiveFX(track);
+      spiMaster.clearTrackLiveFX(track);
       StaticJsonDocument<128> resp;
       resp["type"] = "trackLiveFx";
       resp["track"] = track;
@@ -2488,7 +2488,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setSequencerVolume") {
     int volume = doc["value"];
-    audioEngine.setSequencerVolume(volume);
+    spiMaster.setSequencerVolume(volume);
     
     // Broadcast volume change to all clients
     StaticJsonDocument<128> responseDoc;
@@ -2501,7 +2501,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setLiveVolume") {
     int volume = doc["value"];
-    audioEngine.setLiveVolume(volume);
+    spiMaster.setLiveVolume(volume);
     
     // Broadcast volume change to all clients
     StaticJsonDocument<128> responseDoc;
@@ -2514,14 +2514,14 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setVolume") {
     int volume = doc["value"];
-    audioEngine.setMasterVolume(volume);
+    spiMaster.setMasterVolume(volume);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "volume"; resp["value"] = volume;
     String out; serializeJson(resp, out);
     if (ws) ws->textAll(out);
   }
   else if (cmd == "stopAllSounds") {
-    audioEngine.stopAll();
+    spiMaster.stopAll();
     Serial.println("[WS] KILL ALL - All sounds stopped");
     StaticJsonDocument<64> resp;
     resp["type"] = "allStopped";
@@ -2531,7 +2531,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "setLivePitch") {
     float pitch = doc["pitch"].as<float>();
     pitch = constrain(pitch, 0.25f, 3.0f);
-    audioEngine.setLivePitchShift(pitch);
+    spiMaster.setLivePitchShift(pitch);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "livePitch"; resp["value"] = pitch;
     String out; serializeJson(resp, out);
@@ -2549,14 +2549,14 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     float resonance = doc.containsKey("resonance") ? doc["resonance"].as<float>() : 1.0f;
     float gain = doc.containsKey("gain") ? doc["gain"].as<float>() : 0.0f;
     
-    bool success = audioEngine.setTrackFilter(track, (FilterType)filterType, cutoff, resonance, gain);
+    bool success = spiMaster.setTrackFilter(track, (FilterType)filterType, cutoff, resonance, gain);
     
     // Send response with filter parameters for UI badge
     StaticJsonDocument<256> responseDoc;
     responseDoc["type"] = "trackFilterSet";
     responseDoc["track"] = track;
     responseDoc["success"] = success;
-    responseDoc["activeFilters"] = audioEngine.getActiveTrackFiltersCount();
+    responseDoc["activeFilters"] = spiMaster.getActiveTrackFiltersCount();
     responseDoc["filterType"] = filterType;
     responseDoc["cutoff"] = (int)cutoff;
     responseDoc["resonance"] = resonance;
@@ -2571,13 +2571,13 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       Serial.printf("[WS] Invalid track %d (must be 0-15)\n", track);
       return;
     }
-    audioEngine.clearTrackFilter(track);
+    spiMaster.clearTrackFilter(track);
     
     // Send response
     StaticJsonDocument<128> responseDoc;
     responseDoc["type"] = "trackFilterCleared";
     responseDoc["track"] = track;
-    responseDoc["activeFilters"] = audioEngine.getActiveTrackFiltersCount();
+    responseDoc["activeFilters"] = spiMaster.getActiveTrackFiltersCount();
     
     String output;
     serializeJson(responseDoc, output);
@@ -2595,14 +2595,14 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     float resonance = doc.containsKey("resonance") ? doc["resonance"].as<float>() : 1.0f;
     float gain = doc.containsKey("gain") ? doc["gain"].as<float>() : 0.0f;
     
-    bool success = audioEngine.setPadFilter(pad, (FilterType)filterType, cutoff, resonance, gain);
+    bool success = spiMaster.setPadFilter(pad, (FilterType)filterType, cutoff, resonance, gain);
     
     // Send response
     StaticJsonDocument<128> responseDoc;
     responseDoc["type"] = "padFilterSet";
     responseDoc["pad"] = pad;
     responseDoc["success"] = success;
-    responseDoc["activeFilters"] = audioEngine.getActivePadFiltersCount();
+    responseDoc["activeFilters"] = spiMaster.getActivePadFiltersCount();
     
     String output;
     serializeJson(responseDoc, output);
@@ -2614,13 +2614,13 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       Serial.printf("[WS] Invalid pad %d (must be 0-23)\n", pad);
       return;
     }
-    audioEngine.clearPadFilter(pad);
+    spiMaster.clearPadFilter(pad);
     
     // Send response
     StaticJsonDocument<128> responseDoc;
     responseDoc["type"] = "padFilterCleared";
     responseDoc["pad"] = pad;
-    responseDoc["activeFilters"] = audioEngine.getActivePadFiltersCount();
+    responseDoc["activeFilters"] = spiMaster.getActivePadFiltersCount();
     
     String output;
     serializeJson(responseDoc, output);
@@ -2634,7 +2634,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     JsonArray presets = responseDoc.createNestedArray("presets");
     for (int i = 0; i <= 9; i++) {
       JsonObject preset = presets.createNestedObject();
-      const FilterPreset* fp = AudioEngine::getFilterPreset((FilterType)i);
+      const FilterPreset* fp = SPIMaster::getFilterPreset((FilterType)i);
       preset["id"] = i;
       preset["name"] = fp->name;
       preset["cutoff"] = fp->cutoff;

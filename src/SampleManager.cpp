@@ -5,7 +5,7 @@
 
 #include "SampleManager.h"
 
-extern AudioEngine audioEngine;
+extern SPIMaster spiMaster;
 
 SampleManager::SampleManager() {
   for (int i = 0; i < MAX_SAMPLES; i++) {
@@ -87,8 +87,8 @@ bool SampleManager::loadSample(const char* filename, int padIndex) {
   else name = filename;
   strncpy(sampleNames[padIndex], name, 31);
   
-  // Register with audio engine
-  audioEngine.setSampleBuffer(padIndex, sampleBuffers[padIndex], sampleLengths[padIndex]);
+  // Register with SPI Master → STM32 audio slave
+  spiMaster.setSampleBuffer(padIndex, sampleBuffers[padIndex], sampleLengths[padIndex]);
   
   Serial.printf("[SampleManager] ✓ Sample loaded: %s (%d samples) -> Pad %d\n", 
                 sampleNames[padIndex], sampleLengths[padIndex], padIndex);
@@ -254,7 +254,7 @@ bool SampleManager::unloadSample(int padIndex) {
   if (padIndex < 0 || padIndex >= MAX_SAMPLES) return false;
   
   freeSampleBuffer(padIndex);
-  audioEngine.setSampleBuffer(padIndex, nullptr, 0);
+  spiMaster.setSampleBuffer(padIndex, nullptr, 0);
   
   Serial.printf("Sample unloaded from pad %d\n", padIndex + 1);
   return true;
@@ -287,8 +287,8 @@ bool SampleManager::trimSample(int padIndex, float startNorm, float endNorm) {
   sampleBuffers[padIndex] = newBuf;
   sampleLengths[padIndex] = newLen;
   
-  // Update audio engine
-  audioEngine.setSampleBuffer(padIndex, newBuf, newLen);
+  // Update SPI Master → STM32
+  spiMaster.setSampleBuffer(padIndex, newBuf, newLen);
   
   Serial.printf("[Trim] Pad %d: %u -> %u samples (%.1f%% - %.1f%%)\n",
                 padIndex, origLen, newLen, startNorm * 100, endNorm * 100);

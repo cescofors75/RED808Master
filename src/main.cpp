@@ -2,17 +2,14 @@
 #include <LittleFS.h>
 #include <SPI.h>
 #include <Adafruit_NeoPixel.h>
-#include "AudioEngine.h"
+#include "SPIMaster.h"
 #include "SampleManager.h"
 #include "KitManager.h"
 #include "Sequencer.h"
 #include "WebInterface.h"
 #include "MIDIController.h"
 
-// --- CONFIGURACIÓN DE HARDWARE ---
-#define I2S_BCK   42    // BCLK - Bit Clock
-#define I2S_WS    41    // LRC/WS - Word Select (Left/Right Clock)
-#define I2S_DOUT  40   // DIN/DOUT - Data (TX pin)
+// --- I2S pins now on STM32 (BCK=42, WS=41, DOUT=40 ya no se usan en ESP32) ---
 
 // LED RGB integrado ESP32-S3
 #define RGB_LED_PIN  48
@@ -40,7 +37,7 @@
 // --- OBJETOS GLOBALES ---
 // NOTE: Sequencer's large pattern arrays (~229 KB) are allocated from PSRAM
 // via ps_calloc() inside the Sequencer constructor — see Sequencer.cpp.
-AudioEngine audioEngine;
+SPIMaster spiMaster;
 SampleManager sampleManager;
 KitManager kitManager;
 Sequencer sequencer;
@@ -125,23 +122,24 @@ void setLedMonoMode(bool enabled) {
 }
 
 // --- TASKS (CORE PINNING) ---
-// CORE 1: Audio Processing (Máxima Prioridad)
-void audioTask(void *pvParameters) {
-    Serial.println("[Task] Audio Task en Core 1 (Prioridad: 24)");
+// CORE 1: Sequencer + SPI Master (Máxima Prioridad)
+// El secuenciador y la comunicación SPI comparten Core 1 para mínima latencia
+void spiAudioTask(void *pvParameters) {
+    Serial.println("[Task] SPI Audio Task en Core 1 (Prioridad: 24)");
     while (true) {
-        audioEngine.process();
-        // No yield needed - I2S write blocks naturally via DMA
+        sequencer.update();     // Tick del secuenciador
+        spiMaster.process();    // Poll peaks, manage SPI comms
+        vTaskDelay(pdMS_TO_TICKS(1)); // ~1000Hz loop
     }
 }
 
-// CORE 0: System, WiFi, Web Server (Prioridad Media)
+// CORE 0: WiFi, Web Server, MIDI, LED (Prioridad Media)
 void systemTask(void *pvParameters) {
     Serial.println("[Task] System Task en Core 0 (Prioridad: 5)");
     
     uint32_t lastLedUpdate = 0;
     
     while (true) {
-        sequencer.update();
         webInterface.update();
         webInterface.handleUdp();
         midiController.update();
@@ -168,13 +166,13 @@ void systemTask(void *pvParameters) {
 // Callback que el Sequencer llama cada vez que hay un "trigger" en un step
 // NO enciende el LED (solo secuenciador)
 void onStepTrigger(int track, uint8_t velocity, uint8_t trackVolume, uint32_t noteLenSamples) {
-    audioEngine.triggerSampleSequencer(track, velocity, trackVolume, noteLenSamples);
+    spiMaster.triggerSampleSequencer(track, velocity, trackVolume, noteLenSamples);
 }
 
 // Función para triggers manuales desde live pads (web interface)
 // Esta SÍ enciende el LED RGB
 void triggerPadWithLED(int track, uint8_t velocity) {
-    audioEngine.triggerSampleLive(track, velocity);
+    spiMaster.triggerSampleLive(track, velocity);
     
     // Iluminar LED RGB con color del instrumento (solo pads principales 0-15)
     if (track >= 0 && track < 16) {
@@ -220,15 +218,15 @@ void setup() {
     }
     Serial.println("LittleFS OK");
 
-    Serial.println("[STEP 2] Starting Audio Engine...");
-    // 2. Audio Engine (I2S External DAC)
-    if (!audioEngine.begin(I2S_BCK, I2S_WS, I2S_DOUT)) {
-        Serial.println("AUDIO ENGINE FAIL");
+    Serial.println("[STEP 2] Initializing SPI Master (STM32 Audio Slave)...");
+    // 2. SPI Master — connects to STM32 for audio DSP
+    if (!spiMaster.begin()) {
+        Serial.println("SPI MASTER INIT FAIL");
         rgbLed.setPixelColor(0, 0xFF0000);
         rgbLed.show();
         while(1) { delay(1000); }
     }
-    Serial.println("Audio Engine OK");
+    Serial.println("SPI Master OK");
     
     Serial.println("[STEP 3] Initializing Sample Manager...");
     Serial.flush();
@@ -544,15 +542,15 @@ void setup() {
     // --- DUAL-CORE TASKS ---
     Serial.println("\n[STEP 7] Creating dual-core tasks...");
     
-    // CORE 1: Audio Task - Prioridad máxima
+    // CORE 1: SPI Audio Task (Sequencer + SPI) - Prioridad máxima
     xTaskCreatePinnedToCore(
-        audioTask,
-        "AudioTask",
+        spiAudioTask,
+        "SPIAudioTask",
         8192,   // 8KB stack - optimizado
         NULL,
         24,     // Prioridad máxima
         NULL,
-        1       // CORE 1: Audio DSP
+        1       // CORE 1: Sequencer + SPI Master
     );
     
     // CORE 0: System Task - Prioridad media
@@ -563,7 +561,7 @@ void setup() {
         NULL,
         5,
         NULL,
-        0       // CORE 0: WiFi, Web, Sequencer
+        0       // CORE 0: WiFi, Web, MIDI, LED
     );
 
     showReadyLED();
