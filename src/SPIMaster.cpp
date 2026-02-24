@@ -77,20 +77,24 @@ SPIMaster::~SPIMaster() {
 bool SPIMaster::begin() {
     // Configure control pins
     pinMode(STM32_SPI_CS, OUTPUT);
+    digitalWrite(STM32_SPI_CS, HIGH);   // CS idle high
+    
+#ifdef USE_SPI_SYNC_IRQ
     pinMode(STM32_SPI_SYNC, OUTPUT);
     pinMode(STM32_SPI_IRQ, INPUT_PULLUP);
-    
-    digitalWrite(STM32_SPI_CS, HIGH);   // CS idle high
     digitalWrite(STM32_SPI_SYNC, LOW);  // SYNC idle low
+#endif
     
     // Initialize HSPI (separate from PSRAM which uses SPI0)
     spi = new SPIClass(HSPI);
     spi->begin(STM32_SPI_SCK, STM32_SPI_MISO, STM32_SPI_MOSI, STM32_SPI_CS);
     
-    Serial.println("[SPI] Master initialized on HSPI");
-    Serial.printf("[SPI] Pins: MOSI=%d MISO=%d SCK=%d CS=%d SYNC=%d IRQ=%d\n",
-                  STM32_SPI_MOSI, STM32_SPI_MISO, STM32_SPI_SCK, 
-                  STM32_SPI_CS, STM32_SPI_SYNC, STM32_SPI_IRQ);
+    Serial.println("[SPI] Master initialized on HSPI (4-wire mode)");
+    Serial.printf("[SPI] Pins: MOSI=%d MISO=%d SCK=%d CS=%d\n",
+                  STM32_SPI_MOSI, STM32_SPI_MISO, STM32_SPI_SCK, STM32_SPI_CS);
+#ifdef USE_SPI_SYNC_IRQ
+    Serial.printf("[SPI] SYNC=%d IRQ=%d\n", STM32_SPI_SYNC, STM32_SPI_IRQ);
+#endif
     
     // Try to connect to STM32
     uint32_t rtt;
@@ -122,9 +126,14 @@ void SPIMaster::csHigh() {
 }
 
 void SPIMaster::syncPulse() {
+#ifdef USE_SPI_SYNC_IRQ
     digitalWrite(STM32_SPI_SYNC, HIGH);
     delayMicroseconds(2);
     digitalWrite(STM32_SPI_SYNC, LOW);
+#else
+    // Sin SYNC: pequeño delay para que STM32 procese
+    delayMicroseconds(5);
+#endif
 }
 
 uint16_t SPIMaster::crc16(const uint8_t* data, uint16_t len) {

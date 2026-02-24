@@ -18,12 +18,19 @@
 // ═══════════════════════════════════════════════════════
 // SPI HARDWARE PINS (ESP32-S3 HSPI)
 // ═══════════════════════════════════════════════════════
-#define STM32_SPI_MOSI   12
-#define STM32_SPI_MISO   13
-#define STM32_SPI_SCK    14
-#define STM32_SPI_CS     15
-#define STM32_SPI_SYNC   16   // ESP32 → STM32: command ready pulse
-#define STM32_SPI_IRQ    17   // STM32 → ESP32: data ready / request
+// Modo mínimo: solo 4 líneas SPI + GND
+// Descomenta USE_SPI_SYNC_IRQ cuando añadas SYNC/IRQ
+//#define USE_SPI_SYNC_IRQ  // Habilitar SYNC (GPIO9) e IRQ (GPIO14)
+
+#define STM32_SPI_CS     10   // HSPI CS
+#define STM32_SPI_MOSI   11   // HSPI MOSI
+#define STM32_SPI_SCK    12   // HSPI SCK
+#define STM32_SPI_MISO   13   // HSPI MISO
+
+#ifdef USE_SPI_SYNC_IRQ
+#define STM32_SPI_SYNC    9   // ESP32 → STM32: command ready pulse
+#define STM32_SPI_IRQ    14   // STM32 → ESP32: data ready / request
+#endif
 
 // SPI Speed (40 MHz max for short wires)
 #define STM32_SPI_CLOCK  20000000  // Start conservative at 20 MHz
