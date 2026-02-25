@@ -4,7 +4,7 @@
 // ── Config ──────────────────────────────────────────────────────────────
 const REFRESH_INTERVAL = 3000;
 const MAX_HIST = 80;
-const PAD_NAMES = ['BD','SD','CH','OH','CY','CP','RS','CB','LT','MT','HT','MA','--','HC','MC','LC'];
+const PAD_NAMES = ['BD','SD','CH','OH','CY','CP','RS','CB','LT','MT','HT','MA','CL','HC','MC','LC'];
 
 // ── State ────────────────────────────────────────────────────────────────
 let ws = null;

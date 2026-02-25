@@ -1156,6 +1156,16 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
         
         // Check for bulk pattern command (needs larger JSON doc)
         if (len > 400 && strstr((char*)data, "\"setBulk\"") != nullptr) {
+          if (ESP.getFreeHeap() < 35000) {
+            Serial.printf("[WS] setBulk: low heap %d, aborted\n", ESP.getFreeHeap());
+            StaticJsonDocument<64> errDoc;
+            errDoc["type"] = "error"; errDoc["msg"] = "low_heap";
+            String errStr; serializeJson(errDoc, errStr);
+            if (isClientReady(client)) client->text(errStr);
+            if (safeFreeNeeded) free(safeData);
+            if (_wsFreeAfter && _wsReassemblyBuf) { free(_wsReassemblyBuf); _wsReassemblyBuf = nullptr; }
+            return;
+          }
           DynamicJsonDocument bulkDoc(16384);
           DeserializationError bulkErr = deserializeJson(bulkDoc, (char*)data);
           if (!bulkErr) {

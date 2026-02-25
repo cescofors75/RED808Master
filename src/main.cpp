@@ -581,7 +581,7 @@ void setup() {
     xTaskCreatePinnedToCore(
         spiAudioTask,
         "SPIAudioTask",
-        8192,   // 8KB stack - optimizado
+        16384,  // 16KB stack - margen seguro para cadena sequencer→SPI→Serial
         NULL,
         24,     // Prioridad máxima
         NULL,

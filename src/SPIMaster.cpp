@@ -9,7 +9,7 @@
 // ═══════════════════════════════════════════════════════
 // SPI DEBUG — Activar/desactivar logs por Serial
 // ═══════════════════════════════════════════════════════
-#define SPI_DEBUG_ENABLED   true   // <<< cambiar a false para silenciar
+#define SPI_DEBUG_ENABLED   false  // true = log cada SPI cmd (solo para debug intensivo)
 #define SPI_DEBUG_PEAKS     false  // peaks cada 50ms = mucho spam
 #define SPI_DEBUG_SAMPLE    false  // chunks de sample transfer
 
