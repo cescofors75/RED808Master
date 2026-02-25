@@ -46,7 +46,7 @@ const LAYOUTS = [
 /* ── PANELS ── */
 const PANELS = [
   { id: 'empty',  label: 'VACÍO',      sub: 'Sin contenido', icon: '○',  url: null },
-  { id: 'pads',   label: 'LIVE PADS',  sub: 'Pads en vivo',  icon: '🎹', url: '/?embed=1&tab=performance' },
+  { id: 'pads',   label: 'LIVE PADS',  sub: 'Pads en vivo',  icon: '🎹', url: '/?embed=1&tab=performance&solopads=1' },
   { id: 'xtra',   label: 'XTRA PADS',  sub: 'Pads extra',    icon: '🎲', url: '/?embed=1&tab=xtra-pads' },
   { id: 'seq',    label: 'SEQUENCER',  sub: 'Secuenciador',  icon: '🎵', url: '/?embed=1&tab=sequencer' },
   { id: 'vol',    label: 'VOLUMES',    sub: 'Mezclador',     icon: '🎚', url: '/?embed=1&tab=volumes' },

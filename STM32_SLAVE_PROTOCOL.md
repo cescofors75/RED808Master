@@ -1962,7 +1962,7 @@ Track N audio → [EQ 3-band] → [Track Filter] → [Gate] → [Compressor]
 
 ## 16. MAPA COMPLETO DE COMANDOS ESP32 → DaisySP
 
-> El master tiene **50+ comandos** definidos en `protocol.h`. Este mapa muestra qué módulo de DaisySP implementa cada uno, cuáles ya están en `red808_daisy.cpp` (Section 15.4) y cuáles hay que añadir. Al final: FX que la Daisy puede ofrecer pero que el protocolo aún no cubre.
+> El master tiene **80+ comandos** definidos en `protocol.h`. Este mapa muestra qué módulo de DaisySP implementa cada uno, cuáles ya están en `red808_daisy.cpp` (Section 15.4) y cuáles hay que añadir. Incluye el nuevo sistema de eventos (0xE4) y los Per-Pad LFO (0x80-0x87, ejecutados en ESP32). Al final: FX que la Daisy puede ofrecer pero que el protocolo aún no cubre.
 
 ---
 
@@ -2212,6 +2212,87 @@ float reverbBusL = 0.0f, delayBusL = 0.0f, chorusBusL = 0.0f;
 
 ---
 
+### 16.7.1 PER-PAD LFO (0x80–0x87) — ⚠️ Ejecutado en ESP32, NO en Daisy
+
+> **Nuevo (26/02/2026):** Cada pad tiene un LFO independiente sincronizado al BPM del secuenciador. El concepto "Organic Drum Machine" añade movimiento continuo a los pads.
+
+#### ⚠️ NOTA IMPORTANTE PARA EL EQUIPO DAISY
+
+Los LFOs **se ejecutan íntegramente en el ESP32** (clase `LFOEngine`, Core 1 a 1kHz). El ESP32 calcula la modulación y envía los **comandos SPI existentes** ya modulados:
+
+- `LFO_TARGET_PITCH` → envía `CMD_TRACK_PITCH` (0x61) con cents modulados
+- `LFO_TARGET_VOLUME` → envía `CMD_MASTER_VOLUME` (0x10) con volumen modulado
+- `LFO_TARGET_PAN` → envía `CMD_TRACK_PAN` (0x5C) con pan modulado
+- `LFO_TARGET_FILTER` → envía `CMD_FILTER_CUTOFF` (0x21) con cutoff modulado
+
+**La Daisy NO necesita implementar ningún LFO.** Solo necesita responder correctamente a los comandos que ya recibe (pitch, volume, pan, filter). Si esos comandos ya funcionan, los LFOs funcionarán automáticamente.
+
+Los CMDs 0x80-0x87 están definidos en `protocol.h` por completud documental pero **NO se envían por SPI** — son internos del ESP32.
+
+#### Comandos definidos (internos ESP32)
+
+| CMD   | Nombre              | Payload ESP32-interno           | Descripción                      |
+|-------|---------------------|---------------------------------|----------------------------------|
+| 0x80  | PAD_LFO_ACTIVE      | `PadLfoActivePayload` (2B)      | Activar/desactivar LFO del pad   |
+| 0x81  | PAD_LFO_WAVE        | `PadLfoWavePayload` (2B)        | Forma de onda                    |
+| 0x82  | PAD_LFO_RATE        | `PadLfoRatePayload` (2B)        | División rítmica (sync BPM)      |
+| 0x83  | PAD_LFO_DEPTH       | `PadLfoDepthPayload` (2B)       | Profundidad 0-100%               |
+| 0x84  | PAD_LFO_TARGET      | `PadLfoTargetPayload` (2B)      | Destino de modulación            |
+| 0x85  | PAD_LFO_FREE_HZ     | `PadLfoFreeHzPayload` (4B)      | Hz libre (0.1-20.0 Hz)          |
+| 0x86  | PAD_LFO_PHASE       | 2B: `[pad, phase 0-255]`        | Fase inicial (0°-360°)          |
+| 0x87  | PAD_LFO_RETRIG      | 2B: `[pad, on/off]`             | Reset fase en note-on            |
+
+#### Enums
+
+| Waveform (`PadLfoWavePayload.waveform`) | Valor | Forma |
+|-----------------------------------------|-------|-------|
+| SINE       | 0 | Sinusoidal suave |
+| TRIANGLE   | 1 | Triángulo |
+| SQUARE     | 2 | Cuadrada (PWM 50%) |
+| SAW        | 3 | Diente de sierra |
+| SAMPLE_HOLD | 4 | Random (sample & hold) |
+
+| Division (`PadLfoRatePayload.division`) | Valor | Nota musical |
+|-----------------------------------------|-------|-------------|
+| LFO_DIV_1_4  | 0 | Negra (1/4) |
+| LFO_DIV_1_8  | 1 | Corchea (1/8) |
+| LFO_DIV_1_16 | 2 | Semicorchea (1/16) |
+| LFO_DIV_1_32 | 3 | Fusa (1/32) |
+| LFO_DIV_FREE | 4 | Hz libre (usar CMD 0x85) |
+
+| Target (`PadLfoTargetPayload.target`) | Valor | Qué modula en la Daisy (vía SPI) |
+|---------------------------------------|-------|----------------------------------|
+| LFO_TARGET_PITCH   | 0 | `CMD_TRACK_PITCH` ±1200 cents |
+| LFO_TARGET_DECAY   | 1 | Decay del pad (futuro) |
+| LFO_TARGET_FILTER  | 2 | `CMD_FILTER_CUTOFF` 200-12000 Hz |
+| LFO_TARGET_PAN     | 3 | `CMD_TRACK_PAN` -100..+100 |
+| LFO_TARGET_VOLUME  | 4 | `CMD_MASTER_VOLUME` 0-100 |
+
+#### Visualización Web (WebSocket binario 0xBB)
+
+El ESP32 envía un frame binario de **28 bytes** a 20fps por WebSocket:
+
+```
+Byte 0:    0xBB (magic)
+Byte 1-3:  activeMask[3] (bitmask pads 0-7, 8-15, 16-23)
+Byte 4-27: values[24] (int8_t -100..+100, valor LFO actual por pad)
+```
+
+El frontend dibuja osciloscopios en canvas para cada pad activo.
+
+#### Qué necesita la Daisy para que funcionen los LFOs
+
+**Nada nuevo.** Solo asegurarse de que estos handlers funcionen correctamente:
+
+1. `CMD_TRACK_PITCH` (0x61) — acepta `cents ±1200`, aplica `padPitch[pad] = powf(2, cents/1200.0f)`
+2. `CMD_MASTER_VOLUME` (0x10) — ya implementado ✅
+3. `CMD_TRACK_PAN` (0x5C) — acepta `pan -100..+100`
+4. `CMD_FILTER_CUTOFF` (0x21) — acepta `cutoff Hz`
+
+> **Tip:** Los LFOs envían estos comandos a **50Hz** (cada 20ms). Asegurarse de que los handlers sean ligeros y no hagan allocaciones.
+
+---
+
 ### 16.8 SIDECHAIN (0x90–0x91) → ADSR manual
 
 | CMD | Valor | Estado | DaisySP módulo |
@@ -2253,11 +2334,101 @@ float scGain = 1.0f - (sidechainActive ? sidechainEnv.Process(scGate) * scAmount
 | CMD_SD_LOAD_KIT      | 0xB4 | 🟢 implementado | Cargar kit completo SD → SDRAM |
 | CMD_SD_KIT_LIST      | 0xB5 | 🟢 implementado | Lista nombres de kits (filtra familias) |
 | CMD_SD_STATUS        | 0xB6 | 🟢 implementado | Estado SD (presente, espacio, kit cargado) |
-| CMD_SD_UNLOAD_KIT    | 0xB7 | 🟡 nuevo | Descargar kit de SDRAM |
-| CMD_SD_GET_LOADED    | 0xB8 | 🟡 nuevo | Qué kit está cargado ahora |
-| CMD_SD_ABORT         | 0xB9 | 🟡 nuevo | Cancelar carga en progreso |
+| CMD_SD_UNLOAD_KIT    | 0xB7 | � implementado | Descargar kit de SDRAM — liberar memoria |
+| CMD_SD_GET_LOADED    | 0xB8 | 🟢 implementado | Qué kit está cargado ahora → `SdStatusResponse` |
+| CMD_SD_ABORT         | 0xB9 | 🟢 implementado | Cancelar carga en progreso — set flag abort |
 
 > Ver **Section 15.10** para flujo operativo, diagrama de señal y código de ejemplo.
+
+#### Sistema de Eventos SD (CMD_GET_EVENTS 0xE4) — NUEVO
+
+Las operaciones SD asíncronas (cargar kit, cargar sample) no bloquean el SPI. Cuando terminan, la Daisy almacena un **NotifyEvent** en un ring buffer. El ESP32 hace polling con `CMD_GET_EVENTS` y reenvía los eventos al frontend web.
+
+**Flujo:**
+```
+ESP32                              Daisy
+  │                                  │
+  ├─ CMD_SD_LOAD_KIT ──────────────►│  (no bloquea, retorna inmediatamente)
+  │                                  │  ... loading WAVs in background ...
+  │                                  │  ... eventQueue.push(EVT_SD_KIT_LOADED) ...
+  │                                  │
+  ├─ CMD_GET_EVENTS (0xE4) ────────►│
+  │◄─ EventsResponse ──────────────┤  count=1, events[0]={type=0x02, name="808 Classic"...}
+  │                                  │
+  │  ──► WebSocket JSON: {"type":"sdEvent","evtType":2,"name":"808 Classic"...}
+```
+
+**Tipos de evento:**
+
+| Define                    | Valor | Descripción |
+|---------------------------|-------|-------------|
+| `EVT_SD_BOOT_DONE`       | 0x01  | Boot: LIVE PADS (0-15) cargados desde SD |
+| `EVT_SD_KIT_LOADED`      | 0x02  | Kit cargado por `CMD_SD_LOAD_KIT` |
+| `EVT_SD_SAMPLE_LOADED`   | 0x03  | Sample individual cargado por `CMD_SD_LOAD_SAMPLE` |
+| `EVT_SD_KIT_UNLOADED`    | 0x04  | Kit descargado por `CMD_SD_UNLOAD_KIT` |
+| `EVT_SD_ERROR`           | 0x05  | Error cargando sample (SD falta, archivo corrupto, etc.) |
+| `EVT_SD_XTRA_LOADED`     | 0x06  | Boot: XTRA PADS (16-23) cargados desde `/data/xtra` |
+
+**Struct NotifyEvent (32 bytes):**
+```cpp
+typedef struct __attribute__((packed)) {
+    uint8_t  type;           // EVT_SD_* event type
+    uint8_t  padCount;       // pads affected
+    uint8_t  padMaskLo;      // bitmask pads 0-7
+    uint8_t  padMaskHi;      // bitmask pads 8-15
+    uint8_t  padMaskXtra;    // bitmask pads 16-23
+    uint8_t  reserved[3];
+    char     name[24];       // kit/sample name, null-terminated
+} NotifyEvent;
+```
+
+**Struct EventsResponse (129 bytes máx):**
+```cpp
+#define MAX_EVENTS_PER_CALL  4
+typedef struct __attribute__((packed)) {
+    uint8_t      count;      // 0-4 events
+    NotifyEvent  events[MAX_EVENTS_PER_CALL];
+} EventsResponse;  // 1 + 4*32 = 129 bytes
+```
+
+**Implementación Daisy — ring buffer de eventos:**
+```cpp
+#define EVENT_QUEUE_SIZE 8
+static NotifyEvent eventQueue[EVENT_QUEUE_SIZE];
+static volatile uint8_t evtHead = 0, evtTail = 0;
+
+void pushEvent(uint8_t type, uint8_t padCount, uint32_t padMask, const char* name) {
+    uint8_t next = (evtHead + 1) % EVENT_QUEUE_SIZE;
+    if (next == evtTail) return;  // full, drop oldest
+    NotifyEvent& e = eventQueue[evtHead];
+    e.type = type;
+    e.padCount = padCount;
+    e.padMaskLo   = padMask & 0xFF;
+    e.padMaskHi   = (padMask >> 8) & 0xFF;
+    e.padMaskXtra = (padMask >> 16) & 0xFF;
+    memset(e.reserved, 0, 3);
+    strncpy(e.name, name ? name : "", 23);
+    e.name[23] = '\0';
+    evtHead = next;
+}
+
+// En ProcessCommand():
+case CMD_GET_EVENTS: {
+    EventsResponse resp = {};
+    while (evtTail != evtHead && resp.count < MAX_EVENTS_PER_CALL) {
+        resp.events[resp.count++] = eventQueue[evtTail];
+        evtTail = (evtTail + 1) % EVENT_QUEUE_SIZE;
+    }
+    BuildResponse(CMD_GET_EVENTS, hdr->sequence, (uint8_t*)&resp, 
+                  1 + resp.count * sizeof(NotifyEvent));
+    return;
+}
+
+// Ejemplo de uso al finalizar carga de kit:
+pushEvent(EVT_SD_KIT_LOADED, loadedPadCount, loadedPadMask, currentKitName);
+```
+
+> **Polling:** El ESP32 llama `CMD_GET_EVENTS` cada ~100ms (configurable). Si `count > 0`, procesa y reenvía al WebSocket. Si `count == MAX_EVENTS_PER_CALL`, el ESP32 vuelve a llamar inmediatamente para drenar el buffer.
 
 ---
 
@@ -2269,8 +2440,11 @@ float scGain = 1.0f - (sidechainActive ? sidechainEnv.Process(scGate) * scAmount
 | CMD_GET_PEAKS   | 0xE1 | 🟢 implementado | trackPeaks[16] + masterPeak |
 | CMD_GET_CPU_LOAD| 0xE2 | 🟢 implementado | `seed.system.GetCpuLoad()` |
 | CMD_GET_VOICES  | 0xE3 | 🟢 implementado | contar `voices[v].active` |
+| **CMD_GET_EVENTS** | **0xE4** | **🟡 nuevo** | **`EventsResponse` — hasta 4 NotifyEvent×32B por llamada** |
 | CMD_PING        | 0xEE | 🟢 implementado | echo timestamp + uptime |
 | CMD_RESET       | 0xEF | 🟢 implementado | limpiar voces y samples |
+
+> **CMD_GET_EVENTS (0xE4):** Ver **Section 16.9** para detalles completos del sistema de eventos, structs, ring buffer y código de ejemplo.
 
 ---
 
@@ -2285,7 +2459,7 @@ float scGain = 1.0f - (sidechainActive ? sidechainEnv.Process(scGate) * scAmount
 
 ### 16.12 FX adicionales que la Daisy podría ofrecer (sin CMDs definidos aún)
 
-> Con la actualización del 25/02/2026, **Reverb, Chorus, Tremolo, WaveFolder y Limiter ya tienen CMDs** (0x43–0x4F) en `protocol.h` y el master los envía desde `SPIMaster.cpp`. Solo falta implementarlos en la Daisy (ver Sección 16.5).
+> Con la actualización del 26/02/2026, **Reverb, Chorus, Tremolo, WaveFolder y Limiter ya tienen CMDs** (0x43–0x4F) en `protocol.h` y el master los envía desde `SPIMaster.cpp`. Los **Per-Pad LFO** (0x80-0x87) se ejecutan íntegramente en el ESP32 y modulan parámetros existentes vía SPI. Solo falta implementar los FX restantes en la Daisy (ver Sección 16.5).
 
 Estos módulos DaisySP adicionales NO tienen CMDs definidos todavía. Si quieres usarlos, asignar en el rango `0x59–0x6F` (per-track libres) o `0xB0+` (nuevos).
 
@@ -2310,14 +2484,19 @@ Estos módulos DaisySP adicionales NO tienen CMDs definidos todavía. Si quieres
 | **7 — MEDIO** | Per-track FX + Sends | Filter (0x50), Echo (0x54), Comp (0x56), **Sends (0x59-0x5B)**, **EQ (0x63-0x65)** | ⭐⭐⭐ |
 | **8 — MEDIO** | Sidechain | 0x90-0x91, 0x05 trigger | ⭐⭐⭐ |
 | **9 — BAJO** | WaveFolder + Limiter | 0x4E–0x4F (master ya envía) | ⭐⭐ |
-| **10 — STATUS** | Status queries | 0xE0, 0xE2, 0xE3, bulk 0xF0-0xF1 | ⭐ |
-| **11 — NUEVO** | **SD Card kits** | **0xB0-0xB9 (master ya envía)** | ⭐⭐⭐⭐ |
+| **10 — STATUS** | Status queries + Events | 0xE0-0xE3, **0xE4 (events)**, bulk 0xF0-0xF1 | ⭐ |
+| **11 — NUEVO** | **SD Card kits** | **0xB0-0xB9 (master ya envía, 0xB7-B9 nuevos)** | ⭐⭐⭐⭐ |
 | **12 — NUEVO** | **Track Pan/Mute/Solo** | **0x5C-0x5E (master ya envía)** | ⭐⭐⭐ |
+| **13 — NUEVO** | **Event system** | **CMD_GET_EVENTS (0xE4) — ring buffer + NotifyEvent** | ⭐⭐⭐ |
+| — | **Per-Pad LFO (0x80-0x87)** | **NO requiere trabajo Daisy** — ejecutado en ESP32 | ✅ automático |
 
-> **Bottom line (actualizado 25/02/2026):** El master ESP32 ahora envía **70+ comandos** incluyendo:
+> **Bottom line (actualizado 26/02/2026):** El master ESP32 ahora envía **80+ comandos** incluyendo:
 > - FX master: Reverb, Chorus, Tremolo, WaveFolder, Limiter (0x43–0x4F)
-> - **Per-track sends**: Reverb/Delay/Chorus send, Pan, Mute, Solo, EQ 3-band (0x59–0x65) ← NUEVO
-> - **Daisy SD Card**: Listar kits, cargar WAVs directo SD→SDRAM (0xB0–0xB9) ← NUEVO
+> - **Per-track sends**: Reverb/Delay/Chorus send, Pan, Mute, Solo, EQ 3-band (0x59–0x65)
+> - **Daisy SD Card**: Listar kits, cargar/descargar WAVs SD→SDRAM, abort (0xB0–0xB9) — **0xB7-0xB9 ahora implementados en master**
+> - **Event system**: `CMD_GET_EVENTS` (0xE4) — polling de NotifyEvent para feedback asíncrono SD — **NUEVO**
 > - Per-pad: Loop, Reverse, Pitch (0x74-0x76) ya implementados en Daisy
+> - **Per-Pad LFO** (0x80-0x87): 24 LFOs BPM-synced, 5 formas de onda, 5 targets — **ejecutado 100% en ESP32, Daisy solo recibe los params modulados** — **NUEVO**
 > 
 > La Daisy puede cargar kits **~50x más rápido** desde su propia SD que via SPI transfer. El ESP32 explora las carpetas remotamente y comanda la carga.
+> Los LFOs añaden movimiento orgánico continuo sin ningún cambio en la Daisy — el ESP32 modula pitch/volume/pan/filter y envía los valores por SPI a 50Hz.

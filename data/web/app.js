@@ -3213,6 +3213,23 @@ function setupControls() {
             }, 5000);
         });
     }
+
+    // Botón Solo Pads — oculta controles extra
+    const soloPadsBtn = document.getElementById('soloPadsBtn');
+    if (soloPadsBtn) {
+        // Auto-activate in embed mode
+        const urlP = new URLSearchParams(location.search);
+        if (urlP.get('solopads') === '1') {
+            document.getElementById('section-pads')?.classList.add('solo-pads-mode');
+            soloPadsBtn.classList.add('active');
+        }
+        soloPadsBtn.addEventListener('click', () => {
+            const section = document.getElementById('section-pads');
+            if (!section) return;
+            section.classList.toggle('solo-pads-mode');
+            soloPadsBtn.classList.toggle('active');
+        });
+    }
     
     // Botón de debug info
     const debugInfoBtn = document.getElementById('debugInfoBtn');

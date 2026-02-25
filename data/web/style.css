@@ -9440,6 +9440,7 @@ body.midi-dialog-open .midi-import-overlay * {
 #section-sequencer .seq-btn-view-mode {
     background: linear-gradient(150deg, rgba(72, 52, 132, 0.86), rgba(34, 24, 72, 0.95));
     border-color: rgba(161, 134, 255, 0.46);
+    color: #fff;
 }
 
 #section-sequencer .seq-btn-midi-import {
@@ -10905,6 +10906,50 @@ body.embed-mode .tab-content.active {
     overflow: auto;
 }
 body.embed-mode .tab-content:not(.active) { display: none !important; }
+
+/* Solo Pads button */
+.btn-solo-pads {
+    background: linear-gradient(135deg, #2a2a3a, #1a1a2a);
+    color: #888;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 1px;
+    transition: all 0.2s;
+}
+.btn-solo-pads:hover { border-color: #888; color: #ccc; }
+.btn-solo-pads.active {
+    background: linear-gradient(135deg, #1a3a1a, #0a2a0a);
+    border-color: #0f0;
+    color: #0f0;
+}
+
+/* Solo Pads mode — hide all extra pad controls */
+.pads-section.solo-pads-mode .pad-upload-btn,
+.pads-section.solo-pads-mode .pad-filter-btn,
+.pads-section.solo-pads-mode .pad-fx-btn,
+.pads-section.solo-pads-mode .loop-btn,
+.pads-section.solo-pads-mode .pad-sample-info,
+.pads-section.solo-pads-mode .pad-filter-indicator,
+.pads-section.solo-pads-mode .pad-key-hint {
+    display: none !important;
+}
+.pads-section.solo-pads-mode .pad {
+    min-height: 60px;
+}
+.pads-section.solo-pads-mode .pad .pad-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+}
+.pads-section.solo-pads-mode .pad .pad-name {
+    font-size: 1.1rem;
+    font-weight: 800;
+}
 
 /* ══════════════════════════════════════════════════════════════════════════════
    DAISY SD CARD — Kit Browser & File Manager
