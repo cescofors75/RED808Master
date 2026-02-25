@@ -8,7 +8,6 @@
 #include "Sequencer.h"
 #include "KitManager.h"
 #include "SampleManager.h"
-#include <map>
 #include <esp_wifi.h>
 
 // Timeout para clientes UDP (30 segundos sin actividad)

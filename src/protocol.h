@@ -85,6 +85,35 @@ typedef struct __attribute__((packed)) {
 #define CMD_COMP_MAKEUP       0x42
 
 // ═══════════════════════════════════════════════════════
+// COMMANDS: REVERB (0x43 - 0x46)
+// ═══════════════════════════════════════════════════════
+#define CMD_REVERB_ACTIVE     0x43  // Master reverb on/off
+#define CMD_REVERB_FEEDBACK   0x44  // Room size / decay (0.0-1.0)
+#define CMD_REVERB_LPFREQ     0x45  // Damp: LP filter Hz (200-12000)
+#define CMD_REVERB_MIX        0x46  // Dry/Wet mix (0.0-1.0)
+
+// ═══════════════════════════════════════════════════════
+// COMMANDS: CHORUS (0x47 - 0x4A)
+// ═══════════════════════════════════════════════════════
+#define CMD_CHORUS_ACTIVE     0x47  // Master chorus on/off
+#define CMD_CHORUS_RATE       0x48  // LFO rate Hz (0.1-10.0)
+#define CMD_CHORUS_DEPTH      0x49  // LFO depth (0.0-1.0)
+#define CMD_CHORUS_MIX        0x4A  // Dry/Wet mix (0.0-1.0)
+
+// ═══════════════════════════════════════════════════════
+// COMMANDS: TREMOLO (0x4B - 0x4D)
+// ═══════════════════════════════════════════════════════
+#define CMD_TREMOLO_ACTIVE    0x4B  // Master tremolo on/off
+#define CMD_TREMOLO_RATE      0x4C  // Rate Hz (0.1-20.0)
+#define CMD_TREMOLO_DEPTH     0x4D  // Depth (0.0-1.0)
+
+// ═══════════════════════════════════════════════════════
+// COMMANDS: WAVEFOLDER + LIMITER (0x4E - 0x4F)
+// ═══════════════════════════════════════════════════════
+#define CMD_WAVEFOLDER_GAIN   0x4E  // WaveFolder input gain (1.0-10.0)
+#define CMD_LIMITER_ACTIVE    0x4F  // Brick-wall limiter on/off (threshold = 0dBFS)
+
+// ═══════════════════════════════════════════════════════
 // COMMANDS: PER-TRACK FX (0x50 - 0x6F)
 // ═══════════════════════════════════════════════════════
 #define CMD_TRACK_FILTER      0x50  // Per-track filter
@@ -96,6 +125,21 @@ typedef struct __attribute__((packed)) {
 #define CMD_TRACK_COMPRESSOR  0x56  // Per-track compressor
 #define CMD_TRACK_CLEAR_LIVE  0x57  // Clear per-track live FX
 #define CMD_TRACK_CLEAR_FX    0x58  // Clear all per-track FX
+
+// Per-track FX send levels + mixer
+#define CMD_TRACK_REVERB_SEND 0x59  // Per-track reverb send (0-100)
+#define CMD_TRACK_DELAY_SEND  0x5A  // Per-track delay send (0-100)
+#define CMD_TRACK_CHORUS_SEND 0x5B  // Per-track chorus send (0-100)
+#define CMD_TRACK_PAN         0x5C  // Per-track pan (-100 L .. 0 C .. +100 R)
+#define CMD_TRACK_MUTE        0x5D  // Per-track mute (0/1)
+#define CMD_TRACK_SOLO        0x5E  // Per-track solo (0/1)
+#define CMD_TRACK_PHASER      0x5F  // Per-track phaser
+#define CMD_TRACK_TREMOLO     0x60  // Per-track tremolo
+#define CMD_TRACK_PITCH       0x61  // Per-track pitch shift (cents)
+#define CMD_TRACK_GATE        0x62  // Per-track noise gate
+#define CMD_TRACK_EQ_LOW      0x63  // Per-track 3-band EQ low  (-12..+12 dB)
+#define CMD_TRACK_EQ_MID      0x64  // Per-track 3-band EQ mid  (-12..+12 dB)
+#define CMD_TRACK_EQ_HIGH     0x65  // Per-track 3-band EQ high (-12..+12 dB)
 
 // ═══════════════════════════════════════════════════════
 // COMMANDS: PER-PAD FX (0x70 - 0x8F)
@@ -126,6 +170,24 @@ typedef struct __attribute__((packed)) {
 #define CMD_SAMPLE_END        0xA2  // End sample transfer
 #define CMD_SAMPLE_UNLOAD     0xA3  // Unload one sample
 #define CMD_SAMPLE_UNLOAD_ALL 0xA4  // Unload all samples
+
+// ═══════════════════════════════════════════════════════
+// COMMANDS: DAISY SD FILE SYSTEM (0xB0 - 0xBF)
+//   Permite al ESP32 explorar y cargar samples desde
+//   la SD card conectada al SPI2 de la Daisy Seed.
+//   La Daisy carga directo a SDRAM — mucho más rápido
+//   que transferir PCM por SPI.
+// ═══════════════════════════════════════════════════════
+#define CMD_SD_LIST_FOLDERS   0xB0  // List root-level folders (kit dirs)
+#define CMD_SD_LIST_FILES     0xB1  // List WAV files in a folder
+#define CMD_SD_FILE_INFO      0xB2  // Get sample info (length, SR, bits)
+#define CMD_SD_LOAD_SAMPLE    0xB3  // Load one WAV from SD → SDRAM pad slot
+#define CMD_SD_LOAD_KIT       0xB4  // Load entire kit folder → all pads
+#define CMD_SD_KIT_LIST       0xB5  // Get list of available kit names
+#define CMD_SD_STATUS         0xB6  // SD card status (present, size, free)
+#define CMD_SD_UNLOAD_KIT     0xB7  // Unload current kit from SDRAM
+#define CMD_SD_GET_LOADED     0xB8  // Get currently loaded kit name + pad map
+#define CMD_SD_ABORT          0xB9  // Abort ongoing SD load operation
 
 // ═══════════════════════════════════════════════════════
 // COMMANDS: STATUS / QUERY (0xE0 - 0xEF)
@@ -331,6 +393,160 @@ typedef struct __attribute__((packed)) {
     float    releaseMs;      // 10.0-1200.0 ms
     float    knee;           // 0.0-1.0
 } SidechainPayload;
+
+// --- Sidechain Trigger ---
+typedef struct __attribute__((packed)) {
+    uint8_t  sourceTrack;    // 0-15  (which track triggers the ducking)
+    uint8_t  reserved;
+} SidechainTriggerPayload;
+
+// --- Reverb ---
+typedef struct __attribute__((packed)) {
+    uint8_t  active;         // 0/1
+    uint8_t  reserved[3];
+    float    feedback;       // 0.0-1.0 (room size / decay time)
+    float    lpFreq;         // Hz (200-12000, damp color)
+    float    mix;            // 0.0-1.0 (dry/wet)
+} ReverbPayload;
+
+// --- Chorus ---
+typedef struct __attribute__((packed)) {
+    uint8_t  active;         // 0/1
+    uint8_t  reserved[3];
+    float    rate;           // Hz (0.1-10.0)
+    float    depth;          // 0.0-1.0
+    float    mix;            // 0.0-1.0
+} ChorusPayload;
+
+// --- Tremolo ---
+typedef struct __attribute__((packed)) {
+    uint8_t  active;         // 0/1
+    uint8_t  reserved[3];
+    float    rate;           // Hz (0.1-20.0)
+    float    depth;          // 0.0-1.0
+} TremoloPayload;
+
+// --- Per-Track FX Send ---
+typedef struct __attribute__((packed)) {
+    uint8_t  track;          // 0-15
+    uint8_t  sendLevel;      // 0-100 (percentage)
+} TrackSendPayload;
+
+// --- Per-Track Pan ---
+typedef struct __attribute__((packed)) {
+    uint8_t  track;          // 0-15
+    int8_t   pan;            // -100 (full L) .. 0 (center) .. +100 (full R)
+} TrackPanPayload;
+
+// --- Per-Track Mute/Solo ---
+typedef struct __attribute__((packed)) {
+    uint8_t  track;          // 0-15
+    uint8_t  enabled;        // 0/1
+} TrackMuteSoloPayload;
+
+// --- Per-Track 3-band EQ ---
+typedef struct __attribute__((packed)) {
+    uint8_t  track;          // 0-15
+    int8_t   gainLow;        // -12..+12 dB
+    int8_t   gainMid;        // -12..+12 dB
+    int8_t   gainHigh;       // -12..+12 dB
+} TrackEqPayload;
+
+// --- Per-Track Gate ---
+typedef struct __attribute__((packed)) {
+    uint8_t  track;          // 0-15
+    uint8_t  active;         // 0/1
+    uint8_t  reserved[2];
+    float    threshold;      // dB (-60..-6)
+    float    attackMs;       // 0.1-50
+    float    releaseMs;      // 10-500
+} TrackGatePayload;
+
+// --- SD: List Folders Request (no payload, response below) ---
+// --- SD: List Files Request ---
+typedef struct __attribute__((packed)) {
+    char     folderName[32]; // null-terminated folder name
+} SdListFilesPayload;
+
+// --- SD: File Info Request ---
+typedef struct __attribute__((packed)) {
+    uint8_t  padIndex;       // target pad slot
+    uint8_t  reserved[3];
+    char     folderName[32]; // kit folder
+    char     fileName[32];   // WAV filename
+} SdFileInfoPayload;
+
+// --- SD: Load Sample ---
+typedef struct __attribute__((packed)) {
+    uint8_t  padIndex;       // 0-23 destination pad slot
+    uint8_t  reserved[3];
+    char     folderName[32]; // kit folder on SD
+    char     fileName[32];   // WAV file name
+} SdLoadSamplePayload;
+
+// --- SD: Load Kit (all WAVs in a folder) ---
+typedef struct __attribute__((packed)) {
+    char     kitName[32];    // folder name = kit name
+    uint8_t  startPad;       // first pad slot to fill (usually 0)
+    uint8_t  maxPads;        // max pads to load (usually 16 or 24)
+    uint8_t  reserved[2];
+} SdLoadKitPayload;
+
+// --- SD: Folder List Response (from Daisy → ESP32) ---
+typedef struct __attribute__((packed)) {
+    uint8_t  count;          // number of folders (max 16)
+    uint8_t  reserved[3];
+    char     names[16][32];  // up to 16 folder names, null-terminated
+} SdFolderListResponse;
+
+// --- SD: File List Response ---
+typedef struct __attribute__((packed)) {
+    uint8_t  count;          // number of files (max 24)
+    uint8_t  reserved[3];
+    struct __attribute__((packed)) {
+        char     name[24];   // filename (truncated to 24 chars)
+        uint32_t sizeBytes;  // file size in bytes
+    } files[24];
+} SdFileListResponse;
+
+// --- SD: File Info Response ---
+typedef struct __attribute__((packed)) {
+    uint32_t totalSamples;   // number of int16_t samples
+    uint16_t sampleRate;     // Hz (44100, 48000...)
+    uint8_t  bitsPerSample;  // 16
+    uint8_t  channels;       // 1=mono, 2=stereo
+    uint32_t durationMs;     // duration in milliseconds
+    char     name[32];       // filename
+} SdFileInfoResponse;
+
+// --- SD: Status Response ---
+typedef struct __attribute__((packed)) {
+    uint8_t  present;        // 0=no SD, 1=SD present
+    uint8_t  reserved[3];
+    uint32_t totalMB;        // total capacity in MB
+    uint32_t freeMB;         // free space in MB
+    uint32_t samplesLoaded;  // bitmask of loaded pad slots
+    char     currentKit[32]; // currently loaded kit name
+} SdStatusResponse;
+
+// --- SD: Kit List Response ---
+typedef struct __attribute__((packed)) {
+    uint8_t  count;          // number of kits found
+    uint8_t  reserved[3];
+    char     kits[16][32];   // up to 16 kit names
+} SdKitListResponse;
+
+// --- CPU Load Response (CMD_GET_CPU_LOAD 0xE2) ---
+typedef struct __attribute__((packed)) {
+    float    cpuLoad;        // 0.0-100.0 percent
+    uint32_t uptime;         // milliseconds since boot
+} CpuLoadResponse;
+
+// --- Active Voices Response (CMD_GET_VOICES 0xE3) ---
+typedef struct __attribute__((packed)) {
+    uint8_t  activeVoices;   // 0-MAX_VOICES
+    uint8_t  reserved[3];
+} VoicesResponse;
 
 // --- Sample Transfer ---
 typedef struct __attribute__((packed)) {

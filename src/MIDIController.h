@@ -124,11 +124,6 @@ private:
   uint32_t lastSecondTime;
   uint32_t messagesThisSecond;
 
-  // MIDI parsing state
-  uint8_t runningStatus;
-  uint8_t dataIndex;
-  uint8_t pendingData[2];
-  
   // Note Mapping
   MIDINoteMapping noteMappings[MAX_MIDI_MAPPINGS];
   int mappingCount;

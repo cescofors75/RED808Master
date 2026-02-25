@@ -51,6 +51,19 @@ static const char* spiCmdName(uint8_t cmd) {
         case 0x40: return "CMP_ATK";
         case 0x41: return "CMP_REL";
         case 0x42: return "CMP_MKP";
+        case 0x43: return "RVB_ACT";
+        case 0x44: return "RVB_FB";
+        case 0x45: return "RVB_LP";
+        case 0x46: return "RVB_MIX";
+        case 0x47: return "CHR_ACT";
+        case 0x48: return "CHR_RATE";
+        case 0x49: return "CHR_DEPT";
+        case 0x4A: return "CHR_MIX";
+        case 0x4B: return "TRM_ACT";
+        case 0x4C: return "TRM_RATE";
+        case 0x4D: return "TRM_DEPT";
+        case 0x4E: return "WFOLD";
+        case 0x4F: return "LIM_ACT";
         case 0x50: return "TK_FILT";
         case 0x51: return "TK_CLR_F";
         case 0x52: return "TK_DIST";
@@ -59,7 +72,7 @@ static const char* spiCmdName(uint8_t cmd) {
         case 0x55: return "TK_FLANG";
         case 0x56: return "TK_COMP";
         case 0x57: return "TK_CLR_L";
-        case 0x58: return "TK_CLR_F";
+        case 0x58: return "TK_CLR_X";
         case 0x70: return "PD_FILT";
         case 0x71: return "PD_CLR_F";
         case 0x72: return "PD_DIST";
@@ -130,12 +143,34 @@ SPIMaster::SPIMaster() : spi(nullptr), seqNumber(0), spiErrorCount(0), stm32Conn
     cachedLiveVolume = 80;
     cachedLivePitch = 1.0f;
     
+    // New FX cached state
+    cachedReverbActive = false;
+    cachedReverbFeedback = 0.85f;
+    cachedReverbLpFreq = 8000.0f;
+    cachedReverbMix = 0.3f;
+    cachedChorusActive = false;
+    cachedChorusRate = 0.5f;
+    cachedChorusDepth = 0.5f;
+    cachedChorusMix = 0.4f;
+    cachedTremoloActive = false;
+    cachedTremoloRate = 4.0f;
+    cachedTremoloDepth = 0.7f;
+    cachedWaveFolderGain = 1.0f;
+    cachedLimiterActive = false;
+    memset(&cachedStatus, 0, sizeof(cachedStatus));
+    
     for (int i = 0; i < MAX_AUDIO_TRACKS; i++) {
         cachedTrackFilter[i] = FILTER_NONE;
         trackFilterActive[i] = false;
         cachedTrackEchoActive[i] = false;
         cachedTrackFlangerActive[i] = false;
         cachedTrackCompActive[i] = false;
+        cachedTrackReverbSend[i] = 0;
+        cachedTrackDelaySend[i] = 0;
+        cachedTrackChorusSend[i] = 0;
+        cachedTrackPan[i] = 0;
+        cachedTrackMute[i] = false;
+        cachedTrackSolo[i] = false;
         cachedTrackPeaks[i] = 0.0f;
     }
     
@@ -147,8 +182,6 @@ SPIMaster::SPIMaster() : spi(nullptr), seqNumber(0), spiErrorCount(0), stm32Conn
     
     cachedMasterPeak = 0.0f;
     lastPeakRequest = 0;
-    cachedActiveVoices = 0;
-    cachedCpuLoad = 0.0f;
     
     memset(txBuffer, 0, sizeof(txBuffer));
     memset(rxBuffer, 0, sizeof(rxBuffer));
@@ -159,6 +192,10 @@ SPIMaster::~SPIMaster() {
         spi->end();
         delete spi;
         spi = nullptr;
+    }
+    if (spiMutex) {
+        vSemaphoreDelete(spiMutex);
+        spiMutex = nullptr;
     }
 }
 
@@ -319,9 +356,9 @@ bool SPIMaster::sendAndReceive(uint8_t cmd, const void* payload, uint16_t payloa
     spi->endTransaction();
     csHigh();   // <-- CS HIGH: NSS rising edge dispara la ISR del STM32
 
-    // Dar tiempo al STM32 para parsear el comando y cargar su TX buffer.
-    // A 2MHz 8 bytes = ~32us; con 500us el STM32 tiene más que suficiente.
-    delayMicroseconds(500);
+    // Dar tiempo al slave para parsear el comando y cargar su TX buffer.
+    // A 20MHz 8 bytes = ~3.2us; 100us es más que suficiente para Daisy Seed.
+    delayMicroseconds(100);
 
     // ── PHASE 2: leer respuesta ──────────────────────────
     SPIPacketHeader respHeader;
@@ -429,6 +466,23 @@ void SPIMaster::stopSample(int padIndex) {
 
 void SPIMaster::stopAll() {
     sendCommand(CMD_TRIGGER_STOP_ALL, nullptr, 0);
+}
+
+void SPIMaster::triggerSidechain(int sourceTrack) {
+    if (sourceTrack < 0 || sourceTrack >= MAX_AUDIO_TRACKS) return;
+    SidechainTriggerPayload p = {(uint8_t)sourceTrack, 0};
+    sendCommand(CMD_TRIGGER_SIDECHAIN, &p, sizeof(p));
+}
+
+bool SPIMaster::triggerBulk(const TriggerSeqPayload* triggers, uint8_t count) {
+    if (!triggers || count == 0 || count > 16) return false;
+    BulkTriggersPayload p = {};
+    p.count = count;
+    p.reserved = 0;
+    memcpy(p.triggers, triggers, count * sizeof(TriggerSeqPayload));
+    // Only send header + actual trigger data (not the full 16-slot array)
+    uint16_t payloadLen = (uint16_t)(2 + count * sizeof(TriggerSeqPayload));
+    return sendCommand(CMD_BULK_TRIGGERS, &p, payloadLen);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -842,6 +896,149 @@ bool SPIMaster::getTrackCompressorActive(int track) const {
 }
 
 // ═══════════════════════════════════════════════════════
+// PER-TRACK FX SEND LEVELS
+// ═══════════════════════════════════════════════════════
+
+void SPIMaster::setTrackReverbSend(int track, uint8_t level) {
+    if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+    cachedTrackReverbSend[track] = level;
+    TrackSendPayload p = {};
+    p.track = (uint8_t)track;
+    p.sendLevel = level;
+    sendCommand(CMD_TRACK_REVERB_SEND, &p, sizeof(p));
+}
+
+void SPIMaster::setTrackDelaySend(int track, uint8_t level) {
+    if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+    cachedTrackDelaySend[track] = level;
+    TrackSendPayload p = {};
+    p.track = (uint8_t)track;
+    p.sendLevel = level;
+    sendCommand(CMD_TRACK_DELAY_SEND, &p, sizeof(p));
+}
+
+void SPIMaster::setTrackChorusSend(int track, uint8_t level) {
+    if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+    cachedTrackChorusSend[track] = level;
+    TrackSendPayload p = {};
+    p.track = (uint8_t)track;
+    p.sendLevel = level;
+    sendCommand(CMD_TRACK_CHORUS_SEND, &p, sizeof(p));
+}
+
+// ═══════════════════════════════════════════════════════
+// PER-TRACK MIXER (PAN, MUTE, SOLO)
+// ═══════════════════════════════════════════════════════
+
+void SPIMaster::setTrackPan(int track, int8_t pan) {
+    if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+    cachedTrackPan[track] = pan;
+    TrackPanPayload p = {};
+    p.track = (uint8_t)track;
+    p.pan = pan;
+    sendCommand(CMD_TRACK_PAN, &p, sizeof(p));
+}
+
+void SPIMaster::setTrackMute(int track, bool mute) {
+    if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+    cachedTrackMute[track] = mute;
+    TrackMuteSoloPayload p = {};
+    p.track = (uint8_t)track;
+    p.enabled = mute ? 1 : 0;
+    sendCommand(CMD_TRACK_MUTE, &p, sizeof(p));
+}
+
+void SPIMaster::setTrackSolo(int track, bool solo) {
+    if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+    cachedTrackSolo[track] = solo;
+    TrackMuteSoloPayload p = {};
+    p.track = (uint8_t)track;
+    p.enabled = solo ? 1 : 0;
+    sendCommand(CMD_TRACK_SOLO, &p, sizeof(p));
+}
+
+// ═══════════════════════════════════════════════════════
+// PER-TRACK EXTENDED FX (phaser, tremolo, pitch, gate, EQ)
+// ═══════════════════════════════════════════════════════
+
+void SPIMaster::setTrackPhaser(int track, bool active, float rate, float depth, float feedback) {
+    if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+    TrackFlangerPayload p = {};  // reuse same struct layout
+    p.track = (uint8_t)track;
+    p.active = active ? 1 : 0;
+    p.rate = rate;
+    p.depth = depth;
+    p.feedback = feedback;
+    sendCommand(CMD_TRACK_PHASER, &p, sizeof(p));
+}
+
+void SPIMaster::setTrackTremolo(int track, bool active, float rate, float depth) {
+    if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+    struct __attribute__((packed)) { uint8_t track; uint8_t active; uint8_t reserved[2]; float rate; float depth; } p = {};
+    p.track = (uint8_t)track;
+    p.active = active ? 1 : 0;
+    p.rate = rate;
+    p.depth = depth;
+    sendCommand(CMD_TRACK_TREMOLO, &p, sizeof(p));
+}
+
+void SPIMaster::setTrackPitch(int track, int16_t cents) {
+    if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+    struct __attribute__((packed)) { uint8_t track; uint8_t reserved; int16_t cents; } p = {};
+    p.track = (uint8_t)track;
+    p.cents = cents;
+    sendCommand(CMD_TRACK_PITCH, &p, sizeof(p));
+}
+
+void SPIMaster::setTrackGate(int track, bool active, float thresholdDb, float attackMs, float releaseMs) {
+    if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+    TrackGatePayload p = {};
+    p.track = (uint8_t)track;
+    p.active = active ? 1 : 0;
+    p.threshold = thresholdDb;
+    p.attackMs = attackMs;
+    p.releaseMs = releaseMs;
+    sendCommand(CMD_TRACK_GATE, &p, sizeof(p));
+}
+
+void SPIMaster::setTrackEqLow(int track, int8_t gainDb) {
+    if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+    struct __attribute__((packed)) { uint8_t track; int8_t gain; } p = {};
+    p.track = (uint8_t)track;
+    p.gain = gainDb;
+    sendCommand(CMD_TRACK_EQ_LOW, &p, sizeof(p));
+}
+
+void SPIMaster::setTrackEqMid(int track, int8_t gainDb) {
+    if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+    struct __attribute__((packed)) { uint8_t track; int8_t gain; } p = {};
+    p.track = (uint8_t)track;
+    p.gain = gainDb;
+    sendCommand(CMD_TRACK_EQ_MID, &p, sizeof(p));
+}
+
+void SPIMaster::setTrackEqHigh(int track, int8_t gainDb) {
+    if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+    struct __attribute__((packed)) { uint8_t track; int8_t gain; } p = {};
+    p.track = (uint8_t)track;
+    p.gain = gainDb;
+    sendCommand(CMD_TRACK_EQ_HIGH, &p, sizeof(p));
+}
+
+void SPIMaster::setTrackEq(int track, int8_t low, int8_t mid, int8_t high) {
+    if (track < 0 || track >= MAX_AUDIO_TRACKS) return;
+    TrackEqPayload p = {};
+    p.track = (uint8_t)track;
+    p.gainLow = low;
+    p.gainMid = mid;
+    p.gainHigh = high;
+    // Send as 3 individual commands (no single CMD for full EQ band set)
+    setTrackEqLow(track, low);
+    setTrackEqMid(track, mid);
+    setTrackEqHigh(track, high);
+}
+
+// ═══════════════════════════════════════════════════════
 // SIDECHAIN
 // ═══════════════════════════════════════════════════════
 
@@ -973,7 +1170,7 @@ bool SPIMaster::transferSample(int padIndex, int16_t* buffer, uint32_t numSample
     SampleBeginPayload beginP = {};
     beginP.padIndex = (uint8_t)padIndex;
     beginP.bitsPerSample = 16;
-    beginP.sampleRate = 44100;
+    beginP.sampleRate = SAMPLE_RATE;
     beginP.totalBytes = totalBytes;
     beginP.totalSamples = numSamples;
     
@@ -1033,6 +1230,64 @@ void SPIMaster::unloadAllSamples() {
 }
 
 // ═══════════════════════════════════════════════════════
+// DAISY SD CARD FILE SYSTEM
+// ═══════════════════════════════════════════════════════
+
+bool SPIMaster::sdListFolders(SdFolderListResponse& out) {
+    return sendAndReceive(CMD_SD_LIST_FOLDERS, nullptr, 0, &out, sizeof(out));
+}
+
+bool SPIMaster::sdListFiles(const char* folder, SdFileListResponse& out) {
+    SdListFilesPayload p = {};
+    strncpy(p.folderName, folder, sizeof(p.folderName) - 1);
+    return sendAndReceive(CMD_SD_LIST_FILES, &p, sizeof(p), &out, sizeof(out));
+}
+
+bool SPIMaster::sdGetFileInfo(const char* folder, const char* file, SdFileInfoResponse& out) {
+    SdFileInfoPayload p = {};
+    p.padIndex = 0;
+    strncpy(p.folderName, folder, sizeof(p.folderName) - 1);
+    strncpy(p.fileName, file, sizeof(p.fileName) - 1);
+    return sendAndReceive(CMD_SD_FILE_INFO, &p, sizeof(p), &out, sizeof(out));
+}
+
+bool SPIMaster::sdLoadSample(int padIndex, const char* folder, const char* file) {
+    SdLoadSamplePayload p = {};
+    p.padIndex = (uint8_t)padIndex;
+    strncpy(p.folderName, folder, sizeof(p.folderName) - 1);
+    strncpy(p.fileName, file, sizeof(p.fileName) - 1);
+    return sendCommand(CMD_SD_LOAD_SAMPLE, &p, sizeof(p));
+}
+
+bool SPIMaster::sdLoadKit(const char* kitName, uint8_t startPad, uint8_t maxPads) {
+    SdLoadKitPayload p = {};
+    strncpy(p.kitName, kitName, sizeof(p.kitName) - 1);
+    p.startPad = startPad;
+    p.maxPads = maxPads;
+    return sendCommand(CMD_SD_LOAD_KIT, &p, sizeof(p));
+}
+
+bool SPIMaster::sdGetKitList(SdKitListResponse& out) {
+    return sendAndReceive(CMD_SD_KIT_LIST, nullptr, 0, &out, sizeof(out));
+}
+
+bool SPIMaster::sdGetStatus(SdStatusResponse& out) {
+    return sendAndReceive(CMD_SD_STATUS, nullptr, 0, &out, sizeof(out));
+}
+
+void SPIMaster::sdUnloadKit() {
+    sendCommand(CMD_SD_UNLOAD_KIT, nullptr, 0);
+}
+
+bool SPIMaster::sdGetLoadedKit(SdStatusResponse& out) {
+    return sendAndReceive(CMD_SD_GET_LOADED, nullptr, 0, &out, sizeof(out));
+}
+
+void SPIMaster::sdAbortLoad() {
+    sendCommand(CMD_SD_ABORT, nullptr, 0);
+}
+
+// ═══════════════════════════════════════════════════════
 // STATUS / METERING
 // ═══════════════════════════════════════════════════════
 
@@ -1063,11 +1318,11 @@ bool SPIMaster::requestPeaks() {
 }
 
 int SPIMaster::getActiveVoices() {
-    return cachedActiveVoices;
+    return (int)cachedStatus.activeVoices;
 }
 
 float SPIMaster::getCpuLoad() {
-    return cachedCpuLoad;
+    return (float)cachedStatus.cpuLoadPercent;
 }
 
 bool SPIMaster::ping(uint32_t& roundtripUs) {
@@ -1100,11 +1355,188 @@ void SPIMaster::resetDSP() {
         cachedPadLoop[i] = false;
     }
     cachedMasterPeak = 0.0f;
-    cachedActiveVoices = 0;
-    cachedCpuLoad = 0.0f;
+    cachedReverbActive = false;
+    cachedChorusActive = false;
+    cachedTremoloActive = false;
+    cachedWaveFolderGain = 1.0f;
+    cachedLimiterActive = false;
+    memset(&cachedStatus, 0, sizeof(cachedStatus));
     
     Serial.println("[SPI] DSP Reset sent");
 }
+
+// ═══════════════════════════════════════════════════════
+// MASTER FX — REVERB
+// ═══════════════════════════════════════════════════════
+
+void SPIMaster::setReverbActive(bool active) {
+    cachedReverbActive = active;
+    BoolPayload p = {(uint8_t)(active ? 1 : 0)};
+    sendCommand(CMD_REVERB_ACTIVE, &p, sizeof(p));
+}
+
+void SPIMaster::setReverbFeedback(float feedback) {
+    cachedReverbFeedback = constrain(feedback, 0.0f, 0.99f);
+    FloatPayload p = {cachedReverbFeedback};
+    sendCommand(CMD_REVERB_FEEDBACK, &p, sizeof(p));
+}
+
+void SPIMaster::setReverbLpFreq(float hz) {
+    cachedReverbLpFreq = constrain(hz, 200.0f, 12000.0f);
+    FloatPayload p = {cachedReverbLpFreq};
+    sendCommand(CMD_REVERB_LPFREQ, &p, sizeof(p));
+}
+
+void SPIMaster::setReverbMix(float mix) {
+    cachedReverbMix = constrain(mix, 0.0f, 1.0f);
+    FloatPayload p = {cachedReverbMix};
+    sendCommand(CMD_REVERB_MIX, &p, sizeof(p));
+}
+
+void SPIMaster::setReverb(bool active, float feedback, float lpFreq, float mix) {
+    cachedReverbActive   = active;
+    cachedReverbFeedback = constrain(feedback, 0.0f, 0.99f);
+    cachedReverbLpFreq   = constrain(lpFreq, 200.0f, 12000.0f);
+    cachedReverbMix      = constrain(mix, 0.0f, 1.0f);
+    // Send full payload in one command
+    ReverbPayload p = {};
+    p.active   = active ? 1 : 0;
+    p.feedback = cachedReverbFeedback;
+    p.lpFreq   = cachedReverbLpFreq;
+    p.mix      = cachedReverbMix;
+    sendCommand(CMD_REVERB_ACTIVE, &p, sizeof(p));
+}
+
+// ═══════════════════════════════════════════════════════
+// MASTER FX — CHORUS
+// ═══════════════════════════════════════════════════════
+
+void SPIMaster::setChorusActive(bool active) {
+    cachedChorusActive = active;
+    BoolPayload p = {(uint8_t)(active ? 1 : 0)};
+    sendCommand(CMD_CHORUS_ACTIVE, &p, sizeof(p));
+}
+
+void SPIMaster::setChorusRate(float hz) {
+    cachedChorusRate = constrain(hz, 0.1f, 10.0f);
+    FloatPayload p = {cachedChorusRate};
+    sendCommand(CMD_CHORUS_RATE, &p, sizeof(p));
+}
+
+void SPIMaster::setChorusDepth(float depth) {
+    cachedChorusDepth = constrain(depth, 0.0f, 1.0f);
+    FloatPayload p = {cachedChorusDepth};
+    sendCommand(CMD_CHORUS_DEPTH, &p, sizeof(p));
+}
+
+void SPIMaster::setChorusMix(float mix) {
+    cachedChorusMix = constrain(mix, 0.0f, 1.0f);
+    FloatPayload p = {cachedChorusMix};
+    sendCommand(CMD_CHORUS_MIX, &p, sizeof(p));
+}
+
+void SPIMaster::setChorus(bool active, float rate, float depth, float mix) {
+    cachedChorusActive = active;
+    cachedChorusRate   = constrain(rate,  0.1f, 10.0f);
+    cachedChorusDepth  = constrain(depth, 0.0f, 1.0f);
+    cachedChorusMix    = constrain(mix,   0.0f, 1.0f);
+    ChorusPayload p = {};
+    p.active = active ? 1 : 0;
+    p.rate   = cachedChorusRate;
+    p.depth  = cachedChorusDepth;
+    p.mix    = cachedChorusMix;
+    sendCommand(CMD_CHORUS_ACTIVE, &p, sizeof(p));
+}
+
+// ═══════════════════════════════════════════════════════
+// MASTER FX — TREMOLO
+// ═══════════════════════════════════════════════════════
+
+void SPIMaster::setTremoloActive(bool active) {
+    cachedTremoloActive = active;
+    BoolPayload p = {(uint8_t)(active ? 1 : 0)};
+    sendCommand(CMD_TREMOLO_ACTIVE, &p, sizeof(p));
+}
+
+void SPIMaster::setTremoloRate(float hz) {
+    cachedTremoloRate = constrain(hz, 0.1f, 20.0f);
+    FloatPayload p = {cachedTremoloRate};
+    sendCommand(CMD_TREMOLO_RATE, &p, sizeof(p));
+}
+
+void SPIMaster::setTremoloDepth(float depth) {
+    cachedTremoloDepth = constrain(depth, 0.0f, 1.0f);
+    FloatPayload p = {cachedTremoloDepth};
+    sendCommand(CMD_TREMOLO_DEPTH, &p, sizeof(p));
+}
+
+void SPIMaster::setTremolo(bool active, float rate, float depth) {
+    cachedTremoloActive = active;
+    cachedTremoloRate   = constrain(rate,  0.1f, 20.0f);
+    cachedTremoloDepth  = constrain(depth, 0.0f, 1.0f);
+    TremoloPayload p = {};
+    p.active = active ? 1 : 0;
+    p.rate   = cachedTremoloRate;
+    p.depth  = cachedTremoloDepth;
+    sendCommand(CMD_TREMOLO_ACTIVE, &p, sizeof(p));
+}
+
+// ═══════════════════════════════════════════════════════
+// MASTER FX — WAVEFOLDER + LIMITER
+// ═══════════════════════════════════════════════════════
+
+void SPIMaster::setWaveFolderGain(float gain) {
+    cachedWaveFolderGain = constrain(gain, 1.0f, 10.0f);
+    FloatPayload p = {cachedWaveFolderGain};
+    sendCommand(CMD_WAVEFOLDER_GAIN, &p, sizeof(p));
+}
+
+void SPIMaster::setLimiterActive(bool active) {
+    cachedLimiterActive = active;
+    BoolPayload p = {(uint8_t)(active ? 1 : 0)};
+    sendCommand(CMD_LIMITER_ACTIVE, &p, sizeof(p));
+}
+
+// ═══════════════════════════════════════════════════════
+// STATUS QUERIES — SPI round-trips
+// ═══════════════════════════════════════════════════════
+
+bool SPIMaster::requestActiveVoices() {
+    if (!stm32Connected) return false;
+    VoicesResponse resp = {};
+    if (sendAndReceive(CMD_GET_VOICES, nullptr, 0, &resp, sizeof(resp))) {
+        cachedStatus.activeVoices = resp.activeVoices;
+        return true;
+    }
+    return false;
+}
+
+bool SPIMaster::requestCpuLoad() {
+    if (!stm32Connected) return false;
+    CpuLoadResponse resp = {};
+    if (sendAndReceive(CMD_GET_CPU_LOAD, nullptr, 0, &resp, sizeof(resp))) {
+        cachedStatus.cpuLoadPercent = (uint8_t)constrain((int)resp.cpuLoad, 0, 100);
+        cachedStatus.uptime = resp.uptime / 1000;  // ms → s
+        return true;
+    }
+    return false;
+}
+
+bool SPIMaster::requestStatus() {
+    if (!stm32Connected) return false;
+    StatusResponse resp = {};
+    if (sendAndReceive(CMD_GET_STATUS, nullptr, 0, &resp, sizeof(resp))) {
+        cachedStatus = resp;
+        return true;
+    }
+    return false;
+}
+
+bool SPIMaster::getStatusSnapshot(StatusResponse& out) {
+    out = cachedStatus;
+    return stm32Connected;
+}
+
 
 // ═══════════════════════════════════════════════════════
 // FILTER PRESETS (static, for UI)

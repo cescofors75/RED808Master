@@ -53,8 +53,6 @@ private:
   Kit kits[MAX_KITS];
   int kitCount;
   int currentKit;
-  
-  bool parseKitFile(const char* filename, int kitIndex);
 };
 
 #endif // KITMANAGER_H

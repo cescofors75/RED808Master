@@ -1,5 +1,4 @@
 #include "MIDIController.h"
-#include <Preferences.h>
 
 // Static callback wrapper
 static MIDIController* s_midiInstance = nullptr;
@@ -36,8 +35,6 @@ MIDIController::MIDIController()
   , messagesPerSecond(0)
   , lastSecondTime(0)
   , messagesThisSecond(0)
-  , runningStatus(0)
-  , dataIndex(0)
   , mappingCount(0)
 {
   deviceInfo.connected = false;
