@@ -95,6 +95,8 @@
             <button class="tab-btn" data-tab="volumes">🎚️ VOLUMENES</button>
             <button class="tab-btn" data-tab="fx">🔊 FX</button>
             <button class="tab-btn" data-tab="midi">🎹 MIDI</button>
+            <button class="tab-btn" data-tab="daisy-sd">💾 SD</button>
+            <button class="tab-btn" data-tab="lfo">〰️ LFO</button>
             <button class="tab-btn" data-tab="info">📊 INFO</button>
             <a href="/multiview.html" class="tab-btn tab-btn-multiview" title="Ver múltiples secciones a la vez">🖥 MULTIVIEW</a>
         </nav>
@@ -1406,6 +1408,76 @@
             </div>
         </section>
         </div>
+
+        <!-- TAB: Daisy SD Card -->
+        <div id="tab-daisy-sd" class="tab-content">
+        <section class="section">
+            <h2 class="section-title">💾 Daisy SD Card</h2>
+            <div class="sd-status-bar" id="sdStatusBar">
+                <span class="sd-indicator" id="sdIndicator">⬤</span>
+                <span id="sdStatusText">Checking SD...</span>
+                <span class="sd-stats" id="sdStats"></span>
+                <button class="btn btn-small btn-secondary" id="sdRefreshBtn" onclick="sdRefreshStatus()">↻ Refresh</button>
+            </div>
+
+            <div class="sd-current-kit" id="sdCurrentKit" style="display:none">
+                <span class="sd-kit-label">LOADED KIT:</span>
+                <span class="sd-kit-name" id="sdKitName">—</span>
+                <span class="sd-kit-pads" id="sdKitPads"></span>
+                <button class="btn btn-small btn-danger" onclick="sdUnloadKit()">✕ Unload</button>
+            </div>
+
+            <div class="sd-panels">
+                <!-- Kit Browser -->
+                <div class="sd-panel">
+                    <h3 class="sd-panel-title">📁 Kits</h3>
+                    <div class="sd-kit-list" id="sdKitList">
+                        <div class="sd-empty">Press Refresh to scan...</div>
+                    </div>
+                </div>
+
+                <!-- Folder / File Browser -->
+                <div class="sd-panel sd-panel-wide">
+                    <h3 class="sd-panel-title">📂 File Browser</h3>
+                    <div class="sd-breadcrumb" id="sdBreadcrumb">
+                        <span class="sd-crumb sd-crumb-root" onclick="sdListFolders()">/ root</span>
+                    </div>
+                    <div class="sd-file-list" id="sdFileList">
+                        <div class="sd-empty">Select a folder or kit</div>
+                    </div>
+                </div>
+
+                <!-- Pad Assignment -->
+                <div class="sd-panel">
+                    <h3 class="sd-panel-title">🎯 Assign to Pad</h3>
+                    <div class="sd-pad-grid" id="sdPadGrid"></div>
+                    <div class="sd-assign-info" id="sdAssignInfo">Select a file, then click a pad</div>
+                </div>
+            </div>
+
+            <div class="sd-log" id="sdLog"></div>
+        </section>
+        </div>
+
+        <!-- TAB: LFO (Per-Pad Modulation) -->
+        <div id="tab-lfo" class="tab-content">
+        <section class="section">
+            <h2 class="section-title">〰️ LFO — Organic Modulation</h2>
+            <div class="lfo-toolbar">
+                <button class="btn btn-small" id="lfoResetAll" onclick="lfoResetAll()">⟲ Reset All</button>
+                <span class="lfo-active-count">Active: <strong id="lfoActiveCount">0</strong>/24</span>
+            </div>
+
+            <div class="lfo-grid" id="lfoGrid"></div>
+
+            <!-- LFO Scope Visualizer -->
+            <div class="lfo-scope-section">
+                <h3 class="section-subtitle">Oscilloscopes</h3>
+                <div class="lfo-scopes" id="lfoScopes"></div>
+            </div>
+        </section>
+        </div>
+
         <!-- Fin de Tabs -->
 
         <!-- Footer -->

@@ -8,6 +8,7 @@
 #include "Sequencer.h"
 #include "WebInterface.h"
 #include "MIDIController.h"
+#include "LFOEngine.h"
 
 // --- I2S pins now on STM32 (BCK=42, WS=41, DOUT=40 ya no se usan en ESP32) ---
 
@@ -44,6 +45,7 @@ SPIMaster spiMaster;
 SampleManager sampleManager;
 KitManager kitManager;
 Sequencer sequencer;
+LFOEngine lfoEngine;
 WebInterface webInterface;
 MIDIController midiController;
 Adafruit_NeoPixel rgbLed(RGB_LED_NUM, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -132,6 +134,7 @@ void spiAudioTask(void *pvParameters) {
     Serial.println("[Task] SPI Audio Task en Core 1 (Prioridad: 24)");
     while (true) {
         sequencer.update();     // Tick del secuenciador
+        lfoEngine.update(sequencer.getTempo(), spiMaster); // LFO modulation
         spiMaster.process();    // Poll peaks, manage SPI comms
         vTaskDelay(pdMS_TO_TICKS(1)); // ~1000Hz loop
     }
@@ -173,6 +176,7 @@ void systemTask(void *pvParameters) {
 // NO enciende el LED (solo secuenciador)
 void onStepTrigger(int track, uint8_t velocity, uint8_t trackVolume, uint32_t noteLenSamples) {
     spiMaster.triggerSampleSequencer(track, velocity, trackVolume, noteLenSamples);
+    lfoEngine.onPadTrigger(track);  // LFO retrigger on sequencer hit
 }
 
 // Función para triggers manuales desde live pads (web interface)
@@ -180,6 +184,7 @@ void onStepTrigger(int track, uint8_t velocity, uint8_t trackVolume, uint32_t no
 void triggerPadWithLED(int track, uint8_t velocity) {
     Serial.printf("[PAD] trigger pad=%d vel=%d\n", track, velocity);
     spiMaster.triggerSampleLive(track, velocity);
+    lfoEngine.onPadTrigger(track);  // LFO retrigger
     
     // Iluminar LED RGB con color del instrumento (solo pads principales 0-15)
     if (track >= 0 && track < 16) {
@@ -521,6 +526,23 @@ void setup() {
     } else {
         Serial.println("WiFi FAIL - continuing");
     }
+
+    // --- SD EVENT CALLBACK (Daisy → WebSocket) ---
+    spiMaster.setEventCallback([](const NotifyEvent& evt, void* /*ud*/) {
+        StaticJsonDocument<256> doc;
+        doc["type"]     = "sdEvent";
+        doc["event"]    = evt.type;       // EVT_SD_*
+        doc["padCount"] = evt.padCount;
+        doc["maskLo"]   = evt.padMaskLo;
+        doc["maskHi"]   = evt.padMaskHi;
+        doc["maskXtra"] = evt.padMaskXtra;
+        doc["name"]     = String(evt.name);
+        String out;
+        serializeJson(doc, out);
+        webInterface.broadcastRaw(out.c_str());
+        Serial.printf("[SD-EVT] type=%d pads=%d name=%s\n", evt.type, evt.padCount, evt.name);
+    });
+    Serial.println("[SD] Event callback bridge installed");
 
     // --- MIDI USB HOST ---
     Serial.println("\n[STEP 6] Initializing MIDI USB...");

@@ -54,6 +54,9 @@ public:
   void broadcastUploadProgress(int pad, int percent);
   void broadcastUploadComplete(int pad, bool success, const String& message);
   
+  // Generic text broadcast (for event bridge)
+  void broadcastRaw(const char* json);
+  
   String getIP();
   
 private:

@@ -10905,3 +10905,144 @@ body.embed-mode .tab-content.active {
     overflow: auto;
 }
 body.embed-mode .tab-content:not(.active) { display: none !important; }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   DAISY SD CARD — Kit Browser & File Manager
+   ══════════════════════════════════════════════════════════════════════════════ */
+.sd-status-bar {
+    display: flex; align-items: center; gap: 10px;
+    background: #111; border: 1px solid #333; border-radius: 6px;
+    padding: 8px 14px; margin-bottom: 12px; font-size: 0.85rem;
+}
+.sd-indicator { font-size: 0.6rem; transition: color 0.3s; }
+.sd-stats { color: #888; margin-left: auto; }
+.sd-current-kit {
+    display: flex; align-items: center; gap: 10px;
+    background: #0a1a0a; border: 1px solid #0f03; border-radius: 6px;
+    padding: 8px 14px; margin-bottom: 12px;
+}
+.sd-kit-label { color: #888; font-size: 0.75rem; text-transform: uppercase; }
+.sd-kit-name  { color: #0f0; font-weight: bold; font-size: 1rem; }
+.sd-kit-pads  { color: #888; font-size: 0.8rem; }
+.sd-panels {
+    display: grid; grid-template-columns: 200px 1fr 180px;
+    gap: 12px; margin-bottom: 12px;
+}
+@media (max-width: 800px) { .sd-panels { grid-template-columns: 1fr; } }
+.sd-panel {
+    background: #111; border: 1px solid #333; border-radius: 6px;
+    padding: 10px; max-height: 360px; overflow-y: auto;
+}
+.sd-panel-wide { min-width: 0; }
+.sd-panel-title {
+    font-size: 0.8rem; color: #888; text-transform: uppercase;
+    margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 4px;
+}
+.sd-kit-item, .sd-folder-item, .sd-file-item {
+    padding: 6px 8px; border-radius: 4px; cursor: pointer;
+    font-size: 0.85rem; transition: background 0.15s;
+}
+.sd-kit-item:hover, .sd-folder-item:hover { background: #222; }
+.sd-file-item:hover { background: #1a1a2a; }
+.sd-file-item.selected { background: #1a2a1a; border: 1px solid #0f04; }
+.sd-file-item small { color: #666; margin-left: 6px; }
+.sd-icon { margin-right: 4px; }
+.sd-breadcrumb {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 0.8rem; color: #888; margin-bottom: 8px;
+}
+.sd-crumb { cursor: pointer; }
+.sd-crumb:hover { color: #fff; }
+.sd-crumb-root { color: #0f8; }
+.sd-crumb-sep { color: #555; }
+.sd-pad-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
+}
+.sd-pad-btn {
+    background: #222; border: 1px solid #444; color: #ccc;
+    border-radius: 4px; padding: 6px 2px; font-size: 0.7rem;
+    cursor: pointer; text-align: center; transition: all 0.15s;
+}
+.sd-pad-btn:hover { background: #333; border-color: #888; }
+.sd-pad-btn.active { background: #0a2a0a; border-color: #0f0; color: #0f0; }
+.sd-assign-info {
+    margin-top: 8px; font-size: 0.75rem; color: #666; text-align: center;
+}
+.sd-assign-info.ready { color: #0f8; }
+.sd-empty { color: #555; font-size: 0.8rem; text-align: center; padding: 20px; }
+.sd-error { color: #f44; font-size: 0.8rem; text-align: center; padding: 10px; }
+.sd-log {
+    background: #0a0a0a; border: 1px solid #222; border-radius: 4px;
+    padding: 6px 8px; max-height: 120px; overflow-y: auto; font-family: var(--font-mono);
+    font-size: 0.7rem;
+}
+.sd-log-line { color: #888; padding: 1px 0; }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   LFO — Per-Pad Organic Modulation
+   ══════════════════════════════════════════════════════════════════════════════ */
+.lfo-toolbar {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+}
+.lfo-active-count { color: #888; font-size: 0.85rem; }
+.lfo-active-count strong { color: #0ff; }
+.lfo-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px; margin-bottom: 16px;
+}
+@media (max-width: 600px) { .lfo-grid { grid-template-columns: repeat(2, 1fr); } }
+.lfo-card {
+    background: #111; border: 1px solid #333; border-radius: 6px;
+    padding: 8px; transition: all 0.2s;
+    --lfo-color: #0ff;
+}
+.lfo-card.lfo-active {
+    border-color: var(--lfo-color);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--lfo-color) 30%, transparent);
+}
+.lfo-card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px;
+}
+.lfo-toggle-label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.lfo-toggle { accent-color: var(--lfo-color); width: 16px; height: 16px; cursor: pointer; }
+.lfo-pad-name {
+    font-weight: bold; font-size: 0.85rem; color: #ccc;
+}
+.lfo-card.lfo-active .lfo-pad-name { color: var(--lfo-color); }
+.lfo-card-body { display: none; }
+.lfo-card.lfo-active .lfo-card-body { display: block; }
+.lfo-row {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+}
+.lfo-wave-sel, .lfo-div-sel, .lfo-target-sel {
+    background: #1a1a1a; border: 1px solid #444; color: #ccc;
+    border-radius: 3px; padding: 2px 4px; font-size: 0.7rem; flex: 1;
+}
+.lfo-retrig-label {
+    font-size: 0.7rem; color: #888; display: flex; align-items: center; gap: 3px;
+}
+.lfo-retrig { accent-color: var(--lfo-color); }
+.lfo-label { font-size: 0.7rem; color: #888; min-width: 36px; }
+.lfo-depth-slider, .lfo-free-slider {
+    flex: 1; height: 4px; accent-color: var(--lfo-color);
+}
+.lfo-depth-val { font-size: 0.7rem; color: #aaa; min-width: 30px; text-align: right; }
+.lfo-free-row { display: flex; align-items: center; gap: 6px; }
+
+/* LFO Scopes */
+.lfo-scope-section { margin-top: 12px; }
+.lfo-scopes {
+    display: flex; flex-wrap: wrap; gap: 6px;
+}
+.lfo-scope-wrap {
+    display: flex; align-items: center; gap: 4px;
+    background: #0a0a0a; border: 1px solid #333; border-radius: 4px;
+    padding: 2px 6px;
+}
+.lfo-scope-label {
+    font-size: 0.65rem; color: #888; min-width: 20px; text-align: center;
+}
+.lfo-scope-canvas {
+    border-radius: 2px; image-rendering: pixelated;
+}

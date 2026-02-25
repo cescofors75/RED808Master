@@ -1,5 +1,5 @@
 # RED808 — STM32 SPI Slave: Guía completa de implementación
-> Actualizado 24/02/2026 — verificado con logs reales del monitor serie ESP32
+> Actualizado 25/02/2026 — sincronizado con cambios del equipo slave Daisy
 
 ---
 
@@ -1748,36 +1748,42 @@ GND            | GND        |
 #### Estructura de carpetas en la SD
 
 ```
-/RED808/
-  ├── 808 Classic/
-  │   ├── BD.wav
-  │   ├── SD.wav
-  │   ├── CH.wav
-  │   └── ...
-  ├── 808 Karz/
-  │   ├── BD.wav
-  │   ├── SD.wav
-  │   └── ...
-  ├── Lo-Fi Kit/
-  │   ├── kick.wav
-  │   ├── snare.wav
-  │   └── ...
-  └── My Custom Kit/
+/data/
+  ├── RED 808 KARZ/          ← Kit por defecto (LIVE PADS 0-15)
+  │   ├── 808 BD 3-1.wav       Mapeo automático por nombre: BD→pad0, SD→1, etc.
+  │   ├── 808 SD 1-5.wav
+  │   ├── 808 HH.wav
+  │   └── ... (16 wavs)
+  │
+  ├── BD/                     ← Familias de instrumentos (por pad)
+  │   ├── BD0000.WAV            25 variantes de bass drum
+  │   └── BD7575.WAV
+  ├── SD/                     ← 25 variantes snare
+  ├── CH/  OH/  CY/  CP/     ← Más familias
+  ├── RS/  CB/  LT/  MT/
+  ├── HT/  MA/  CL/  HC/
+  ├── MC/  LC/
+  │
+  └── xtra/                   ← XTRA PADS (pads 16-23)
+      ├── Alesis-Fusion-Bass-C3.wav
+      ├── dre-yeah.wav
       └── ...
 ```
+
+> **Actualizado 25/02/2026:** Rutas cambiadas de `/RED808/` a `/data/`. `CMD_SD_KIT_LIST` filtra familias (2 chars) y `xtra`, solo devuelve kits completos.
 
 #### Flujo de operación
 
 ```
 ESP32                         Daisy (SD + SDRAM)
   │                              │
-  ├─ CMD_SD_KIT_LIST ──────────►│  Escanear /RED808/
-  │◄─ SdKitListResponse ────────┤  ["808 Classic", "808 Karz", "Lo-Fi Kit"]
+  ├─ CMD_SD_KIT_LIST ──────────►│  Escanear /data/ (solo kits completos)
+  │◄─ SdKitListResponse ────────┤  ["RED 808 KARZ", ...]
   │                              │
   │  (Usuario selecciona kit     │
   │   desde la web interface)    │
   │                              │
-  ├─ CMD_SD_LIST_FILES ─────────►│  Listar /RED808/808 Classic/*.wav
+  ├─ CMD_SD_LIST_FILES ─────────►│  Listar /data/RED 808 KARZ/*.wav
   │◄─ SdFileListResponse ───────┤  [{BD.wav, 26KB}, {SD.wav, 18KB}, ...]
   │                              │
   ├─ CMD_SD_LOAD_KIT ───────────►│  Cargar todos los WAVs → SDRAM
@@ -1807,8 +1813,8 @@ ESP32                         Daisy (SD + SDRAM)
 |-------|---------------------|----------------------------------|--------------------------------|
 | 0xB0  | SD_LIST_FOLDERS     | —                                | `SdFolderListResponse` (516B)  |
 | 0xB1  | SD_LIST_FILES       | `SdListFilesPayload` (32B)       | `SdFileListResponse` (676B)    |
-| 0xB2  | SD_FILE_INFO        | `SdFileInfoPayload` (68B)        | `SdFileInfoResponse` (44B)     |
-| 0xB3  | SD_LOAD_SAMPLE      | `SdLoadSamplePayload` (68B)      | —                              |
+| 0xB2  | SD_FILE_INFO        | `SdFileInfoPayload` (68B)        | `SdFileInfoResponse` (16B)     |
+| 0xB3  | SD_LOAD_SAMPLE      | `SdLoadSamplePayload` (65B)      | — (emits EVT_SD_SAMPLE_LOADED) |
 | 0xB4  | SD_LOAD_KIT         | `SdLoadKitPayload` (36B)         | —                              |
 | 0xB5  | SD_KIT_LIST         | —                                | `SdKitListResponse` (516B)     |
 | 0xB6  | SD_STATUS           | —                                | `SdStatusResponse` (44B)       |
@@ -1845,9 +1851,12 @@ case CMD_SD_KIT_LIST: {
     SdKitListResponse resp = {};
     DIR dir;
     FILINFO fno;
-    if (f_opendir(&dir, "/RED808") == FR_OK) {
+    if (f_opendir(&dir, "/data") == FR_OK) {
         while (f_readdir(&dir, &fno) == FR_OK && fno.fname[0] != 0) {
             if ((fno.fattrib & AM_DIR) && resp.count < 16) {
+                // Filtrar familias (2 chars) y xtra
+                size_t nameLen = strlen(fno.fname);
+                if (nameLen <= 2 || strcmp(fno.fname, "xtra") == 0) continue;
                 strncpy(resp.kits[resp.count], fno.fname, 31);
                 resp.count++;
             }
@@ -1863,7 +1872,7 @@ case CMD_SD_LOAD_KIT: {
         SdLoadKitPayload lk;
         memcpy(&lk, p, sizeof(lk));
         char path[64];
-        snprintf(path, sizeof(path), "/RED808/%s", lk.kitName);
+        snprintf(path, sizeof(path), "/data/%s", lk.kitName);
         DIR dir; FILINFO fno;
         uint8_t padIdx = lk.startPad;
         if (f_opendir(&dir, path) == FR_OK) {
@@ -2237,13 +2246,13 @@ float scGain = 1.0f - (sidechainActive ? sidechainEnv.Process(scGate) * scAmount
 
 | CMD | Valor | Estado | Descripción |
 |-----|-------|--------|-------------|
-| CMD_SD_LIST_FOLDERS  | 0xB0 | 🟡 nuevo | Listar carpetas de kits en `/RED808/` |
-| CMD_SD_LIST_FILES    | 0xB1 | 🟡 nuevo | Listar WAVs en una carpeta |
-| CMD_SD_FILE_INFO     | 0xB2 | 🟡 nuevo | Info de un WAV (SR, bits, duración) |
-| CMD_SD_LOAD_SAMPLE   | 0xB3 | 🟡 nuevo | Cargar WAV → pad slot en SDRAM |
-| CMD_SD_LOAD_KIT      | 0xB4 | 🟡 nuevo | Cargar kit completo SD → SDRAM |
-| CMD_SD_KIT_LIST      | 0xB5 | 🟡 nuevo | Lista nombres de kits disponibles |
-| CMD_SD_STATUS        | 0xB6 | 🟡 nuevo | Estado SD (presente, espacio, kit cargado) |
+| CMD_SD_LIST_FOLDERS  | 0xB0 | � implementado | Listar carpetas en `/data/` |
+| CMD_SD_LIST_FILES    | 0xB1 | 🟢 implementado | Listar WAVs en una carpeta |
+| CMD_SD_FILE_INFO     | 0xB2 | 🟢 implementado | Info de un WAV (SR, bits, duración) |
+| CMD_SD_LOAD_SAMPLE   | 0xB3 | 🟢 implementado | Cargar WAV → pad slot en SDRAM |
+| CMD_SD_LOAD_KIT      | 0xB4 | 🟢 implementado | Cargar kit completo SD → SDRAM |
+| CMD_SD_KIT_LIST      | 0xB5 | 🟢 implementado | Lista nombres de kits (filtra familias) |
+| CMD_SD_STATUS        | 0xB6 | 🟢 implementado | Estado SD (presente, espacio, kit cargado) |
 | CMD_SD_UNLOAD_KIT    | 0xB7 | 🟡 nuevo | Descargar kit de SDRAM |
 | CMD_SD_GET_LOADED    | 0xB8 | 🟡 nuevo | Qué kit está cargado ahora |
 | CMD_SD_ABORT         | 0xB9 | 🟡 nuevo | Cancelar carga en progreso |
@@ -2252,11 +2261,11 @@ float scGain = 1.0f - (sidechainActive ? sidechainEnv.Process(scGate) * scAmount
 
 ---
 
-### 16.10 STATUS QUERIES (0xE0–0xE3) — sólo las básicas implementadas
+### 16.10 STATUS QUERIES (0xE0–0xE4) — actualizado con eventos
 
 | CMD | Valor | Estado | |
 |-----|-------|--------|-|
-| CMD_GET_STATUS  | 0xE0 | � implementado | `StatusResponse` — voces, CPU%, uptime |
+| CMD_GET_STATUS  | 0xE0 | 🟢 implementado | `StatusResponse` V2 — 54 bytes (voces, CPU%, kit, SD, events) |
 | CMD_GET_PEAKS   | 0xE1 | 🟢 implementado | trackPeaks[16] + masterPeak |
 | CMD_GET_CPU_LOAD| 0xE2 | 🟢 implementado | `seed.system.GetCpuLoad()` |
 | CMD_GET_VOICES  | 0xE3 | 🟢 implementado | contar `voices[v].active` |

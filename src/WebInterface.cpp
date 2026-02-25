@@ -8,6 +8,7 @@
 #include "Sequencer.h"
 #include "KitManager.h"
 #include "SampleManager.h"
+#include "LFOEngine.h"
 #include <esp_wifi.h>
 
 // Timeout para clientes UDP (30 segundos sin actividad)
@@ -17,6 +18,7 @@ extern SPIMaster spiMaster;
 extern Sequencer sequencer;
 extern KitManager kitManager;
 extern SampleManager sampleManager;
+extern LFOEngine lfoEngine;
 extern void triggerPadWithLED(int track, uint8_t velocity);  // Función que enciende LED
 extern void setLedMonoMode(bool enabled);
 
@@ -118,6 +120,18 @@ static void populateStateDocument(DynamicJsonDocument& doc) {
     FilterType filterType = spiMaster.getTrackFilter(track);
     trackFilters.add((int)filterType);
   }
+  
+  // Daisy SD card info (from cached status)
+  doc["sdPresent"] = spiMaster.hasSdCard();
+  doc["sdKit"] = spiMaster.getCurrentKitName();
+  doc["sdPadsLoaded"] = spiMaster.getTotalPadsLoaded();
+  
+  // LFO active count
+  int lfoCount = 0;
+  for (int i = 0; i < 24; i++) {
+    if (lfoEngine.isActive(i)) lfoCount++;
+  }
+  doc["lfoActive"] = lfoCount;
 }
 
 static bool isClientReady(AsyncWebSocketClient* client) {
@@ -1544,6 +1558,29 @@ void WebInterface::update() {
     }
   }
   
+  // Broadcast LFO scope data every 50ms (20fps) — binary protocol
+  static unsigned long lastLfoScope = 0;
+  if (now - lastLfoScope >= 50 && ws->count() > 0) {
+    lastLfoScope = now;
+    LfoScopeData scope;
+    lfoEngine.getScopeData(scope);
+    // Only send if at least one LFO is active
+    if (scope.activeMask[0] || scope.activeMask[1] || scope.activeMask[2]) {
+      // Binary protocol: [0xBB][mask0][mask1][mask2][24 × int8 value] = 28 bytes
+      uint8_t lfoBuf[28];
+      lfoBuf[0] = 0xBB;  // Magic byte: LFO scope
+      lfoBuf[1] = scope.activeMask[0];
+      lfoBuf[2] = scope.activeMask[1];
+      lfoBuf[3] = scope.activeMask[2];
+      for (int i = 0; i < 24; i++) {
+        // Convert -1..+1 float to -127..+127 int8
+        int8_t v = (int8_t)(scope.values[i] * 127.0f);
+        lfoBuf[4 + i] = (uint8_t)v;
+      }
+      ws->binaryAll(lfoBuf, 28);
+    }
+  }
+  
   // Limpiar WebSocket clients desconectados cada 2 segundos
   static unsigned long lastWsCleanup = 0;
   if (now - lastWsCleanup > 2000) {
@@ -2932,6 +2969,218 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       if (ws) ws->textAll(output);
     }
   }
+  // ══════════════════════════════════════════════════════
+  // DAISY SD CARD COMMANDS
+  // ══════════════════════════════════════════════════════
+  else if (cmd == "sdListKits") {
+    SdKitListResponse kitList;
+    if (spiMaster.sdGetKitList(kitList)) {
+      DynamicJsonDocument resp(2048);
+      resp["type"] = "sdKitList";
+      JsonArray kits = resp.createNestedArray("kits");
+      for (int i = 0; i < kitList.count && i < 16; i++) {
+        kits.add(String(kitList.kits[i]));
+      }
+      String output;
+      serializeJson(resp, output);
+      if (ws) ws->textAll(output);
+    } else {
+      StaticJsonDocument<128> resp;
+      resp["type"] = "sdKitList";
+      resp["error"] = "SPI timeout";
+      String output;
+      serializeJson(resp, output);
+      if (ws) ws->textAll(output);
+    }
+  }
+  else if (cmd == "sdLoadKit") {
+    const char* kit = doc["kit"];
+    if (kit) {
+      uint8_t startPad = doc.containsKey("startPad") ? doc["startPad"].as<uint8_t>() : 0;
+      uint8_t maxPads  = doc.containsKey("maxPads")  ? doc["maxPads"].as<uint8_t>()  : 16;
+      bool ok = spiMaster.sdLoadKit(kit, startPad, maxPads);
+      StaticJsonDocument<192> resp;
+      resp["type"] = "sdLoadKitAck";
+      resp["kit"] = kit;
+      resp["ok"] = ok;
+      String output;
+      serializeJson(resp, output);
+      if (ws) ws->textAll(output);
+      Serial.printf("[SD] Load kit '%s' → %s\n", kit, ok ? "sent" : "FAIL");
+    }
+  }
+  else if (cmd == "sdUnloadKit") {
+    spiMaster.sdUnloadKit();
+    StaticJsonDocument<64> resp;
+    resp["type"] = "sdUnloadKitAck";
+    resp["ok"] = true;
+    String output;
+    serializeJson(resp, output);
+    if (ws) ws->textAll(output);
+  }
+  else if (cmd == "sdLoadSample") {
+    int pad = doc["pad"];
+    const char* folder = doc["folder"];
+    const char* file   = doc["file"];
+    if (folder && file && pad >= 0 && pad < 24) {
+      bool ok = spiMaster.sdLoadSample(pad, folder, file);
+      StaticJsonDocument<192> resp;
+      resp["type"] = "sdLoadSampleAck";
+      resp["pad"]  = pad;
+      resp["file"] = file;
+      resp["ok"]   = ok;
+      String output;
+      serializeJson(resp, output);
+      if (ws) ws->textAll(output);
+    }
+  }
+  else if (cmd == "sdListFolders") {
+    SdFolderListResponse folders;
+    if (spiMaster.sdListFolders(folders)) {
+      DynamicJsonDocument resp(2048);
+      resp["type"] = "sdFolderList";
+      JsonArray arr = resp.createNestedArray("folders");
+      for (int i = 0; i < folders.count && i < 16; i++) {
+        arr.add(String(folders.names[i]));
+      }
+      String output;
+      serializeJson(resp, output);
+      if (ws) ws->textAll(output);
+    }
+  }
+  else if (cmd == "sdListFiles") {
+    const char* folder = doc["folder"];
+    if (folder) {
+      SdFileListResponse files;
+      if (spiMaster.sdListFiles(folder, files)) {
+        DynamicJsonDocument resp(4096);
+        resp["type"] = "sdFileList";
+        resp["folder"] = folder;
+        JsonArray arr = resp.createNestedArray("files");
+        for (int i = 0; i < files.count && i < 24; i++) {
+          JsonObject f = arr.createNestedObject();
+          f["name"] = String(files.files[i].name);
+          f["size"] = files.files[i].sizeBytes;
+        }
+        String output;
+        serializeJson(resp, output);
+        if (ws) ws->textAll(output);
+      }
+    }
+  }
+  else if (cmd == "sdGetStatus") {
+    SdStatusResponse sdStat;
+    if (spiMaster.sdGetStatus(sdStat)) {
+      StaticJsonDocument<256> resp;
+      resp["type"]      = "sdStatus";
+      resp["present"]   = (bool)sdStat.present;
+      resp["totalMB"]   = sdStat.totalMB;
+      resp["freeMB"]    = sdStat.freeMB;
+      resp["loaded"]    = sdStat.samplesLoaded;
+      resp["kit"]       = String(sdStat.currentKit);
+      String output;
+      serializeJson(resp, output);
+      if (ws) ws->textAll(output);
+    }
+  }
+  else if (cmd == "sdAbort") {
+    spiMaster.sdAbortLoad();
+    StaticJsonDocument<64> resp;
+    resp["type"] = "sdAbortAck";
+    resp["ok"]   = true;
+    String output;
+    serializeJson(resp, output);
+    if (ws) ws->textAll(output);
+  }
+  // ══════════════════════════════════════════════════════
+  // PER-PAD LFO COMMANDS
+  // ══════════════════════════════════════════════════════
+  else if (cmd == "lfoSetActive") {
+    int pad = doc["pad"];
+    bool on = doc["active"];
+    if (pad >= 0 && pad < 24) {
+      lfoEngine.setActive(pad, on);
+      Serial.printf("[LFO] Pad %d %s\n", pad, on ? "ON" : "OFF");
+    }
+  }
+  else if (cmd == "lfoSetWave") {
+    int pad = doc["pad"];
+    int wave = doc["wave"];  // 0=sin 1=tri 2=sq 3=saw 4=s&h
+    if (pad >= 0 && pad < 24 && wave >= 0 && wave <= 4) {
+      lfoEngine.setWaveform(pad, (LfoWaveform)wave);
+    }
+  }
+  else if (cmd == "lfoSetRate") {
+    int pad = doc["pad"];
+    int div = doc["division"];  // 0=1/4 1=1/8 2=1/16 3=1/32 4=free
+    if (pad >= 0 && pad < 24 && div >= 0 && div <= 4) {
+      lfoEngine.setDivision(pad, (LfoDivision)div);
+    }
+  }
+  else if (cmd == "lfoSetDepth") {
+    int pad = doc["pad"];
+    int depth = doc["depth"];  // 0-100
+    if (pad >= 0 && pad < 24) {
+      lfoEngine.setDepth(pad, depth);
+    }
+  }
+  else if (cmd == "lfoSetTarget") {
+    int pad = doc["pad"];
+    int tgt = doc["target"];  // 0=pitch 1=decay 2=filter 3=pan 4=vol
+    if (pad >= 0 && pad < 24 && tgt >= 0 && tgt <= 4) {
+      lfoEngine.setTarget(pad, (LfoTarget)tgt);
+    }
+  }
+  else if (cmd == "lfoSetFreeHz") {
+    int pad = doc["pad"];
+    float hz = doc["hz"];  // 0.1-20.0
+    if (pad >= 0 && pad < 24) {
+      lfoEngine.setFreeHz(pad, hz);
+    }
+  }
+  else if (cmd == "lfoSetPhase") {
+    int pad = doc["pad"];
+    int phase = doc["phase"];  // 0-255
+    if (pad >= 0 && pad < 24) {
+      lfoEngine.setPhaseOffset(pad, phase);
+    }
+  }
+  else if (cmd == "lfoSetRetrigger") {
+    int pad = doc["pad"];
+    bool on = doc["retrigger"];
+    if (pad >= 0 && pad < 24) {
+      lfoEngine.setRetrigger(pad, on);
+    }
+  }
+  else if (cmd == "lfoGetState") {
+    // Send full LFO state for all pads to requesting client
+    DynamicJsonDocument resp(4096);
+    resp["type"] = "lfoState";
+    JsonArray pads = resp.createNestedArray("pads");
+    for (int i = 0; i < 24; i++) {
+      const PadLFO& lfo = lfoEngine.getPadLFO(i);
+      JsonObject p = pads.createNestedObject();
+      p["active"]   = lfo.active;
+      p["wave"]     = (int)lfo.waveform;
+      p["div"]      = (int)lfo.division;
+      p["target"]   = (int)lfo.target;
+      p["depth"]    = lfo.depth;
+      p["freeHz"]   = lfo.freeHz;
+      p["retrig"]   = lfo.retrigger;
+      p["phase"]    = lfo.startPhase;
+    }
+    String output;
+    serializeJson(resp, output);
+    if (ws) ws->textAll(output);
+  }
+  else if (cmd == "lfoReset") {
+    lfoEngine.resetAll();
+    StaticJsonDocument<64> resp;
+    resp["type"] = "lfoResetAck";
+    String output;
+    serializeJson(resp, output);
+    if (ws) ws->textAll(output);
+  }
 }
 
 // Actualizar o registrar cliente UDP
@@ -3362,5 +3611,10 @@ void WebInterface::broadcastUploadComplete(int pad, bool success, const String& 
   String output;
   serializeJson(doc, output);
   ws->textAll(output);
+}
+
+void WebInterface::broadcastRaw(const char* json) {
+  if (!initialized || !ws) return;
+  ws->textAll(json);
 }
 

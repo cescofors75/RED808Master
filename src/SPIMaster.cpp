@@ -91,10 +91,21 @@ static const char* spiCmdName(uint8_t cmd) {
         case 0xA2: return "SMPL_END";
         case 0xA3: return "SMPL_UNL";
         case 0xA4: return "SMPL_UNA";
+        case 0xB0: return "SD_DIRS";
+        case 0xB1: return "SD_FILES";
+        case 0xB2: return "SD_INFO";
+        case 0xB3: return "SD_LOAD";
+        case 0xB4: return "SD_LKIT";
+        case 0xB5: return "SD_KLIST";
+        case 0xB6: return "SD_STAT";
+        case 0xB7: return "SD_UKIT";
+        case 0xB8: return "SD_GLOAD";
+        case 0xB9: return "SD_ABORT";
         case 0xE0: return "GET_STAT";
         case 0xE1: return "GET_PEAK";
         case 0xE2: return "GET_CPU";
         case 0xE3: return "GET_VOIC";
+        case 0xE4: return "GET_EVTS";
         case 0xEE: return "PING";
         case 0xEF: return "RESET";
         case 0xF0: return "BULK_TRG";
@@ -182,6 +193,9 @@ SPIMaster::SPIMaster() : spi(nullptr), seqNumber(0), spiErrorCount(0), stm32Conn
     
     cachedMasterPeak = 0.0f;
     lastPeakRequest = 0;
+    lastStatusPoll = 0;
+    eventCallback = nullptr;
+    eventUserData = nullptr;
     
     memset(txBuffer, 0, sizeof(txBuffer));
     memset(rxBuffer, 0, sizeof(rxBuffer));
@@ -412,6 +426,17 @@ void SPIMaster::process() {
     if (millis() - lastPeakRequest > 50) {
         requestPeaks();
         lastPeakRequest = millis();
+    }
+    
+    // Poll status every 500ms (includes evtCount check)
+    if (millis() - lastStatusPoll > 500) {
+        requestStatus();
+        lastStatusPoll = millis();
+        
+        // Auto-drain events if any pending
+        if (cachedStatus.evtCount > 0) {
+            drainEvents();
+        }
     }
     
     // Retry connection if not connected
@@ -1253,9 +1278,9 @@ bool SPIMaster::sdGetFileInfo(const char* folder, const char* file, SdFileInfoRe
 
 bool SPIMaster::sdLoadSample(int padIndex, const char* folder, const char* file) {
     SdLoadSamplePayload p = {};
-    p.padIndex = (uint8_t)padIndex;
     strncpy(p.folderName, folder, sizeof(p.folderName) - 1);
     strncpy(p.fileName, file, sizeof(p.fileName) - 1);
+    p.padIndex = (uint8_t)padIndex;
     return sendCommand(CMD_SD_LOAD_SAMPLE, &p, sizeof(p));
 }
 
@@ -1527,6 +1552,11 @@ bool SPIMaster::requestStatus() {
     StatusResponse resp = {};
     if (sendAndReceive(CMD_GET_STATUS, nullptr, 0, &resp, sizeof(resp))) {
         cachedStatus = resp;
+        if (SPI_DEBUG_ENABLED) {
+            Serial.printf("[SPI] Status: voices=%d cpu=%d%% kit='%s' pads=%d sd=%d evt=%d\n",
+                resp.activeVoices, resp.cpuLoadPercent, resp.currentKitName,
+                resp.totalPadsLoaded, resp.sdPresent, resp.evtCount);
+        }
         return true;
     }
     return false;
@@ -1535,6 +1565,53 @@ bool SPIMaster::requestStatus() {
 bool SPIMaster::getStatusSnapshot(StatusResponse& out) {
     out = cachedStatus;
     return stm32Connected;
+}
+
+bool SPIMaster::requestEvents(EventsResponse& out) {
+    if (!stm32Connected) return false;
+    memset(&out, 0, sizeof(out));
+    return sendAndReceive(CMD_GET_EVENTS, nullptr, 0, &out, sizeof(out));
+}
+
+bool SPIMaster::drainEvents() {
+    if (!stm32Connected) return false;
+    uint8_t remaining = cachedStatus.evtCount;
+    int totalDrained = 0;
+    
+    while (remaining > 0) {
+        EventsResponse evtResp = {};
+        if (!requestEvents(evtResp)) break;
+        if (evtResp.count == 0) break;
+        
+        for (int i = 0; i < evtResp.count; i++) {
+            const NotifyEvent& evt = evtResp.events[i];
+            totalDrained++;
+            
+            // Log the event
+            const char* evtName = "???";
+            switch (evt.type) {
+                case EVT_SD_BOOT_DONE:     evtName = "BOOT_DONE"; break;
+                case EVT_SD_KIT_LOADED:    evtName = "KIT_LOADED"; break;
+                case EVT_SD_SAMPLE_LOADED: evtName = "SAMPLE_LOADED"; break;
+                case EVT_SD_KIT_UNLOADED:  evtName = "KIT_UNLOADED"; break;
+                case EVT_SD_ERROR:         evtName = "SD_ERROR"; break;
+                case EVT_SD_XTRA_LOADED:   evtName = "XTRA_LOADED"; break;
+            }
+            Serial.printf("[SPI EVT] %s: pads=%d name='%s'\n", evtName, evt.padCount, evt.name);
+            
+            // Fire callback if registered
+            if (eventCallback) {
+                eventCallback(evt, eventUserData);
+            }
+        }
+        
+        remaining -= evtResp.count;
+    }
+    
+    if (totalDrained > 0) {
+        Serial.printf("[SPI] Drained %d events\n", totalDrained);
+    }
+    return totalDrained > 0;
 }
 
 

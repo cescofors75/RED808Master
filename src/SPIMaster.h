@@ -293,12 +293,31 @@ public:
     bool requestPeaks();               // Request peaks from slave (updates cache)
     bool requestActiveVoices();        // Request active voice count from slave
     bool requestCpuLoad();             // Request CPU % from slave
-    bool requestStatus();              // Request full StatusResponse from slave
+    bool requestStatus();              // Request full StatusResponse (54 bytes) from slave
     int getActiveVoices();             // Returns cached value
     float getCpuLoad();                // Returns cached value
     bool getStatusSnapshot(StatusResponse& out); // Fills struct with latest cached status
     bool ping(uint32_t& roundtripUs);
     void resetDSP();
+
+    // ══════════════════════════════════════════════════
+    // EVENT SYSTEM (Daisy notifications)
+    // ══════════════════════════════════════════════════
+    bool requestEvents(EventsResponse& out);    // Poll CMD_GET_EVENTS (0xE4)
+    bool drainEvents();                          // Auto-drain all pending events
+    uint8_t getPendingEventCount() const { return cachedStatus.evtCount; }
+    bool hasSdCard() const { return cachedStatus.sdPresent != 0; }
+    const char* getCurrentKitName() const { return cachedStatus.currentKitName; }
+    uint8_t getTotalPadsLoaded() const { return cachedStatus.totalPadsLoaded; }
+    uint16_t getPadsLoadedMask() const { return cachedStatus.padsLoadedMask; }
+    uint8_t getXtraPadsMask() const { return cachedStatus.xtraPadsMask; }
+
+    // Event callback (optional — set to receive events as they arrive)
+    typedef void (*EventCallback)(const NotifyEvent& event, void* userData);
+    void setEventCallback(EventCallback cb, void* userData = nullptr) {
+        eventCallback = cb;
+        eventUserData = userData;
+    }
     
     // ══════════════════════════════════════════════════
     // FILTER PRESETS (static, for UI)
@@ -344,7 +363,7 @@ private:
     float cachedWaveFolderGain;
     bool  cachedLimiterActive;
 
-    // Status cache
+    // Status cache (54 bytes V2)
     StatusResponse cachedStatus;
     
     // Per-track/pad cached filter state
@@ -369,6 +388,11 @@ private:
     // Pad loop cached state
     bool cachedPadLoop[MAX_PADS];
     
+    // Event callback
+    EventCallback eventCallback;
+    void* eventUserData;
+    uint32_t lastStatusPoll;
+
     // Peak levels (updated by requestPeaks)
     float cachedTrackPeaks[MAX_AUDIO_TRACKS];
     float cachedMasterPeak;

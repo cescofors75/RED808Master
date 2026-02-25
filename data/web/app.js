@@ -178,8 +178,13 @@ function initWebSocket() {
     
     ws.binaryType = 'arraybuffer';  // Enable binary messages for audio levels
     ws.onmessage = (event) => {
-        // Handle binary audio level data (0xAA header)
+        // Handle binary audio level data (0xAA header) and LFO scope (0xBB)
         if (event.data instanceof ArrayBuffer) {
+            const v = new Uint8Array(event.data);
+            if (v.length >= 28 && v[0] === 0xBB) {
+                handleLfoScopeBinary(v);
+                return;
+            }
             if (typeof handleWaveformBinaryMessage === 'function') {
                 handleWaveformBinaryMessage(event);
             }
@@ -471,6 +476,44 @@ function handleWebSocketMessage(data) {
             if (typeof window._handleXtraSampleList === 'function') {
                 window._handleXtraSampleList(data);
             }
+            break;
+
+        // ═══ Daisy SD Card messages ═══
+        case 'sdKitList':
+            sdRenderKitList(data.kits || [], data.error);
+            break;
+        case 'sdFolderList':
+            sdRenderFolders(data.folders || []);
+            break;
+        case 'sdFileList':
+            sdRenderFiles(data.folder, data.files || []);
+            break;
+        case 'sdStatus':
+            sdRenderStatus(data);
+            break;
+        case 'sdLoadKitAck':
+            sdLog(`Kit "${data.kit}" ${data.ok ? 'loading...' : 'FAILED'}`);
+            break;
+        case 'sdLoadSampleAck':
+            sdLog(`Pad ${data.pad} ← ${data.file} ${data.ok ? '✓' : '✗'}`);
+            break;
+        case 'sdUnloadKitAck':
+            sdLog('Kit unloaded');
+            sdRefreshStatus();
+            break;
+        case 'sdAbortAck':
+            sdLog('Load aborted');
+            break;
+        case 'sdEvent':
+            sdHandleEvent(data);
+            break;
+
+        // ═══ LFO messages ═══
+        case 'lfoState':
+            lfoHandleFullState(data.pads || []);
+            break;
+        case 'lfoResetAck':
+            lfoHandleReset();
             break;
     }
     
@@ -6579,4 +6622,419 @@ function _setupWaveformMarkers(modal, canvas, state) {
         });
     });
 })();
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  DAISY SD CARD — Kit Browser & File Manager
+// ══════════════════════════════════════════════════════════════════════════════
+let _sdSelectedFile = null;   // {folder, file}
+let _sdSelectedPad  = -1;
+
+function sdRefreshStatus() {
+    sendWebSocket({cmd: 'sdGetStatus'});
+    sendWebSocket({cmd: 'sdListKits'});
+}
+
+function sdListFolders() {
+    sendWebSocket({cmd: 'sdListFolders'});
+    const bc = document.getElementById('sdBreadcrumb');
+    if (bc) bc.innerHTML = '<span class="sd-crumb sd-crumb-root" onclick="sdListFolders()">/ root</span>';
+    _sdSelectedFile = null;
+    sdUpdateAssignInfo();
+}
+
+function sdListFiles(folder) {
+    sendWebSocket({cmd: 'sdListFiles', folder});
+    const bc = document.getElementById('sdBreadcrumb');
+    if (bc) bc.innerHTML = `<span class="sd-crumb sd-crumb-root" onclick="sdListFolders()">/ root</span> <span class="sd-crumb-sep">›</span> <span class="sd-crumb">${folder}</span>`;
+    _sdSelectedFile = null;
+    sdUpdateAssignInfo();
+}
+
+function sdLoadKit(kitName) {
+    sendWebSocket({cmd: 'sdLoadKit', kit: kitName});
+    sdLog(`Loading kit: ${kitName}...`);
+}
+
+function sdUnloadKit() {
+    sendWebSocket({cmd: 'sdUnloadKit'});
+}
+
+function sdAssignFile(pad) {
+    if (!_sdSelectedFile) return;
+    sendWebSocket({cmd: 'sdLoadSample', pad, folder: _sdSelectedFile.folder, file: _sdSelectedFile.file});
+    sdLog(`Loading "${_sdSelectedFile.file}" → pad ${pad}...`);
+}
+
+function sdRenderStatus(d) {
+    const ind = document.getElementById('sdIndicator');
+    const txt = document.getElementById('sdStatusText');
+    const stats = document.getElementById('sdStats');
+    const kitSec = document.getElementById('sdCurrentKit');
+    if (ind) ind.style.color = d.present ? '#0f0' : '#f00';
+    if (txt) txt.textContent = d.present ? 'SD Card OK' : 'No SD Card';
+    if (stats && d.present) stats.textContent = `${d.freeMB}/${d.totalMB} MB free`;
+    if (kitSec) {
+        const hasKit = d.kit && d.kit.length > 0;
+        kitSec.style.display = hasKit ? 'flex' : 'none';
+        if (hasKit) {
+            const kn = document.getElementById('sdKitName');
+            const kp = document.getElementById('sdKitPads');
+            if (kn) kn.textContent = d.kit;
+            if (kp) kp.textContent = `(${d.loaded} pads)`;
+        }
+    }
+}
+
+function sdRenderKitList(kits, error) {
+    const el = document.getElementById('sdKitList');
+    if (!el) return;
+    if (error) { el.innerHTML = `<div class="sd-error">${error}</div>`; return; }
+    if (!kits.length) { el.innerHTML = '<div class="sd-empty">No kits found</div>'; return; }
+    el.innerHTML = kits.map(k => `<div class="sd-kit-item" onclick="sdLoadKit('${k}')" title="Click to load"><span class="sd-kit-icon">📁</span> ${k}</div>`).join('');
+}
+
+function sdRenderFolders(folders) {
+    const el = document.getElementById('sdFileList');
+    if (!el) return;
+    if (!folders.length) { el.innerHTML = '<div class="sd-empty">Empty</div>'; return; }
+    el.innerHTML = folders.map(f => `<div class="sd-folder-item" onclick="sdListFiles('${f}')"><span class="sd-icon">📂</span> ${f}</div>`).join('');
+}
+
+function sdRenderFiles(folder, files) {
+    const el = document.getElementById('sdFileList');
+    if (!el) return;
+    if (!files.length) { el.innerHTML = '<div class="sd-empty">No files</div>'; return; }
+    el.innerHTML = files.map(f => {
+        const sizeKB = (f.size / 1024).toFixed(1);
+        return `<div class="sd-file-item" onclick="sdSelectFile('${folder}','${f.name}',this)" title="${sizeKB} KB"><span class="sd-icon">🔊</span> ${f.name} <small>${sizeKB}K</small></div>`;
+    }).join('');
+}
+
+function sdSelectFile(folder, file, el) {
+    document.querySelectorAll('.sd-file-item.selected').forEach(e => e.classList.remove('selected'));
+    if (el) el.classList.add('selected');
+    _sdSelectedFile = {folder, file};
+    sdUpdateAssignInfo();
+}
+
+function sdUpdateAssignInfo() {
+    const el = document.getElementById('sdAssignInfo');
+    if (!el) return;
+    if (_sdSelectedFile) {
+        el.textContent = `"${_sdSelectedFile.file}" → click a pad to assign`;
+        el.classList.add('ready');
+    } else {
+        el.textContent = 'Select a file, then click a pad';
+        el.classList.remove('ready');
+    }
+}
+
+function sdHandleEvent(data) {
+    // Events from Daisy: load progress, completion, errors
+    const evtNames = {1: 'Kit loaded', 2: 'Load error', 3: 'Kit unloaded', 4: 'Sample loaded', 5: 'Boot loaded', 6: 'XTRA loaded'};
+    const name = evtNames[data.event] || `Event ${data.event}`;
+    const extra = data.name ? ` "${data.name}"` : '';
+    sdLog(`${name}${extra} (${data.padCount} pads)`);
+    if (data.event === 1 || data.event === 3 || data.event === 4) sdRefreshStatus();
+}
+
+function sdLog(msg) {
+    const el = document.getElementById('sdLog');
+    if (!el) return;
+    const line = document.createElement('div');
+    line.className = 'sd-log-line';
+    line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    el.prepend(line);
+    while (el.children.length > 20) el.removeChild(el.lastChild);
+}
+
+// Build pad assignment grid
+(function initSdPadGrid() {
+    const grid = document.getElementById('sdPadGrid');
+    if (!grid) return;
+    const names = ['BD','SD','CH','OH','CY','CP','RS','CB','LT','MT','HT','MA','CL','HC','MC','LC'];
+    for (let i = 0; i < 16; i++) {
+        const btn = document.createElement('button');
+        btn.className = 'sd-pad-btn';
+        btn.textContent = names[i] || i;
+        btn.dataset.pad = i;
+        btn.onclick = () => {
+            _sdSelectedPad = i;
+            document.querySelectorAll('.sd-pad-btn.active').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            sdAssignFile(i);
+        };
+        grid.appendChild(btn);
+    }
+})();
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  LFO ENGINE — Per-Pad Organic Modulation
+// ══════════════════════════════════════════════════════════════════════════════
+const LFO_WAVES   = ['Sine','Triangle','Square','Saw','S&H'];
+const LFO_DIVS    = ['1/4','1/8','1/16','1/32','Free'];
+const LFO_TARGETS = ['Pitch','Decay','Filter','Pan','Volume'];
+const LFO_COLORS  = [ // Per-pad colors for scope visualization
+    '#f44','#f80','#ff0','#8f0','#0f8','#0ff','#08f','#80f',
+    '#f0f','#f48','#fa0','#cf0','#0fa','#0cf','#40f','#c0f',
+    '#f66','#f96','#ff6','#9f6','#6f9','#6ff','#69f','#96f'
+];
+
+let lfoState = new Array(24).fill(null).map(() => ({
+    active: false, wave: 0, div: 0, target: 0, depth: 50, freeHz: 2.0, retrig: false, phase: 0
+}));
+let lfoScopeData = new Float32Array(24); // -1..+1 current values
+let lfoActiveMask = 0;   // 24-bit mask
+
+function lfoSend(pad, cmd, extra) {
+    sendWebSocket(Object.assign({cmd, pad}, extra));
+}
+
+function lfoSetActive(pad, on) {
+    lfoState[pad].active = on;
+    lfoSend(pad, 'lfoSetActive', {active: on});
+    lfoUpdateCard(pad);
+    lfoUpdateActiveCount();
+}
+
+function lfoSetWave(pad, w) {
+    lfoState[pad].wave = w;
+    lfoSend(pad, 'lfoSetWave', {wave: w});
+    lfoUpdateCard(pad);
+}
+
+function lfoSetRate(pad, d) {
+    lfoState[pad].div = d;
+    lfoSend(pad, 'lfoSetRate', {division: d});
+    lfoUpdateCard(pad);
+}
+
+function lfoSetDepth(pad, v) {
+    lfoState[pad].depth = v;
+    lfoSend(pad, 'lfoSetDepth', {depth: v});
+}
+
+function lfoSetTarget(pad, t) {
+    lfoState[pad].target = t;
+    lfoSend(pad, 'lfoSetTarget', {target: t});
+    lfoUpdateCard(pad);
+}
+
+function lfoSetFreeHz(pad, hz) {
+    lfoState[pad].freeHz = hz;
+    lfoSend(pad, 'lfoSetFreeHz', {hz});
+}
+
+function lfoSetRetrigger(pad, on) {
+    lfoState[pad].retrig = on;
+    lfoSend(pad, 'lfoSetRetrigger', {retrigger: on});
+}
+
+function lfoResetAll() {
+    sendWebSocket({cmd: 'lfoReset'});
+}
+
+function lfoRequestState() {
+    sendWebSocket({cmd: 'lfoGetState'});
+}
+
+function lfoHandleFullState(pads) {
+    for (let i = 0; i < Math.min(pads.length, 24); i++) {
+        const p = pads[i];
+        lfoState[i] = {
+            active: p.active, wave: p.wave, div: p.div,
+            target: p.target, depth: p.depth, freeHz: p.freeHz,
+            retrig: p.retrig, phase: p.phase || 0
+        };
+        lfoUpdateCard(i);
+    }
+    lfoUpdateActiveCount();
+}
+
+function lfoHandleReset() {
+    for (let i = 0; i < 24; i++) {
+        lfoState[i] = {active: false, wave: 0, div: 0, target: 0, depth: 50, freeHz: 2.0, retrig: false, phase: 0};
+        lfoUpdateCard(i);
+    }
+    lfoUpdateActiveCount();
+}
+
+function lfoUpdateActiveCount() {
+    const cnt = lfoState.filter(l => l.active).length;
+    const el = document.getElementById('lfoActiveCount');
+    if (el) el.textContent = cnt;
+}
+
+function lfoUpdateCard(pad) {
+    const card = document.getElementById(`lfoCard${pad}`);
+    if (!card) return;
+    const s = lfoState[pad];
+    card.classList.toggle('lfo-active', s.active);
+    
+    const tog = card.querySelector('.lfo-toggle');
+    if (tog) tog.checked = s.active;
+    
+    const wSel = card.querySelector('.lfo-wave-sel');
+    if (wSel) wSel.value = s.wave;
+    
+    const dSel = card.querySelector('.lfo-div-sel');
+    if (dSel) dSel.value = s.div;
+    
+    const tSel = card.querySelector('.lfo-target-sel');
+    if (tSel) tSel.value = s.target;
+    
+    const depthSlider = card.querySelector('.lfo-depth-slider');
+    if (depthSlider) depthSlider.value = s.depth;
+    
+    const depthVal = card.querySelector('.lfo-depth-val');
+    if (depthVal) depthVal.textContent = s.depth + '%';
+    
+    const freeRow = card.querySelector('.lfo-free-row');
+    if (freeRow) freeRow.style.display = (s.div === 4) ? 'flex' : 'none';
+    
+    const freeSlider = card.querySelector('.lfo-free-slider');
+    if (freeSlider) freeSlider.value = s.freeHz;
+    
+    const retrig = card.querySelector('.lfo-retrig');
+    if (retrig) retrig.checked = s.retrig;
+}
+
+// Build LFO pad cards
+(function initLfoGrid() {
+    const grid = document.getElementById('lfoGrid');
+    if (!grid) return;
+    const names = ['BD','SD','CH','OH','CY','CP','RS','CB','LT','MT','HT','MA','CL','HC','MC','LC',
+                   'X1','X2','X3','X4','X5','X6','X7','X8'];
+    for (let i = 0; i < 24; i++) {
+        const card = document.createElement('div');
+        card.className = 'lfo-card';
+        card.id = `lfoCard${i}`;
+        card.style.setProperty('--lfo-color', LFO_COLORS[i]);
+        card.innerHTML = `
+            <div class="lfo-card-header">
+                <label class="lfo-toggle-label">
+                    <input type="checkbox" class="lfo-toggle" onchange="lfoSetActive(${i},this.checked)">
+                    <span class="lfo-pad-name">${names[i]}</span>
+                </label>
+            </div>
+            <div class="lfo-card-body">
+                <div class="lfo-row">
+                    <select class="lfo-wave-sel" onchange="lfoSetWave(${i},+this.value)">
+                        ${LFO_WAVES.map((w,j) => `<option value="${j}">${w}</option>`).join('')}
+                    </select>
+                    <select class="lfo-div-sel" onchange="lfoSetRate(${i},+this.value)">
+                        ${LFO_DIVS.map((d,j) => `<option value="${j}">${d}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="lfo-row">
+                    <select class="lfo-target-sel" onchange="lfoSetTarget(${i},+this.value)">
+                        ${LFO_TARGETS.map((t,j) => `<option value="${j}">${t}</option>`).join('')}
+                    </select>
+                    <label class="lfo-retrig-label"><input type="checkbox" class="lfo-retrig" onchange="lfoSetRetrigger(${i},this.checked)"> Retrig</label>
+                </div>
+                <div class="lfo-row">
+                    <span class="lfo-label">Depth</span>
+                    <input type="range" class="lfo-depth-slider" min="0" max="100" value="50" oninput="lfoSetDepth(${i},+this.value);this.nextElementSibling.textContent=this.value+'%'">
+                    <span class="lfo-depth-val">50%</span>
+                </div>
+                <div class="lfo-free-row" style="display:none">
+                    <span class="lfo-label">Hz</span>
+                    <input type="range" class="lfo-free-slider" min="0.1" max="20" step="0.1" value="2.0" oninput="lfoSetFreeHz(${i},+this.value)">
+                </div>
+            </div>`;
+        grid.appendChild(card);
+    }
+})();
+
+// Build LFO scope canvases
+(function initLfoScopes() {
+    const container = document.getElementById('lfoScopes');
+    if (!container) return;
+    const names = ['BD','SD','CH','OH','CY','CP','RS','CB','LT','MT','HT','MA','CL','HC','MC','LC',
+                   'X1','X2','X3','X4','X5','X6','X7','X8'];
+    for (let i = 0; i < 24; i++) {
+        const wrap = document.createElement('div');
+        wrap.className = 'lfo-scope-wrap';
+        wrap.id = `lfoScopeWrap${i}`;
+        wrap.style.display = 'none';
+        wrap.innerHTML = `<span class="lfo-scope-label">${names[i]}</span><canvas class="lfo-scope-canvas" id="lfoScope${i}" width="100" height="40"></canvas>`;
+        container.appendChild(wrap);
+    }
+})();
+
+// LFO scope history buffers (30 samples each = 1.5s at 20fps)
+const lfoScopeHistory = new Array(24).fill(null).map(() => []);
+
+function handleLfoScopeBinary(view) {
+    // 0xBB + 3 mask bytes + 24×int8 values = 28 bytes
+    const m0 = view[1], m1 = view[2], m2 = view[3];
+    lfoActiveMask = m0 | (m1 << 8) | (m2 << 16);
+    for (let i = 0; i < 24; i++) {
+        const raw = view[4 + i];
+        lfoScopeData[i] = (raw > 127 ? raw - 256 : raw) / 127.0; // int8 → -1..+1
+        if (lfoActiveMask & (1 << i)) {
+            lfoScopeHistory[i].push(lfoScopeData[i]);
+            if (lfoScopeHistory[i].length > 60) lfoScopeHistory[i].shift();
+        }
+    }
+}
+
+// LFO scope rendering at ~20fps (driven by requestAnimationFrame)
+let _lfoScopeRafId = 0;
+let _lfoScopeLastDraw = 0;
+function lfoScopeLoop(ts) {
+    _lfoScopeRafId = requestAnimationFrame(lfoScopeLoop);
+    if (ts - _lfoScopeLastDraw < 50) return; // 20fps cap
+    _lfoScopeLastDraw = ts;
+    
+    for (let i = 0; i < 24; i++) {
+        const wrap = document.getElementById(`lfoScopeWrap${i}`);
+        if (!wrap) continue;
+        const active = !!(lfoActiveMask & (1 << i));
+        wrap.style.display = active ? '' : 'none';
+        if (!active) continue;
+        
+        const canvas = document.getElementById(`lfoScope${i}`);
+        if (!canvas) continue;
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width, H = canvas.height;
+        const hist = lfoScopeHistory[i];
+        
+        ctx.clearRect(0, 0, W, H);
+        
+        // Center line
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(0, H / 2);
+        ctx.lineTo(W, H / 2);
+        ctx.stroke();
+        
+        // Waveform
+        if (hist.length < 2) continue;
+        ctx.strokeStyle = LFO_COLORS[i];
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        const step = W / (hist.length - 1);
+        for (let j = 0; j < hist.length; j++) {
+            const x = j * step;
+            const y = H / 2 - hist[j] * (H / 2 - 2);
+            j === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+}
+requestAnimationFrame(lfoScopeLoop);
+
+// Request LFO state on tab switch
+document.addEventListener('DOMContentLoaded', () => {
+    const tabBtns = document.querySelectorAll('.tab-btn[data-tab]');
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (btn.dataset.tab === 'lfo') lfoRequestState();
+            if (btn.dataset.tab === 'daisy-sd') sdRefreshStatus();
+        });
+    });
+});
 

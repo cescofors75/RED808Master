@@ -142,7 +142,7 @@ typedef struct __attribute__((packed)) {
 #define CMD_TRACK_EQ_HIGH     0x65  // Per-track 3-band EQ high (-12..+12 dB)
 
 // ═══════════════════════════════════════════════════════
-// COMMANDS: PER-PAD FX (0x70 - 0x8F)
+// COMMANDS: PER-PAD FX (0x70 - 0x7F)
 // ═══════════════════════════════════════════════════════
 #define CMD_PAD_FILTER        0x70  // Per-pad filter
 #define CMD_PAD_CLEAR_FILTER  0x71  // Clear pad filter
@@ -155,6 +155,21 @@ typedef struct __attribute__((packed)) {
 #define CMD_PAD_SCRATCH       0x78  // Vinyl scratch
 #define CMD_PAD_TURNTABLISM   0x79  // DJ turntablism
 #define CMD_PAD_CLEAR_FX      0x7A  // Clear all pad FX
+
+// ═══════════════════════════════════════════════════════
+// COMMANDS: PER-PAD LFO (0x80 - 0x8F)
+//   Each pad has its own LFO synced to BPM.
+//   LFOs live in ESP32 — they modulate existing params
+//   and send the result via SPI to the Daisy.
+// ═══════════════════════════════════════════════════════
+#define CMD_PAD_LFO_ACTIVE    0x80  // [pad, on/off]
+#define CMD_PAD_LFO_WAVE      0x81  // [pad, waveform] 0=sin 1=tri 2=sq 3=saw 4=s&h
+#define CMD_PAD_LFO_RATE      0x82  // [pad, division] 0=1/4 1=1/8 2=1/16 3=1/32 4=free
+#define CMD_PAD_LFO_DEPTH     0x83  // [pad, depth 0-100]
+#define CMD_PAD_LFO_TARGET    0x84  // [pad, target] 0=pitch 1=decay 2=filter 3=pan 4=vol
+#define CMD_PAD_LFO_FREE_HZ   0x85 // [pad, hz_x10] for free-running mode (0.1-20.0 Hz)
+#define CMD_PAD_LFO_PHASE     0x86  // [pad, phase 0-255] (0=0°, 128=180°, 255≈360°)
+#define CMD_PAD_LFO_RETRIG    0x87  // [pad, on/off] retrigger phase on note-on
 
 // ═══════════════════════════════════════════════════════
 // COMMANDS: SIDECHAIN (0x90 - 0x9F)
@@ -192,10 +207,11 @@ typedef struct __attribute__((packed)) {
 // ═══════════════════════════════════════════════════════
 // COMMANDS: STATUS / QUERY (0xE0 - 0xEF)
 // ═══════════════════════════════════════════════════════
-#define CMD_GET_STATUS        0xE0  // Get general status
+#define CMD_GET_STATUS        0xE0  // Get general status (54 bytes response)
 #define CMD_GET_PEAKS         0xE1  // Get VU meters (16 tracks + master)
 #define CMD_GET_CPU_LOAD      0xE2  // Get CPU load
 #define CMD_GET_VOICES        0xE3  // Get active voices
+#define CMD_GET_EVENTS        0xE4  // Get pending notification events from slave
 #define CMD_PING              0xEE  // Ping/Pong
 #define CMD_RESET             0xEF  // Full DSP reset
 
@@ -383,6 +399,52 @@ typedef struct __attribute__((packed)) {
     float    vinylNoise;     // 0.0-1.0
 } PadTurntablismPayload;
 
+// --- Per-Pad LFO ---
+typedef struct __attribute__((packed)) {
+    uint8_t  pad;            // 0-23
+    uint8_t  active;         // 0/1
+} PadLfoActivePayload;
+
+typedef struct __attribute__((packed)) {
+    uint8_t  pad;            // 0-23
+    uint8_t  waveform;       // 0=sin 1=tri 2=sq 3=saw 4=s&h
+} PadLfoWavePayload;
+
+// LFO rate divisions (sync to BPM)
+#define LFO_DIV_1_4   0     // quarter note
+#define LFO_DIV_1_8   1     // eighth note
+#define LFO_DIV_1_16  2     // sixteenth note
+#define LFO_DIV_1_32  3     // thirty-second note
+#define LFO_DIV_FREE  4     // free-running Hz
+
+typedef struct __attribute__((packed)) {
+    uint8_t  pad;            // 0-23
+    uint8_t  division;       // LFO_DIV_*
+} PadLfoRatePayload;
+
+typedef struct __attribute__((packed)) {
+    uint8_t  pad;            // 0-23
+    uint8_t  depth;          // 0-100 (percentage)
+} PadLfoDepthPayload;
+
+// LFO modulation targets
+#define LFO_TARGET_PITCH   0
+#define LFO_TARGET_DECAY   1
+#define LFO_TARGET_FILTER  2
+#define LFO_TARGET_PAN     3
+#define LFO_TARGET_VOLUME  4
+
+typedef struct __attribute__((packed)) {
+    uint8_t  pad;            // 0-23
+    uint8_t  target;         // LFO_TARGET_*
+} PadLfoTargetPayload;
+
+typedef struct __attribute__((packed)) {
+    uint8_t  pad;            // 0-23
+    uint8_t  reserved;
+    uint16_t hzX10;          // Hz * 10 (1 = 0.1 Hz, 200 = 20.0 Hz)
+} PadLfoFreeHzPayload;
+
 // --- Sidechain ---
 typedef struct __attribute__((packed)) {
     uint8_t  active;         // 0/1
@@ -476,12 +538,11 @@ typedef struct __attribute__((packed)) {
     char     fileName[32];   // WAV filename
 } SdFileInfoPayload;
 
-// --- SD: Load Sample ---
+// --- SD: Load Sample (65 bytes — folder[32] + filename[32] + padIdx) ---
 typedef struct __attribute__((packed)) {
-    uint8_t  padIndex;       // 0-23 destination pad slot
-    uint8_t  reserved[3];
-    char     folderName[32]; // kit folder on SD
+    char     folderName[32]; // kit folder on SD (e.g. "BD", "xtra", "RED 808 KARZ")
     char     fileName[32];   // WAV file name
+    uint8_t  padIndex;       // 0-23 destination pad slot
 } SdLoadSamplePayload;
 
 // --- SD: Load Kit (all WAVs in a folder) ---
@@ -509,14 +570,14 @@ typedef struct __attribute__((packed)) {
     } files[24];
 } SdFileListResponse;
 
-// --- SD: File Info Response ---
+// --- SD: File Info Response (16 bytes) ---
 typedef struct __attribute__((packed)) {
-    uint32_t totalSamples;   // number of int16_t samples
+    uint32_t sizeBytes;      // file size in bytes
     uint16_t sampleRate;     // Hz (44100, 48000...)
-    uint8_t  bitsPerSample;  // 16
+    uint16_t bitsPerSample;  // 8, 16, 24
     uint8_t  channels;       // 1=mono, 2=stereo
+    uint8_t  reserved[3];
     uint32_t durationMs;     // duration in milliseconds
-    char     name[32];       // filename
 } SdFileInfoResponse;
 
 // --- SD: Status Response ---
@@ -582,15 +643,51 @@ typedef struct __attribute__((packed)) {
     float masterPeak;        // 0.0-1.0 master
 } PeaksResponse;
 
+// --- Legacy StatusResponse (kept for reference) ---
+// Was 20 bytes. Slave now sends 54 bytes (StatusResponseV2).
+
+// --- StatusResponse V2 (54 bytes — matches Daisy slave firmware) ---
 typedef struct __attribute__((packed)) {
-    uint8_t  activeVoices;
-    uint8_t  cpuLoadPercent;
-    uint16_t freeSRAM;       // KB free
-    uint32_t samplesLoaded;  // Bitmask of loaded pads
-    uint32_t uptime;         // Seconds since boot
-    uint16_t spiErrors;
-    uint16_t bufferUnderruns;
-} StatusResponse;
+    uint8_t  activeVoices;       // byte 0: active polyphonic voices
+    uint8_t  cpuLoadPercent;     // byte 1: CPU % (0-100)
+    uint16_t padsLoadedMask;     // bytes 2-3: bitmask pads 0-15 loaded
+    uint32_t uptime;             // bytes 4-7: uptime in ms
+    uint8_t  sdPresent;          // byte 8: SD card present (0/1)
+    uint8_t  xtraPadsMask;       // byte 9: bitmask pads 16-23 (XTRA)
+    uint8_t  evtCount;           // byte 10: pending notification events
+    uint8_t  reserved1[3];       // bytes 11-13
+    char     currentKitName[32]; // bytes 14-45: null-terminated kit name
+    uint8_t  totalPadsLoaded;    // byte 46: total pads loaded count
+    uint32_t totalBytesUsed;     // bytes 47-50: total bytes in SDRAM
+    uint8_t  maxPads;            // byte 51: MAX_PADS value (=24)
+    uint8_t  reserved2[2];       // bytes 52-53
+} StatusResponse;  // 54 bytes total
+
+// --- Notification Event (32 bytes — returned by CMD_GET_EVENTS) ---
+#define EVT_SD_BOOT_DONE       0x01  // Boot: LIVE PADS loaded from SD
+#define EVT_SD_KIT_LOADED      0x02  // Kit loaded by CMD_SD_LOAD_KIT
+#define EVT_SD_SAMPLE_LOADED   0x03  // Single sample loaded by CMD_SD_LOAD_SAMPLE
+#define EVT_SD_KIT_UNLOADED    0x04  // Kit unloaded by CMD_SD_UNLOAD_KIT
+#define EVT_SD_ERROR           0x05  // Error loading sample
+#define EVT_SD_XTRA_LOADED     0x06  // Boot: XTRA PADS loaded from /data/xtra
+
+typedef struct __attribute__((packed)) {
+    uint8_t  type;           // EVT_SD_* event type
+    uint8_t  padCount;       // pads affected
+    uint8_t  padMaskLo;      // bitmask pads 0-7
+    uint8_t  padMaskHi;      // bitmask pads 8-15
+    uint8_t  padMaskXtra;    // bitmask pads 16-23
+    uint8_t  reserved[3];
+    char     name[24];       // kit/sample name, null-terminated
+} NotifyEvent;
+
+// CMD_GET_EVENTS response: [count(1)] + [NotifyEvent(32)] × count
+// Maximum 4 events per call. Poll again if evtCount > returned count.
+#define MAX_EVENTS_PER_CALL  4
+typedef struct __attribute__((packed)) {
+    uint8_t      count;      // number of events in this response (0-4)
+    NotifyEvent  events[MAX_EVENTS_PER_CALL]; // up to 4 events
+} EventsResponse;  // 1 + 4*32 = 129 bytes max
 
 typedef struct __attribute__((packed)) {
     uint32_t timestamp;      // millis() from ESP32
