@@ -382,7 +382,7 @@ function init() {
   worldEl = document.getElementById('pbWorld');
   selectionBoxEl = document.getElementById('pbSelectionBox');
 
-  /* Embed mode — when loaded inside multiview iframe, hide the header */
+  /* Embed mode — when loaded inside multiview iframe, hide header + toolbar */
   if (new URLSearchParams(location.search).get('embed') === '1') {
     document.getElementById('patchbay')?.classList.add('embed-mode');
   }
@@ -433,6 +433,15 @@ function init() {
   applyTempoVisuals();
 
   updateStatus();
+}
+
+function pbToggleEmbedToolbar() {
+  const toolbar = document.getElementById('pbToolbar');
+  const btn     = document.getElementById('pbEmbedToolbarToggle');
+  if (!toolbar || !btn) return;
+  const isOpen = toolbar.classList.toggle('embed-toolbar-open');
+  btn.classList.toggle('open', isOpen);
+  btn.textContent = isOpen ? '⊖ FX TOOLS' : '⊕ FX TOOLS';
 }
 
 function parsePadTrackId(nodeId) {

@@ -1636,8 +1636,41 @@ body {
 #pbCanvas::-webkit-scrollbar-thumb:hover { background: var(--pb-text-dim); }
 
 /* ============ EMBED MODE (inside multiview) ============ */
-#patchbay.embed-mode #pbHeader  { display: none !important; }
-#patchbay.embed-mode #patchbay  { height: 100vh; }
+#patchbay.embed-mode #pbHeader   { display: none !important; }
+#patchbay.embed-mode #pbToolbar  { display: none !important; }
+#patchbay.embed-mode #pbToolbar.embed-toolbar-open { display: grid !important; }
+
+/* Compact toggle button to show/hide toolbar in embed mode */
+#pbEmbedToolbarToggle {
+  display: none;
+}
+#patchbay.embed-mode #pbEmbedToolbarToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px 5px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-top: none;
+  color: rgba(221,228,240,0.6);
+  cursor: pointer;
+  transition: background .18s, color .18s;
+  flex-shrink: 0;
+  user-select: none;
+}
+#patchbay.embed-mode #pbEmbedToolbarToggle:hover {
+  background: rgba(0,229,255,0.08);
+  color: #00e5ff;
+  border-color: rgba(0,229,255,0.3);
+}
+#patchbay.embed-mode #pbEmbedToolbarToggle.open {
+  background: rgba(0,229,255,0.10);
+  color: #00e5ff;
+  border-color: rgba(0,229,255,0.35);
+}
 
 /* ============ FX DEBUG TESTER ============ */
 #pbFxTester {
