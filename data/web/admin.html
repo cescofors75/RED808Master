@@ -2,165 +2,228 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RED808 Admin Dashboard</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+  <title>RED808 — Admin</title>
   <link rel="stylesheet" href="admin.css">
 </head>
 <body>
-  <div class="admin-container">
-    <header class="admin-header">
-      <h1>🎛️ RED808 ADMIN DASHBOARD</h1>
-      <div class="status-badge" id="connectionStatus">CONNECTING...</div>
-    </header>
+<div id="adm">
 
-    <div class="dashboard-grid">
-      <!-- System Info Card -->
-      <div class="card">
-        <div class="card-header">
-          <h2>💻 System Info</h2>
-          <button class="refresh-btn" onclick="refreshData()">🔄</button>
-        </div>
-        <div class="card-body">
-          <div class="info-row">
-            <span class="label">Uptime:</span>
-            <span class="value" id="uptime">-</span>
-          </div>
-          <div class="info-row">
-            <span class="label">IP Address:</span>
-            <span class="value" id="ipAddress">-</span>
-          </div>
-          <div class="info-row">
-            <span class="label">WiFi Channel:</span>
-            <span class="value" id="wifiChannel">-</span>
-          </div>
-          <div class="info-row">
-            <span class="label">TX Power:</span>
-            <span class="value" id="txPower">-</span>
-          </div>
-          <div class="info-row">
-            <span class="label">WiFi Stations:</span>
-            <span class="value" id="connectedStations">-</span>
-          </div>
-        </div>
+  <!-- ── HEADER ── -->
+  <header id="admHeader">
+    <div class="adm-logo">
+      <span class="adm-logo-r">R</span><span class="adm-logo-e">E</span><span class="adm-logo-d">D</span>
+      <span class="adm-logo-808">808</span>
+      <span class="adm-logo-tag">ADMIN</span>
+    </div>
+    <nav class="adm-nav">
+      <a href="/" class="adm-nav-btn">🎛 MAIN</a>
+      <a href="/patchbay" class="adm-nav-btn">⬡ PATCHBAY</a>
+      <a href="/multiview" class="adm-nav-btn">⊞ MULTIVIEW</a>
+    </nav>
+    <div class="adm-status-wrap">
+      <div id="admWsBadge" class="adm-badge badge-warn">● WS…</div>
+      <div id="admSyncBadge" class="adm-badge badge-dim">↺ --s</div>
+    </div>
+  </header>
+
+  <!-- ── TOP STATS BAR ── -->
+  <section id="admStats">
+    <div class="stat-card" id="stat-heap">
+      <div class="stat-label">HEAP FREE</div>
+      <div class="stat-value" id="sv-heap">--</div>
+      <div class="stat-sub" id="ss-heap">of --</div>
+    </div>
+    <div class="stat-card" id="stat-psram">
+      <div class="stat-label">PSRAM FREE</div>
+      <div class="stat-value" id="sv-psram">--</div>
+      <div class="stat-sub" id="ss-psram">of --</div>
+    </div>
+    <div class="stat-card" id="stat-samples">
+      <div class="stat-label">SAMPLES</div>
+      <div class="stat-value" id="sv-samples">--</div>
+      <div class="stat-sub" id="ss-samples">-- MB RAM</div>
+    </div>
+    <div class="stat-card" id="stat-bpm">
+      <div class="stat-label">TEMPO</div>
+      <div class="stat-value" id="sv-bpm">--</div>
+      <div class="stat-sub" id="ss-bpm">BPM</div>
+    </div>
+    <div class="stat-card" id="stat-uptime">
+      <div class="stat-label">UPTIME</div>
+      <div class="stat-value" id="sv-uptime">--</div>
+      <div class="stat-sub" id="ss-uptime">hh:mm:ss</div>
+    </div>
+    <div class="stat-card" id="stat-clients">
+      <div class="stat-label">CLIENTS</div>
+      <div class="stat-value" id="sv-clients">--</div>
+      <div class="stat-sub" id="ss-clients">WS / UDP</div>
+    </div>
+  </section>
+
+  <!-- ── MAIN GRID ── -->
+  <main id="admGrid">
+
+    <!-- ── SYSTEM INFO ── -->
+    <div class="adm-card" id="card-sysinfo">
+      <div class="adm-card-head">
+        <span class="adm-card-title">💻 SYSTEM</span>
+        <button class="adm-hdr-btn" onclick="fetchSysinfo()">↺</button>
       </div>
-
-      <!-- Memory Card -->
-      <div class="card">
-        <div class="card-header">
-          <h2>🧠 Memory Status</h2>
-        </div>
-        <div class="card-body">
-          <div class="memory-section">
-            <h3>Heap Memory</h3>
-            <div class="progress-bar">
-              <div class="progress-fill" id="heapProgress"></div>
-            </div>
-            <div class="memory-stats">
-              <span id="heapUsed">-</span> / <span id="heapTotal">-</span>
-              <span class="percent" id="heapPercent">0%</span>
-            </div>
-          </div>
-          
-          <div class="memory-section">
-            <h3>PSRAM</h3>
-            <div class="progress-bar">
-              <div class="progress-fill psram" id="psramProgress"></div>
-            </div>
-            <div class="memory-stats">
-              <span id="psramUsed">-</span> / <span id="psramTotal">-</span>
-              <span class="percent" id="psramPercent">0%</span>
-            </div>
-          </div>
-
-          <div class="memory-section">
-            <h3>Audio Samples</h3>
-            <div class="progress-bar">
-              <div class="progress-fill samples" id="samplesProgress"></div>
-            </div>
-            <div class="memory-stats">
-              <span id="samplesLoaded">-</span> samples
-              <span id="samplesMemory">- MB</span>
-            </div>
-          </div>
-
-          <div class="info-row">
-            <span class="label">Flash Size:</span>
-            <span class="value" id="flashSize">-</span>
-          </div>
-        </div>
+      <div class="adm-card-body">
+        <table class="info-table">
+          <tr><td>IP</td><td id="si-ip">--</td></tr>
+          <tr><td>WiFi Channel</td><td id="si-ch">--</td></tr>
+          <tr><td>TX Power</td><td id="si-tx">--</td></tr>
+          <tr><td>Stations</td><td id="si-sta">--</td></tr>
+          <tr><td>Flash Size</td><td id="si-flash">--</td></tr>
+          <tr><td>Firmware</td><td id="si-fw">RED808 v2.0</td></tr>
+        </table>
       </div>
+    </div>
 
-      <!-- WebSocket Clients Card -->
-      <div class="card">
-        <div class="card-header">
-          <h2>🔌 WebSocket Clients (<span id="wsClientCount">0</span>/3)</h2>
-        </div>
-        <div class="card-body">
-          <div class="clients-container" id="wsClientsContainer">
-            <div class="empty-state">No clients connected</div>
-          </div>
-        </div>
+    <!-- ── MEMORY ── -->
+    <div class="adm-card" id="card-memory">
+      <div class="adm-card-head">
+        <span class="adm-card-title">🧠 MEMORY</span>
       </div>
-
-      <!-- UDP Clients Card -->
-      <div class="card">
-        <div class="card-header">
-          <h2>📡 UDP Clients (<span id="udpClientCount">0</span>)</h2>
+      <div class="adm-card-body">
+        <div class="mem-row">
+          <div class="mem-label">Heap</div>
+          <div class="mem-bar-wrap"><div class="mem-bar heap" id="mb-heap"></div></div>
+          <div class="mem-nums"><span id="mn-heap-used">--</span> / <span id="mn-heap-total">--</span></div>
         </div>
-        <div class="card-body">
-          <div class="clients-container" id="udpClientsContainer">
-            <div class="empty-state">No UDP clients detected</div>
-          </div>
+        <div class="mem-row">
+          <div class="mem-label">PSRAM</div>
+          <div class="mem-bar-wrap"><div class="mem-bar psram" id="mb-psram"></div></div>
+          <div class="mem-nums"><span id="mn-psram-used">--</span> / <span id="mn-psram-total">--</span></div>
         </div>
-      </div>
-
-      <!-- Sequencer Status Card -->
-      <div class="card">
-        <div class="card-header">
-          <h2>🎵 Sequencer Status</h2>
-        </div>
-        <div class="card-body">
-          <div class="info-row">
-            <span class="label">Status:</span>
-            <span class="value status-indicator" id="seqStatus">
-              <span class="dot stopped"></span> STOPPED
-            </span>
-          </div>
-          <div class="info-row">
-            <span class="label">Tempo:</span>
-            <span class="value" id="seqTempo">-</span>
-          </div>
-          <div class="info-row">
-            <span class="label">Pattern:</span>
-            <span class="value" id="seqPattern">-</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Quick Actions Card -->
-      <div class="card">
-        <div class="card-header">
-          <h2>⚡ Quick Actions</h2>
-        </div>
-        <div class="card-body actions">
-          <button class="action-btn" onclick="location.href='/'">🎛️ Main Interface</button>
-          <button class="action-btn" onclick="rebootESP()">🔄 Reboot ESP32</button>
-          <button class="action-btn" onclick="clearSamples()">🗑️ Clear Samples</button>
-        </div>
-      </div>
-
-      <!-- Real-time Monitor Card -->
-      <div class="card full-width">
-        <div class="card-header">
-          <h2>📊 Real-time Monitor</h2>
-        </div>
-        <div class="card-body">
-          <canvas id="memoryChart" width="800" height="200"></canvas>
+        <div class="mem-row">
+          <div class="mem-label">Samples</div>
+          <div class="mem-bar-wrap"><div class="mem-bar samp" id="mb-samples"></div></div>
+          <div class="mem-nums"><span id="mn-samples-used">--</span> used</div>
         </div>
       </div>
     </div>
-  </div>
 
-  <script src="admin.js"></script>
+    <!-- ── DAISY SLAVE STATUS ── -->
+    <div class="adm-card" id="card-daisy">
+      <div class="adm-card-head">
+        <span class="adm-card-title">🎛 DAISY SLAVE</span>
+        <div id="daisy-badge" class="adm-badge badge-warn">WAITING</div>
+      </div>
+      <div class="adm-card-body">
+        <table class="info-table">
+          <tr><td>SPI Connection</td><td id="ds-conn">--</td></tr>
+          <tr><td>Last PING RTT</td><td id="ds-rtt">--</td></tr>
+          <tr><td>Samples loaded</td><td id="ds-samples">--</td></tr>
+          <tr><td>Active voices</td><td id="ds-voices">--</td></tr>
+          <tr><td>Slave uptime</td><td id="ds-uptime">--</td></tr>
+        </table>
+        <div id="daisy-hint" class="daisy-hint">
+          ⌛ Esperando Daisy Seed… → D10↔GPIO12 · D9↔GPIO11 · D8↔GPIO13 · D7↔GPIO10 · GND
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SEQUENCER ── -->
+    <div class="adm-card" id="card-seq">
+      <div class="adm-card-head">
+        <span class="adm-card-title">🎵 SEQUENCER</span>
+        <div class="seq-btns">
+          <button class="adm-hdr-btn" onclick="admSendWS({cmd:'start'})">▶</button>
+          <button class="adm-hdr-btn" onclick="admSendWS({cmd:'stop'})">⏹</button>
+        </div>
+      </div>
+      <div class="adm-card-body">
+        <table class="info-table">
+          <tr><td>Status</td><td><span id="seq-dot" class="seq-dot stopped"></span><span id="seq-status">STOPPED</span></td></tr>
+          <tr><td>Tempo</td><td id="seq-bpm">-- BPM</td></tr>
+          <tr><td>Pattern</td><td id="seq-pat">--</td></tr>
+          <tr><td>Step</td><td id="seq-step">--</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── AUDIO PEAKS ── -->
+    <div class="adm-card" id="card-peaks">
+      <div class="adm-card-head">
+        <span class="adm-card-title">🔊 AUDIO PEAKS</span>
+        <div class="adm-badge badge-dim" id="peak-master-badge">MASTER --</div>
+      </div>
+      <div class="adm-card-body">
+        <div id="peaksGrid" class="peaks-grid"><!-- generated by JS --></div>
+      </div>
+    </div>
+
+    <!-- ── WS CLIENTS ── -->
+    <div class="adm-card" id="card-ws">
+      <div class="adm-card-head">
+        <span class="adm-card-title">🔌 WS CLIENTS <span class="adm-count" id="wc-count">0</span>/3</span>
+      </div>
+      <div class="adm-card-body" id="wc-body">
+        <div class="empty-state">No hay clientes conectados</div>
+      </div>
+    </div>
+
+    <!-- ── UDP CLIENTS ── -->
+    <div class="adm-card" id="card-udp">
+      <div class="adm-card-head">
+        <span class="adm-card-title">📡 UDP CLIENTS <span class="adm-count" id="uc-count">0</span></span>
+      </div>
+      <div class="adm-card-body" id="uc-body">
+        <div class="empty-state">No hay clientes UDP</div>
+      </div>
+    </div>
+
+    <!-- ── QUICK ACTIONS ── -->
+    <div class="adm-card" id="card-actions">
+      <div class="adm-card-head">
+        <span class="adm-card-title">⚡ ACCIONES</span>
+      </div>
+      <div class="adm-card-body">
+        <div class="actions-grid">
+          <button class="act-btn accent" onclick="location.href='/'">🎛 Main UI</button>
+          <button class="act-btn" onclick="admFetchRefreshAll()">↺ Refresh</button>
+          <button class="act-btn danger" onclick="admReboot()">⏻ Reboot</button>
+          <button class="act-btn warn" onclick="admClearSamples()">🗑 Clear samples</button>
+          <button class="act-btn" onclick="admSendWS({cmd:'stop'})">⏹ Stop seq</button>
+          <button class="act-btn" id="autRefBtn" onclick="admToggleAutoRefresh()">⏱ Auto: ON</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── MEMORY CHART full width ── -->
+    <div class="adm-card full-width" id="card-chart">
+      <div class="adm-card-head">
+        <span class="adm-card-title">📈 MONITOR EN VIVO</span>
+        <div class="chart-legend">
+          <span class="leg heap">● Heap</span>
+          <span class="leg psram">● PSRAM</span>
+        </div>
+      </div>
+      <div class="adm-card-body chart-body">
+        <canvas id="admChart"></canvas>
+      </div>
+    </div>
+
+    <!-- ── LOG CONSOLE full width ── -->
+    <div class="adm-card full-width" id="card-log">
+      <div class="adm-card-head">
+        <span class="adm-card-title">📋 LOG EN VIVO</span>
+        <div class="log-controls">
+          <button class="adm-hdr-btn" onclick="admClearLog()">🗑</button>
+          <label class="log-pause-label"><input type="checkbox" id="logPauseChk"> Pausar</label>
+        </div>
+      </div>
+      <div class="adm-card-body log-body">
+        <pre id="admLog"></pre>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script src="admin.js"></script>
 </body>
 </html>

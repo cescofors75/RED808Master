@@ -1,327 +1,425 @@
-// RED808 Admin Dashboard JavaScript
+/* RED808 Admin Dashboard JS v2 */
+'use strict';
 
+// ── Config ──────────────────────────────────────────────────────────────
+const REFRESH_INTERVAL = 3000;
+const MAX_HIST = 80;
+const PAD_NAMES = ['BD','SD','CH','OH','CY','CP','RS','CB','LT','MT','HT','MA','--','HC','MC','LC'];
+
+// ── State ────────────────────────────────────────────────────────────────
 let ws = null;
-let reconnectTimer = null;
-let dataHistory = {
-  heap: [],
-  psram: [],
-  timestamps: []
-};
-const MAX_HISTORY = 50;
+let wsConnected = false;
+let autoRefreshTimer = null;
+let autoRefreshEnabled = true;
+let logPaused = false;
+const chartHistory = { heap: [], psram: [], labels: [] };
+let chartCtx = null;
+let chartAnimId = null;
 
-// Initialize
+// ── Init ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  connectWebSocket();
+  connectWS();
+  buildPeaksGrid();
   initChart();
+  startAutoRefresh();
+  fetchSysinfo();
+  document.getElementById('logPauseChk').addEventListener('change', e => {
+    logPaused = e.target.checked;
+  });
 });
 
-// WebSocket Connection
-function connectWebSocket() {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.hostname}/ws`;
-  
-  ws = new WebSocket(wsUrl);
-  
+// ── WebSocket ─────────────────────────────────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+
   ws.onopen = () => {
-    updateConnectionStatus(true);
-    refreshData();
+    wsConnected = true;
+    setBadge('admWsBadge', '● WS ONLINE', 'badge-ok');
+    admLog('WebSocket conectado', 'info');
   };
-  
   ws.onclose = () => {
-    updateConnectionStatus(false);
-    scheduleReconnect();
+    wsConnected = false;
+    setBadge('admWsBadge', '● WS OFFLINE', 'badge-err');
+    admLog('WebSocket desconectado – reintentando en 4s…', 'warn');
+    setTimeout(connectWS, 4000);
   };
-  
-  ws.onerror = (error) => {
-    console.error('WebSocket error:', error);
-    updateConnectionStatus(false);
-  };
-  
-  ws.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      handleWebSocketMessage(data);
-    } catch (e) {
-      console.error('Error parsing WebSocket message:', e);
-    }
+  ws.onerror = () => admLog('WS error', 'err');
+  ws.onmessage = e => {
+    try { handleWsMsg(JSON.parse(e.data)); } catch (_) { }
   };
 }
 
-function scheduleReconnect() {
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(() => {
-    connectWebSocket();
-  }, 3000);
+function handleWsMsg(d) {
+  // Estado del secuenciador — viene en 'state' (broadcast periódico) o 'playState' (respuesta al play/stop)
+  if (d.type === 'state' || d.type === 'playState') updateSeqFromState(d);
+  // El mensaje 'state' también contiene datos de sysinfo (heap, samplesLoaded, psramFree)
+  if (d.type === 'state') updateDashboardFromState(d);
+  if (d.type === 'sysinfo') updateDashboard(d);
+  if (d.type === 'peaks')   updatePeaks(d.peaks, d.master);
+  if (d.type === 'log')     admLog(d.msg, d.level || 'info');
+  if (d.type === 'daisy')   updateDaisyStatus(d);
+  if (d.wsClients != null)  updateWsClients(d.wsClients);
+  if (d.udpClients != null) updateUdpClients(d.udpClients);
 }
 
-function updateConnectionStatus(connected) {
-  const statusBadge = document.getElementById('connectionStatus');
-  if (connected) {
-    statusBadge.textContent = 'CONNECTED';
-    statusBadge.className = 'status-badge connected';
-  } else {
-    statusBadge.textContent = 'DISCONNECTED';
-    statusBadge.className = 'status-badge disconnected';
+// Extrae los campos de sysinfo que llegan dentro del mensaje 'state'
+function updateDashboardFromState(d) {
+  // El mensaje state incluye: heap, psramFree, samplesLoaded, tempo, playing, pattern, step
+  if (d.heap != null)         setEl('sv-heap',    fmtBytes(d.heap));
+  if (d.psramFree != null)    setEl('sv-psram',   fmtBytes(d.psramFree));
+  if (d.samplesLoaded != null)setEl('sv-samples', d.samplesLoaded);
+  if (d.tempo != null)        setEl('sv-bpm',     d.tempo);
+
+  // Barras de memoria con los valores disponibles en el mensaje state
+  const heapTotal  = 460 * 1024;  // ESP32-S3 heap total típico
+  const psramTotal = 5.5 * 1024 * 1024;
+  if (d.heap != null) {
+    const used = heapTotal - d.heap;
+    setBarPct('mb-heap', used / heapTotal * 100);
+    setEl('mn-heap-used', fmtBytes(used));
+    setEl('mn-heap-total', fmtBytes(heapTotal));
+  }
+  if (d.psramFree != null) {
+    const used = psramTotal - d.psramFree;
+    setBarPct('mb-psram', used / psramTotal * 100);
+    setEl('mn-psram-used', fmtBytes(used));
+    setEl('mn-psram-total', fmtBytes(psramTotal));
+  }
+  if (d.samplesLoaded != null) {
+    setBarPct('mb-samples', d.samplesLoaded / 32 * 100);
+    setEl('mn-samples-used', d.samplesLoaded + ' / 32 samples');
+  }
+  // Historial del chart
+  if (d.heap != null || d.psramFree != null) {
+    const ts = new Date().toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    chartHistory.heap.push(d.heap || 0);
+    chartHistory.psram.push(d.psramFree || 0);
+    chartHistory.labels.push(ts);
+    if (chartHistory.heap.length   > MAX_HIST) chartHistory.heap.shift();
+    if (chartHistory.psram.length  > MAX_HIST) chartHistory.psram.shift();
+    if (chartHistory.labels.length > MAX_HIST) chartHistory.labels.shift();
+    drawChart();
   }
 }
 
-function handleWebSocketMessage(data) {
-  if (data.type === 'state') {
-    updateSequencerStatus(data);
-  }
-}
-
-// Data Polling disabled - using WebSocket state updates
-
-async function fetchSystemInfo() {
+// ── REST polling ──────────────────────────────────────────────────────────
+async function fetchSysinfo() {
   try {
-    const response = await fetch('/api/sysinfo');
-    const data = await response.json();
-    updateDashboard(data);
-  } catch (error) {
-    console.error('Error fetching system info:', error);
+    const r = await fetch('/api/sysinfo');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    updateDashboard(d);
+    setBadge('admSyncBadge', '↺ SYNC OK', 'badge-ok');
+  } catch (err) {
+    admLog('Error /api/sysinfo: ' + err, 'warn');
+    setBadge('admSyncBadge', '↺ SYNC ERR', 'badge-warn');
   }
 }
 
-function updateDashboard(data) {
-  // System Info
-  document.getElementById('uptime').textContent = formatUptime(data.uptime);
-  document.getElementById('ipAddress').textContent = data.ip || '-';
-  document.getElementById('wifiChannel').textContent = data.channel || '-';
-  document.getElementById('txPower').textContent = data.txPower || '-';
-  document.getElementById('connectedStations').textContent = data.connectedStations || '0';
-  
-  // Memory - Heap
-  const heapUsed = data.heapSize - data.heapFree;
-  const heapPercent = ((heapUsed / data.heapSize) * 100).toFixed(1);
-  document.getElementById('heapUsed').textContent = formatBytes(heapUsed);
-  document.getElementById('heapTotal').textContent = formatBytes(data.heapSize);
-  document.getElementById('heapPercent').textContent = `${heapPercent}%`;
-  document.getElementById('heapProgress').style.width = `${heapPercent}%`;
-  
-  // Memory - PSRAM
-  const psramUsed = data.psramSize - data.psramFree;
-  const psramPercent = ((psramUsed / data.psramSize) * 100).toFixed(1);
-  document.getElementById('psramUsed').textContent = formatBytes(psramUsed);
-  document.getElementById('psramTotal').textContent = formatBytes(data.psramSize);
-  document.getElementById('psramPercent').textContent = `${psramPercent}%`;
-  document.getElementById('psramProgress').style.width = `${psramPercent}%`;
-  
-  // Memory - Samples
-  document.getElementById('samplesLoaded').textContent = data.samplesLoaded || '0';
-  document.getElementById('samplesMemory').textContent = formatBytes(data.memoryUsed || 0);
-  const samplesPercent = ((data.memoryUsed / data.psramSize) * 100).toFixed(1);
-  document.getElementById('samplesProgress').style.width = `${samplesPercent}%`;
-  
-  // Flash
-  document.getElementById('flashSize').textContent = formatBytes(data.flashSize);
-  
-  // WebSocket Clients
-  document.getElementById('wsClientCount').textContent = data.wsClients || '0';
-  updateClientsList(data.wsClientList || []);
-  
-  // UDP Clients
-  document.getElementById('udpClientCount').textContent = data.udpClients || '0';
-  updateUdpClientsList(data.udpClientList || []);
-  
-  // Sequencer
-  updateSequencerInfo(data);
-  
-  // Update chart
-  updateChart(heapPercent, psramPercent);
+function startAutoRefresh() {
+  stopAutoRefresh();
+  if (!autoRefreshEnabled) return;
+  autoRefreshTimer = setInterval(fetchSysinfo, REFRESH_INTERVAL);
+}
+function stopAutoRefresh() {
+  if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
 }
 
-function updateClientsList(clients) {
-  const container = document.getElementById('wsClientsContainer');
-  
-  if (clients.length === 0) {
-    container.innerHTML = '<div class="empty-state">No clients connected</div>';
-    return;
+// ── Dashboard update ──────────────────────────────────────────────────────
+function updateDashboard(d) {
+  // Stat bar
+  setEl('sv-heap',    d.heapFree    != null ? fmtBytes(d.heapFree)    : '--');
+  setEl('sv-psram',   d.psramFree   != null ? fmtBytes(d.psramFree)   : '--');
+  setEl('sv-samples', d.samplesLoaded != null ? d.samplesLoaded       : '--');
+  setEl('sv-bpm',     d.tempo       != null ? d.tempo                 : '--');
+  setEl('sv-uptime',  d.uptime      != null ? fmtUptime(d.uptime)     : '--');
+  setEl('sv-clients', d.wsClients   != null ? d.wsClients             : '--');
+
+  // System info table
+  setEl('si-ip',   d.ip       || '--');
+  setEl('si-ch',   d.channel  != null ? 'CH ' + d.channel   : '--');
+  setEl('si-tx',   d.txPower  != null ? d.txPower           : '--');
+  setEl('si-sta',  d.connectedStations != null ? d.connectedStations : (d.wifiMode === 'STA' ? 'STA' : '--'));
+  setEl('si-fw',   'RED808 v2.0');
+  setEl('si-flash',d.flashSize != null ? fmtBytes(d.flashSize) : '--');
+
+  // Memory bars
+  const heapTotal  = d.heapSize  || (460 * 1024);
+  const psramTotal = d.psramSize || (5.5 * 1024 * 1024);
+  const heapUsed   = heapTotal - (d.heapFree  || 0);
+  const psramUsed  = psramTotal - (d.psramFree || 0);
+  const sampLoaded = d.samplesLoaded || 0;
+  const sampMax    = 32;  // MAX_TRACKS en el firmware
+
+  setBarPct('mb-heap',    heapUsed  / heapTotal  * 100);
+  setBarPct('mb-psram',   psramUsed / psramTotal * 100);
+  setBarPct('mb-samples', sampLoaded / sampMax   * 100);
+
+  setEl('mn-heap-used',   fmtBytes(heapUsed));
+  setEl('mn-heap-total',  fmtBytes(heapTotal));
+  setEl('mn-psram-used',  fmtBytes(psramUsed));
+  setEl('mn-psram-total', fmtBytes(psramTotal));
+  setEl('mn-samples-used', sampLoaded + ' / ' + sampMax + ' samples');
+
+  // WS / UDP clients
+  if (d.wsClientList)  updateWsClients(d.wsClientList);
+  if (d.udpClientList) updateUdpClients(d.udpClientList);
+
+  // Sequencer (sysinfo también incluye estos campos)
+  if (d.tempo   != null) { setEl('seq-bpm', d.tempo + ' BPM'); setEl('sv-bpm', d.tempo); }
+  if (d.playing != null) updateSeqFromState(d);
+  if (d.pattern != null) setEl('seq-pat', 'PAT ' + d.pattern);
+
+  // Chart history
+  const now = new Date().toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  chartHistory.heap.push(d.heapFree   || 0);
+  chartHistory.psram.push(d.psramFree || 0);
+  chartHistory.labels.push(now);
+  if (chartHistory.heap.length   > MAX_HIST) chartHistory.heap.shift();
+  if (chartHistory.psram.length  > MAX_HIST) chartHistory.psram.shift();
+  if (chartHistory.labels.length > MAX_HIST) chartHistory.labels.shift();
+  drawChart();
+}
+
+// ── Sequencer ─────────────────────────────────────────────────────────────
+function updateSeqFromState(d) {
+  // Normalizar campo playing (distintos tipos de mensaje usan distintos keys)
+  const playing = d.playing === true || d.isPlaying === true;
+  const dot = document.getElementById('seq-dot');
+  const sta = document.getElementById('seq-status');
+  if (dot) { dot.className = playing ? 'playing' : 'stopped'; }
+  if (sta) { sta.textContent = playing ? '▶ PLAYING' : '■ STOPPED'; }
+  // Actualizar BPM/patrón/step solo si el mensaje los incluye (playState no los tiene)
+  const bpm = d.tempo || d.bpm;
+  if (bpm != null) {
+    setEl('seq-bpm', bpm + ' BPM');
+    setEl('sv-bpm',  bpm);
   }
-  
-  container.innerHTML = clients.map(client => `
-    <div class="client-card">
-      <div class="client-id">Client #${client.id}</div>
-      <div class="client-info">
-        <div>IP: ${client.ip}</div>
-        <div>Status: ${getClientStatus(client.status)}</div>
-      </div>
-    </div>
-  `).join('');
+  if (d.pattern != null) setEl('seq-pat',  'PAT ' + d.pattern);
+  if (d.step    != null) setEl('seq-step', 'STEP ' + d.step);
 }
 
-function updateUdpClientsList(clients) {
-  const container = document.getElementById('udpClientsContainer');
-  
-  if (clients.length === 0) {
-    container.innerHTML = '<div class="empty-state">No UDP clients detected</div>';
-    return;
-  }
-  
-  container.innerHTML = clients.map(client => `
-    <div class="client-card udp">
-      <div class="client-id">📡 ${client.ip}:${client.port}</div>
-      <div class="client-info">
-        <div>Last seen: ${client.lastSeen}s ago</div>
-        <div>Packets: ${client.packets}</div>
-      </div>
-    </div>
-  `).join('');
+// ── Daisy ─────────────────────────────────────────────────────────────────
+function updateDaisyStatus(d) {
+  const connected = d.connected || d.daisy_conn;
+  setBadge('daisy-badge', connected ? 'CONECTADO' : 'SIN CONEXIÓN',
+           connected ? 'badge-ok' : 'badge-dim');
+  setEl('ds-rtt',     d.rtt     != null ? d.rtt + ' ms'     : '--');
+  setEl('ds-samples', d.samples != null ? d.samples          : '--');
+  setEl('ds-voices',  d.voices  != null ? d.voices + ' voces': '--');
+  setEl('ds-uptime',  d.uptime  != null ? fmtUptime(d.uptime): '--');
+  const hint = document.getElementById('daisy-hint');
+  if (hint) hint.textContent = connected ? 'Conexión UDP activa' : 'Esperando Daisy Seed…';
 }
 
-function getClientStatus(status) {
-  const statuses = {
-    0: 'Disconnected',
-    1: 'Connected',
-    2: 'Disconnecting',
-    3: 'Reconnecting'
-  };
-  return statuses[status] || 'Unknown';
+// ── Peaks grid ────────────────────────────────────────────────────────────
+function buildPeaksGrid() {
+  const grid = document.getElementById('peaksGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  PAD_NAMES.forEach((name, i) => {
+    const t = document.createElement('div');
+    t.className = 'peak-track';
+    t.id = 'pt-' + i;
+    t.innerHTML = `<div class="peak-bar-wrap"><div class="peak-bar" id="pb-${i}"></div></div><div class="peak-track-label">${name}</div>`;
+    grid.appendChild(t);
+  });
 }
 
-function updateSequencerInfo(data) {
-  document.getElementById('seqTempo').textContent = `${data.tempo || '-'} BPM`;
-  document.getElementById('seqPattern').textContent = `Pattern ${(data.pattern || 0) + 1}`;
-  
-  const statusEl = document.getElementById('seqStatus');
-  if (data.playing) {
-    statusEl.innerHTML = '<span class="dot playing"></span> PLAYING';
-  } else {
-    statusEl.innerHTML = '<span class="dot stopped"></span> STOPPED';
+function updatePeaks(peaks, master) {
+  if (!peaks) return;
+  peaks.forEach((v, i) => {
+    const bar = document.getElementById('pb-' + i);
+    const trk = document.getElementById('pt-' + i);
+    if (!bar) return;
+    const pct = Math.min(100, Math.max(0, v * 100));
+    bar.style.height = pct + '%';
+    if (trk) trk.classList.toggle('hot', pct > 80);
+  });
+  if (master != null) {
+    // peak-master-badge muestra el % en texto (no hay barra master separada)
+    const lbl = document.getElementById('peak-master-badge');
+    const pct = Math.min(100, Math.max(0, master * 100));
+    if (lbl) lbl.textContent = 'MASTER ' + Math.round(pct) + '%';
   }
 }
 
-function updateSequencerStatus(data) {
-  if (data.tempo) document.getElementById('seqTempo').textContent = `${data.tempo} BPM`;
-  if (data.pattern !== undefined) document.getElementById('seqPattern').textContent = `Pattern ${data.pattern + 1}`;
-  
-  const statusEl = document.getElementById('seqStatus');
-  if (data.playing) {
-    statusEl.innerHTML = '<span class="dot playing"></span> PLAYING';
-  } else {
-    statusEl.innerHTML = '<span class="dot stopped"></span> STOPPED';
-  }
+// ── WS / UDP Clients ──────────────────────────────────────────────────────
+function updateWsClients(list) {
+  const cnt  = document.getElementById('wc-count');
+  const body = document.getElementById('wc-body');
+  if (!body) return;
+  const arr = Array.isArray(list) ? list : [];
+  if (cnt) cnt.textContent = arr.length;
+  if (arr.length === 0) { body.innerHTML = '<div class="empty-hint">Sin clientes WS</div>'; return; }
+  body.innerHTML = '<div class="clients-list">' +
+    arr.map(c => `<div class="client-item"><span class="client-dot"></span><span class="client-ip">${c.ip || c}</span><span class="client-info">${c.id || ''}</span></div>`).join('') +
+    '</div>';
 }
 
-// Chart
-let chartCanvas, chartCtx;
+function updateUdpClients(list) {
+  const cnt  = document.getElementById('uc-count');
+  const body = document.getElementById('uc-body');
+  if (!body) return;
+  const arr = Array.isArray(list) ? list : [];
+  if (cnt) cnt.textContent = arr.length;
+  if (arr.length === 0) { body.innerHTML = '<div class="empty-hint">Sin clientes UDP</div>'; return; }
+  body.innerHTML = '<div class="clients-list">' +
+    arr.map(c => `<div class="client-item"><span class="client-dot" style="background:var(--adm-orange);box-shadow:0 0 5px var(--adm-orange)"></span><span class="client-ip">${c.ip || c}</span><span class="client-info">${c.port ? ':'+c.port : ''}</span></div>`).join('') +
+    '</div>';
+}
 
+// ── Chart ─────────────────────────────────────────────────────────────────
 function initChart() {
-  chartCanvas = document.getElementById('memoryChart');
-  chartCtx = chartCanvas.getContext('2d');
-  drawChart();
-}
-
-function updateChart(heapPercent, psramPercent) {
-  const now = new Date();
-  dataHistory.heap.push(parseFloat(heapPercent));
-  dataHistory.psram.push(parseFloat(psramPercent));
-  dataHistory.timestamps.push(now.getSeconds());
-  
-  if (dataHistory.heap.length > MAX_HISTORY) {
-    dataHistory.heap.shift();
-    dataHistory.psram.shift();
-    dataHistory.timestamps.shift();
-  }
-  
-  drawChart();
+  const canvas = document.getElementById('admChart');
+  if (!canvas) return;
+  chartCtx = canvas.getContext('2d');
+  new ResizeObserver(() => {
+    canvas.width  = canvas.offsetWidth;
+    canvas.height = canvas.offsetHeight || 160;
+    drawChart();
+  }).observe(canvas);
 }
 
 function drawChart() {
-  const width = chartCanvas.width;
-  const height = chartCanvas.height;
-  
-  // Clear
-  chartCtx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-  chartCtx.fillRect(0, 0, width, height);
-  
-  // Grid
-  chartCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+  if (!chartCtx) return;
+  const canvas = chartCtx.canvas;
+  const w = canvas.width, h = canvas.height;
+  if (!w || !h) return;
+  chartCtx.clearRect(0, 0, w, h);
+
+  // grid lines
+  chartCtx.strokeStyle = 'rgba(255,255,255,0.05)';
   chartCtx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
-    const y = (height / 4) * i;
+    const y = Math.round(h * i / 4) + 0.5;
+    chartCtx.beginPath(); chartCtx.moveTo(0, y); chartCtx.lineTo(w, y); chartCtx.stroke();
+  }
+
+  const data = [
+    { arr: chartHistory.heap,  color: '#00e5ff', fill: 'rgba(0,229,255,0.1)' },
+    { arr: chartHistory.psram, color: '#bf5af2', fill: 'rgba(191,90,242,0.1)' }
+  ];
+
+  const maxVal = 6 * 1024 * 1024; // 6MB scale
+
+  data.forEach(series => {
+    if (series.arr.length < 2) return;
+    const pts = series.arr;
+    const step = w / (pts.length - 1);
+
+    // fill
     chartCtx.beginPath();
-    chartCtx.moveTo(0, y);
-    chartCtx.lineTo(width, y);
+    chartCtx.moveTo(0, h);
+    pts.forEach((v, i) => {
+      const x = i * step;
+      const y = h - (v / maxVal) * h;
+      i === 0 ? chartCtx.moveTo(x, y) : chartCtx.lineTo(x, y);
+    });
+    chartCtx.lineTo((pts.length - 1) * step, h);
+    chartCtx.closePath();
+    chartCtx.fillStyle = series.fill;
+    chartCtx.fill();
+
+    // line
+    chartCtx.beginPath();
+    pts.forEach((v, i) => {
+      const x = i * step;
+      const y = h - (v / maxVal) * h;
+      i === 0 ? chartCtx.moveTo(x, y) : chartCtx.lineTo(x, y);
+    });
+    chartCtx.strokeStyle = series.color;
+    chartCtx.lineWidth = 2;
     chartCtx.stroke();
-  }
-  
-  if (dataHistory.heap.length < 2) return;
-  
-  const pointSpacing = width / MAX_HISTORY;
-  
-  // Draw Heap line
-  chartCtx.strokeStyle = '#00ff88';
-  chartCtx.lineWidth = 2;
-  chartCtx.beginPath();
-  dataHistory.heap.forEach((value, i) => {
-    const x = i * pointSpacing;
-    const y = height - (value / 100) * height;
-    if (i === 0) chartCtx.moveTo(x, y);
-    else chartCtx.lineTo(x, y);
   });
-  chartCtx.stroke();
-  
-  // Draw PSRAM line
-  chartCtx.strokeStyle = '#ff00ff';
-  chartCtx.lineWidth = 2;
-  chartCtx.beginPath();
-  dataHistory.psram.forEach((value, i) => {
-    const x = i * pointSpacing;
-    const y = height - (value / 100) * height;
-    if (i === 0) chartCtx.moveTo(x, y);
-    else chartCtx.lineTo(x, y);
-  });
-  chartCtx.stroke();
-  
-  // Labels
-  chartCtx.fillStyle = '#00ff88';
-  chartCtx.font = '12px monospace';
-  chartCtx.fillText('Heap', 10, 20);
-  
-  chartCtx.fillStyle = '#ff00ff';
-  chartCtx.fillText('PSRAM', 10, 35);
 }
 
-// Utility Functions
-function formatBytes(bytes) {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+// ── Actions ───────────────────────────────────────────────────────────────
+function admReboot() {
+  if (!confirm('¿Reiniciar el ESP32?')) return;
+  // El ESP32 no tiene comando reboot via WS; usar HTTP POST al endpoint de sequencer
+  // como workaround de confirmación visual
+  admLog('Reboot: no soportado via WebSocket en este firmware', 'warn');
+  admLog('→ Pulsa el botón físico RST en la placa para reiniciar', 'dim');
 }
-
-function formatUptime(ms) {
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-  
-  if (days > 0) return `${days}d ${hours % 24}h`;
-  if (hours > 0) return `${hours}h ${minutes % 60}m`;
-  if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
-  return `${seconds}s`;
+function admClearSamples() {
+  if (!confirm('¿Descargar kit de samples de la Daisy?')) return;
+  admSendWS({ cmd: 'sdUnloadKit' });
+  admLog('sdUnloadKit enviado', 'warn');
 }
-
-function refreshData() {
-  fetchSystemInfo();
+function admToggleAutoRefresh() {
+  autoRefreshEnabled = !autoRefreshEnabled;
+  const btn = document.getElementById('autRefBtn');
+  if (autoRefreshEnabled) {
+    startAutoRefresh();
+    if (btn) { btn.textContent = '⏱ Auto: ON'; btn.className = 'act-btn warn'; }
+    admLog('Auto-refresh activado', 'info');
+  } else {
+    stopAutoRefresh();
+    if (btn) { btn.textContent = '⏱ Auto: OFF'; btn.className = 'act-btn accent'; }
+    admLog('Auto-refresh pausado', 'dim');
+  }
 }
-
-function rebootESP() {
-  if (confirm('¿Seguro que quieres reiniciar el ESP32?')) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ cmd: 'reboot' }));
-    }
-    alert('Comando de reinicio enviado. El ESP32 se reiniciará en unos segundos.');
+function admClearLog() {
+  const el = document.getElementById('admLog');
+  if (el) el.innerHTML = '';
+}
+function admSendWS(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
+  } else {
+    admLog('WS no disponible', 'err');
   }
 }
 
-function clearSamples() {
-  if (confirm('¿Seguro que quieres descargar todos los samples de la memoria?')) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ cmd: 'clearSamples' }));
-    }
-    alert('Comando enviado. Los samples se descargarán de la RAM.');
-  }
+// ── Log ───────────────────────────────────────────────────────────────────
+function admLog(msg, type) {
+  if (logPaused) return;
+  const el = document.getElementById('admLog');
+  if (!el) return;
+  const ts = new Date().toLocaleTimeString('es', { hour12: false });
+  const cls = type === 'info' ? 'log-info' : type === 'warn' ? 'log-warn' : type === 'err' ? 'log-err' : type === 'dim' ? 'log-dim' : '';
+  const line = document.createElement('span');
+  if (cls) line.className = cls;
+  line.textContent = `[${ts}] ${msg}\n`;
+  el.appendChild(line);
+  // keep max 300 lines
+  while (el.children.length > 300) el.removeChild(el.firstChild);
+  el.scrollTop = el.scrollHeight;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function setEl(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+function setBarPct(id, pct) {
+  const el = document.getElementById(id);
+  if (el) el.style.width = Math.min(100, Math.max(0, pct)).toFixed(1) + '%';
+}
+function setBadge(id, text, cls) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'adm-badge ' + cls;
+}
+function admFetchRefreshAll() { fetchSysinfo(); admLog('Refresh manual', 'dim'); }
+
+function fmtBytes(b) {
+  if (b == null) return '--';
+  if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
+  if (b >= 1024)    return (b / 1024).toFixed(0) + ' KB';
+  return b + ' B';
+}
+function fmtUptime(ms) {
+  if (ms == null) return '--';
+  const s  = Math.floor(ms / 1000);
+  const d  = Math.floor(s / 86400);
+  const h  = Math.floor((s % 86400) / 3600);
+  const m  = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m ${ss}s`;
+  return `${m}m ${ss}s`;
 }
