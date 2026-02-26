@@ -205,6 +205,99 @@ typedef struct __attribute__((packed)) {
 #define CMD_SD_ABORT          0xB9  // Abort ongoing SD load operation
 
 // ═══════════════════════════════════════════════════════
+// COMMANDS: SYNTH ENGINES (0xC0 - 0xCF)
+//   Daisy Seed onboard synthesis: TR-808, TR-909, TR-505
+//   (percussive engines) + TB-303 (bass synth).
+//   engine IDs: 0=TR-808, 1=TR-909, 2=TR-505, 3=TB-303
+// ═══════════════════════════════════════════════════════
+#define CMD_SYNTH_TRIGGER    0xC0  // Trigger one synth instrument
+#define CMD_SYNTH_PARAM      0xC1  // Set synth instrument parameter
+#define CMD_SYNTH_NOTE_ON    0xC2  // TB-303 note on (MIDI note + accent/slide)
+#define CMD_SYNTH_NOTE_OFF   0xC3  // TB-303 note off (no payload)
+#define CMD_SYNTH_303_PARAM  0xC4  // TB-303 global parameter
+#define CMD_SYNTH_ACTIVE     0xC5  // Engine active mask (bit0=808, bit1=909, bit2=505, bit3=303)
+
+// Synth engine IDs
+#define SYNTH_ENGINE_808   0
+#define SYNTH_ENGINE_909   1
+#define SYNTH_ENGINE_505   2
+#define SYNTH_ENGINE_303   3
+
+// TR-808 instrument IDs (engine=0)
+#define SYNTH_808_KICK     0
+#define SYNTH_808_SNARE    1
+#define SYNTH_808_CLAP     2
+#define SYNTH_808_HH_CL    3
+#define SYNTH_808_HH_OP    4
+#define SYNTH_808_LO_TOM   5
+#define SYNTH_808_MID_TOM  6
+#define SYNTH_808_HI_TOM   7
+#define SYNTH_808_LO_CONGA 8
+#define SYNTH_808_MID_CONGA 9
+#define SYNTH_808_HI_CONGA 10
+#define SYNTH_808_CLAVES   11
+#define SYNTH_808_MARACAS  12
+#define SYNTH_808_RIMSHOT  13
+#define SYNTH_808_COWBELL  14
+#define SYNTH_808_CYMBAL   15
+
+// Synth parameter IDs (CMD_SYNTH_PARAM — applies to 808/909/505)
+#define SYNTH_PARAM_DECAY   0
+#define SYNTH_PARAM_PITCH   1
+#define SYNTH_PARAM_TONE    2   // also "saturation" depending on engine
+#define SYNTH_PARAM_VOLUME  3
+#define SYNTH_PARAM_SNAPPY  4
+
+// TB-303 parameter IDs (CMD_SYNTH_303_PARAM)
+#define SYNTH_303_CUTOFF    0   // filter cutoff frequency (Hz)
+#define SYNTH_303_RESONANCE 1   // resonance / Q
+#define SYNTH_303_ENV_MOD   2   // envelope modulation depth
+#define SYNTH_303_DECAY     3   // decay time (seconds)
+#define SYNTH_303_ACCENT    4   // accent level (0.0-1.0)
+#define SYNTH_303_SLIDE_T   5   // slide/portamento time (seconds)
+#define SYNTH_303_WAVEFORM  6   // waveform: 0=sawtooth, 1=square
+#define SYNTH_303_VOLUME    7   // output volume (0.0-1.0)
+
+// ─── Synth Payload Structs ───────────────────────────
+
+// CMD_SYNTH_TRIGGER (0xC0) — 3 bytes
+typedef struct __attribute__((packed)) {
+    uint8_t  engine;      // SYNTH_ENGINE_*
+    uint8_t  instrument;  // 0-15 (varies by engine)
+    uint8_t  velocity;    // 0-127
+} SynthTriggerPayload;
+
+// CMD_SYNTH_PARAM (0xC1) — 7 bytes
+typedef struct __attribute__((packed)) {
+    uint8_t  engine;      // SYNTH_ENGINE_*  (0/1/2; not used for 303)
+    uint8_t  instrument;  // instrument ID
+    uint8_t  paramId;     // SYNTH_PARAM_*
+    uint8_t  reserved;
+    float    value;       // IEEE 754 little-endian
+} SynthParamPayload;
+
+// CMD_SYNTH_NOTE_ON (0xC2) — 3 bytes (TB-303 only)
+typedef struct __attribute__((packed)) {
+    uint8_t  midiNote;    // 0-127
+    uint8_t  accent;      // 0=normal, 1=accent
+    uint8_t  slide;       // 0=normal, 1=slide/portamento
+} SynthNoteOnPayload;
+
+// CMD_SYNTH_NOTE_OFF (0xC3) — no payload
+
+// CMD_SYNTH_303_PARAM (0xC4) — 5 bytes
+typedef struct __attribute__((packed)) {
+    uint8_t  paramId;     // SYNTH_303_*
+    uint8_t  reserved[3];
+    float    value;       // IEEE 754 little-endian
+} Synth303ParamPayload;
+
+// CMD_SYNTH_ACTIVE (0xC5) — 1 byte
+typedef struct __attribute__((packed)) {
+    uint8_t  engineMask;  // bit0=808, bit1=909, bit2=505, bit3=303  (default 0x0F)
+} SynthActivePayload;
+
+// ═══════════════════════════════════════════════════════
 // COMMANDS: STATUS / QUERY (0xE0 - 0xEF)
 // ═══════════════════════════════════════════════════════
 #define CMD_GET_STATUS        0xE0  // Get general status (54 bytes response)

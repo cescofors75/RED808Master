@@ -110,6 +110,12 @@ static const char* spiCmdName(uint8_t cmd) {
         case 0xEF: return "RESET";
         case 0xF0: return "BULK_TRG";
         case 0xF1: return "BULK_FX";
+        case 0xC0: return "SYN_TRIG";
+        case 0xC1: return "SYN_PARA";
+        case 0xC2: return "SYN_NON";
+        case 0xC3: return "SYN_NOFF";
+        case 0xC4: return "SYN_303P";
+        case 0xC5: return "SYN_ACT";
         default:   return "???";
     }
 }
@@ -169,6 +175,7 @@ SPIMaster::SPIMaster() : spi(nullptr), seqNumber(0), spiErrorCount(0), stm32Conn
     cachedWaveFolderGain = 1.0f;
     cachedLimiterActive = false;
     memset(&cachedStatus, 0, sizeof(cachedStatus));
+    cachedSynthActiveMask = 0x0F;
     
     for (int i = 0; i < MAX_AUDIO_TRACKS; i++) {
         cachedTrackFilter[i] = FILTER_NONE;
@@ -1629,4 +1636,54 @@ const FilterPreset* SPIMaster::getFilterPreset(FilterType type) {
 const char* SPIMaster::getFilterName(FilterType type) {
     const FilterPreset* fp = getFilterPreset(type);
     return fp ? fp->name : "Unknown";
+}
+
+// ═══════════════════════════════════════════════════════
+// SYNTH ENGINES (TR-808/909/505 percussive + TB-303 bass)
+// ═══════════════════════════════════════════════════════
+
+void SPIMaster::synthTrigger(uint8_t engine, uint8_t instrument, uint8_t velocity) {
+    SynthTriggerPayload p;
+    p.engine     = engine;
+    p.instrument = instrument;
+    p.velocity   = velocity;
+    sendCommand(CMD_SYNTH_TRIGGER, &p, sizeof(p));
+}
+
+void SPIMaster::synthParam(uint8_t engine, uint8_t instrument, uint8_t paramId, float value) {
+    SynthParamPayload p;
+    p.engine     = engine;
+    p.instrument = instrument;
+    p.paramId    = paramId;
+    p.reserved   = 0;
+    p.value      = value;
+    sendCommand(CMD_SYNTH_PARAM, &p, sizeof(p));
+}
+
+void SPIMaster::synth303NoteOn(uint8_t midiNote, bool accent, bool slide) {
+    SynthNoteOnPayload p;
+    p.midiNote = midiNote;
+    p.accent   = accent ? 1 : 0;
+    p.slide    = slide  ? 1 : 0;
+    sendCommand(CMD_SYNTH_NOTE_ON, &p, sizeof(p));
+}
+
+void SPIMaster::synth303NoteOff() {
+    sendCommand(CMD_SYNTH_NOTE_OFF, nullptr, 0);
+}
+
+void SPIMaster::synth303Param(uint8_t paramId, float value) {
+    Synth303ParamPayload p;
+    p.paramId    = paramId;
+    p.reserved[0] = p.reserved[1] = p.reserved[2] = 0;
+    p.value      = value;
+    sendCommand(CMD_SYNTH_303_PARAM, &p, sizeof(p));
+}
+
+void SPIMaster::synthSetActive(uint8_t engineMask) {
+    SynthActivePayload p;
+    p.engineMask = engineMask;
+    if (sendCommand(CMD_SYNTH_ACTIVE, &p, sizeof(p))) {
+        cachedSynthActiveMask = engineMask;
+    }
 }

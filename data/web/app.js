@@ -44,6 +44,12 @@ let preSoloMuteState = null;    // estado de mutes guardado antes de entrar en s
 let padFilterState = new Array(24).fill(0); // 0 = FILTER_NONE (16 main + 8 xtra)
 let trackFilterState = new Array(16).fill(0); // 0 = FILTER_NONE
 
+// Synth engine selector per pad (-1 = sample mode, 0=808, 1=909, 2=505, 3=303)
+let padSynthEngine = new Array(16).fill(-1);
+// TB-303 note map per live pad (chromatic scale C3-D5)
+const PAD_303_NOTES = [48,50,52,53,55,57,59,60,62,64,65,67,69,71,72,74];
+const SYNTH_ENGINE_LABELS = ['808','909','505','303'];
+
 // Per-track live FX state (Echo, Flanger, Compressor)
 let trackLiveFxState = new Array(16).fill(null).map(() => ({
     echo:       { active: false, time: 100, feedback: 40, mix: 50 },
@@ -914,6 +920,31 @@ function createPads() {
                 showLoopTypePopup(i);
             });
         }
+
+        // Event listeners para botones de synth engine
+        const synthStrip = document.createElement('div');
+        synthStrip.className = 'pad-synth-strip';
+        synthStrip.dataset.pad = i;
+        synthStrip.innerHTML = `
+            <button class="synth-btn" data-pad="${i}" data-engine="0" title="TR-808 synth engine">808</button>
+            <button class="synth-btn" data-pad="${i}" data-engine="1" title="TR-909 synth engine">909</button>
+            <button class="synth-btn" data-pad="${i}" data-engine="2" title="TR-505 synth engine">505</button>
+            <button class="synth-btn" data-pad="${i}" data-engine="3" title="TB-303 bass synth">303</button>
+        `;
+        synthStrip.querySelectorAll('.synth-btn').forEach(btn => {
+            const stopEvt = (e) => { e.stopPropagation(); };
+            btn.addEventListener('touchstart', stopEvt);
+            btn.addEventListener('mousedown', stopEvt);
+            const handler = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const padIdx = parseInt(btn.dataset.pad);
+                const engine = parseInt(btn.dataset.engine);
+                setSynthEngine(padIdx, engine);
+            };
+            btn.addEventListener('touchend', handler);
+            btn.addEventListener('click', handler);
+        });
         
         // Botón para seleccionar sample (se añade después según count)
         const selectBtn = document.createElement('button');
@@ -929,6 +960,7 @@ function createPads() {
 
         
         padContainer.appendChild(pad);
+        padContainer.appendChild(synthStrip);
         padContainer.appendChild(selectBtn);
         grid.appendChild(padContainer);
 
@@ -964,6 +996,13 @@ function stopTremolo(padIndex, padElement) {
         clearTimeout(tremoloIntervals[padIndex]);
         clearInterval(tremoloIntervals[padIndex]);
         delete tremoloIntervals[padIndex];
+    }
+
+    // 303 note-off al soltar el pad
+    if (padIndex < 16 && padSynthEngine[padIndex] === 3) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ cmd: 'synth303NoteOff' }));
+        }
     }
     
     // Limpiar estados visuales
@@ -2137,6 +2176,12 @@ function triggerPad(padIndex) {
         lastPadTriggerMs[padIndex] = now;
     }
 
+    // Redirigir a synth si hay engine activo en este pad
+    if (padIndex < 16 && padSynthEngine[padIndex] >= 0) {
+        triggerSynthPad(padIndex);
+        return;
+    }
+
     console.log('[PAD] triggerPad()', padIndex, 'ws=', ws ? ws.readyState : 'null');
 
     // Enviar al ESP32 (Protocolo Binario para baja latencia)
@@ -2153,6 +2198,56 @@ function triggerPad(padIndex) {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: `pad=${encodeURIComponent(padIndex)}`
         }).catch((err) => console.error('[PAD] /api/trigger failed', err));
+    }
+}
+
+// Disparar engine synth de la Daisy para un pad
+function triggerSynthPad(padIndex) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const engine = padSynthEngine[padIndex];
+    if (engine < 0) return;
+    if (engine === 3) {
+        // TB-303: note on (nota escalada según posición del pad)
+        ws.send(JSON.stringify({
+            cmd: 'synth303NoteOn',
+            note:   PAD_303_NOTES[padIndex] || 48,
+            accent: false,
+            slide:  false
+        }));
+    } else {
+        // TR-808/909/505: trigger percusivo
+        ws.send(JSON.stringify({
+            cmd:        'synthTrigger',
+            engine:     engine,
+            instrument: padIndex,
+            velocity:   127
+        }));
+    }
+}
+
+// Activar/desactivar engine synth en un pad (toggle)
+function setSynthEngine(padIndex, engine) {
+    const pad = document.querySelector(`.pad[data-pad="${padIndex}"]`);
+    if (!pad) return;
+
+    if (padSynthEngine[padIndex] === engine) {
+        // Deseleccionar — volver a modo sample
+        padSynthEngine[padIndex] = -1;
+        pad.classList.remove('synth-mode-active');
+        pad.removeAttribute('data-synth-engine');
+    } else {
+        padSynthEngine[padIndex] = engine;
+        pad.classList.add('synth-mode-active');
+        pad.setAttribute('data-synth-engine', engine);
+    }
+
+    // Actualizar aspecto de los 4 botones de este pad
+    const strip = document.querySelector(`.pad-synth-strip[data-pad="${padIndex}"]`);
+    if (strip) {
+        strip.querySelectorAll('.synth-btn').forEach(btn => {
+            const e = parseInt(btn.dataset.engine);
+            btn.classList.toggle('active', padSynthEngine[padIndex] === e);
+        });
     }
 }
 

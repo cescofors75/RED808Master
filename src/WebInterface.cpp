@@ -3191,6 +3191,59 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     serializeJson(resp, output);
     if (ws) ws->textAll(output);
   }
+
+  // ══════════════════════════════════════════════════════
+  // SYNTH ENGINES — TR-808/909/505 percussive + TB-303 bass
+  // ══════════════════════════════════════════════════════
+
+  // {"cmd":"synthTrigger","engine":0,"instrument":0,"velocity":100}
+  else if (cmd == "synthTrigger") {
+    uint8_t engine     = doc["engine"]     | 0;
+    uint8_t instrument = doc["instrument"] | 0;
+    uint8_t velocity   = doc["velocity"]   | 100;
+    spiMaster.synthTrigger(engine, instrument, velocity);
+  }
+
+  // {"cmd":"synthParam","engine":0,"instrument":0,"paramId":0,"value":0.5}
+  else if (cmd == "synthParam") {
+    uint8_t engine     = doc["engine"]     | 0;
+    uint8_t instrument = doc["instrument"] | 0;
+    uint8_t paramId    = doc["paramId"]    | 0;
+    float   value      = doc["value"]      | 0.5f;
+    spiMaster.synthParam(engine, instrument, paramId, value);
+  }
+
+  // {"cmd":"synth303NoteOn","note":48,"accent":false,"slide":false}
+  else if (cmd == "synth303NoteOn") {
+    uint8_t note   = doc["note"]   | 36;
+    bool    accent = doc["accent"] | false;
+    bool    slide  = doc["slide"]  | false;
+    spiMaster.synth303NoteOn(note, accent, slide);
+  }
+
+  // {"cmd":"synth303NoteOff"}
+  else if (cmd == "synth303NoteOff") {
+    spiMaster.synth303NoteOff();
+  }
+
+  // {"cmd":"synth303Param","paramId":0,"value":800.0}
+  else if (cmd == "synth303Param") {
+    uint8_t paramId = doc["paramId"] | 0;
+    float   value   = doc["value"]   | 0.5f;
+    spiMaster.synth303Param(paramId, value);
+  }
+
+  // {"cmd":"synthActive","mask":15}   (bit0=808, bit1=909, bit2=505, bit3=303)
+  else if (cmd == "synthActive") {
+    uint8_t mask = doc["mask"] | 0x0F;
+    spiMaster.synthSetActive(mask);
+    StaticJsonDocument<64> resp;
+    resp["type"] = "synthActiveAck";
+    resp["mask"] = mask;
+    String output;
+    serializeJson(resp, output);
+    if (ws) ws->textAll(output);
+  }
 }
 
 // Actualizar o registrar cliente UDP

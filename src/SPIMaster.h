@@ -320,6 +320,17 @@ public:
     }
     
     // ══════════════════════════════════════════════════
+    // SYNTH ENGINES (Daisy onboard: TR-808/909/505 + TB-303)
+    // ══════════════════════════════════════════════════
+    void synthTrigger(uint8_t engine, uint8_t instrument, uint8_t velocity);
+    void synthParam(uint8_t engine, uint8_t instrument, uint8_t paramId, float value);
+    void synth303NoteOn(uint8_t midiNote, bool accent, bool slide);
+    void synth303NoteOff();
+    void synth303Param(uint8_t paramId, float value);
+    void synthSetActive(uint8_t engineMask);
+    uint8_t getSynthActiveMask() const { return cachedSynthActiveMask; }
+
+    // ══════════════════════════════════════════════════
     // FILTER PRESETS (static, for UI)
     // ══════════════════════════════════════════════════
     static const FilterPreset* getFilterPreset(FilterType type);
@@ -365,6 +376,9 @@ private:
 
     // Status cache (54 bytes V2)
     StatusResponse cachedStatus;
+
+    // Synth engine active mask (0x0F = all active by default)
+    uint8_t cachedSynthActiveMask;
     
     // Per-track/pad cached filter state
     FilterType cachedTrackFilter[MAX_AUDIO_TRACKS];

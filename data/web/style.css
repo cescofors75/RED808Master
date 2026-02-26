@@ -11091,3 +11091,142 @@ body.embed-mode .tab-content:not(.active) { display: none !important; }
 .lfo-scope-canvas {
     border-radius: 2px; image-rendering: pixelated;
 }
+
+/* ═══════════════════════════════════════════════════════
+   SYNTH ENGINE SELECTOR STRIP (Live Pads)
+   4 small toggle buttons: 808 / 909 / 505 / 303
+   Positioned vertically on the right side of each pad.
+   ═══════════════════════════════════════════════════════ */
+
+.pad-synth-strip {
+    position: absolute;
+    right: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 20;
+    pointer-events: auto;
+}
+
+.synth-btn {
+    width: 28px;
+    height: 20px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(5, 5, 5, 0.85);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 7px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    transition: all 0.15s ease;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.synth-btn:hover {
+    border-color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.85);
+    background: rgba(40, 40, 40, 0.9);
+}
+
+/* 808 — rojo Roland */
+.synth-btn[data-engine="0"].active {
+    background: linear-gradient(145deg, #c0392b, #922b21);
+    border-color: #e74c3c;
+    color: #fff;
+    box-shadow: 0 0 8px rgba(231, 76, 60, 0.75), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+
+/* 909 — azul cian */
+.synth-btn[data-engine="1"].active {
+    background: linear-gradient(145deg, #0076a8, #005580);
+    border-color: #00bcd4;
+    color: #fff;
+    box-shadow: 0 0 8px rgba(0, 188, 212, 0.75), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+
+/* 505 — verde */
+.synth-btn[data-engine="2"].active {
+    background: linear-gradient(145deg, #1e8449, #145a32);
+    border-color: #2ecc71;
+    color: #fff;
+    box-shadow: 0 0 8px rgba(46, 204, 113, 0.75), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+
+/* 303 — violeta */
+.synth-btn[data-engine="3"].active {
+    background: linear-gradient(145deg, #7d3c98, #5b2c6f);
+    border-color: #9b59b6;
+    color: #fff;
+    box-shadow: 0 0 8px rgba(155, 89, 182, 0.75), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+
+/* Badge de engine activo en la esquina superior izquierda del pad */
+.pad.synth-mode-active::before {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    font-size: 7px;
+    font-weight: 900;
+    font-family: var(--font-mono);
+    padding: 2px 5px;
+    border-radius: 3px;
+    color: #fff;
+    z-index: 4;
+    pointer-events: none;
+    letter-spacing: 0.5px;
+}
+.pad[data-synth-engine="0"].synth-mode-active::before { content: "808"; background: #c0392b; }
+.pad[data-synth-engine="1"].synth-mode-active::before { content: "909"; background: #0076a8; }
+.pad[data-synth-engine="2"].synth-mode-active::before { content: "505"; background: #1e8449; }
+.pad[data-synth-engine="3"].synth-mode-active::before { content: "303"; background: #7d3c98; }
+
+/* Border glow on pad when synth mode active */
+.pad[data-synth-engine="0"].synth-mode-active { border-color: rgba(231, 76, 60, 0.6); }
+.pad[data-synth-engine="1"].synth-mode-active { border-color: rgba(0, 188, 212, 0.6); }
+.pad[data-synth-engine="2"].synth-mode-active { border-color: rgba(46, 204, 113, 0.6); }
+.pad[data-synth-engine="3"].synth-mode-active { border-color: rgba(155, 89, 182, 0.6); }
+
+/* Ensure pad-container has overflow visible for the strip */
+.pad-container {
+    overflow: visible;
+}
+
+/* Strip ahora dentro del pad — no se necesita padding extra */
+/* .pads-grid padding-right removed */
+
+/* En modo cols-8 el strip se comprime un poco */
+.pads-grid.cols-8 .pad-synth-strip {
+    right: 1px;
+}
+.pads-grid.cols-8 .synth-btn {
+    width: 24px;
+    height: 18px;
+    font-size: 7px;
+}
+
+/* Solo-pads mode: ocultar strip */
+.pads-section.solo-pads-mode .pad-synth-strip {
+    display: none;
+}
+
+/* Mobile: columna más pequeña pero sigue dentro del pad */
+@media (max-width: 520px) {
+    .pad-synth-strip {
+        right: 1px;
+        gap: 2px;
+    }
+    .synth-btn {
+        width: 22px;
+        height: 17px;
+        font-size: 6px;
+    }
+}
+
