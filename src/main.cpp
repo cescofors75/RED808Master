@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <LittleFS.h>
-#include <SPI.h>
 #include <Adafruit_NeoPixel.h>
 #include "SPIMaster.h"
 #include "SampleManager.h"
@@ -23,11 +22,6 @@
 // Si se deja vacío (""), usará solo modo AP (red propia RED808).
 #define HOME_WIFI_SSID     "MIWIFI_2G_yU2f"         // ← tu WiFi doméstico, ej: "MiRedCasa"
 #define HOME_WIFI_PASS     "M6LR7zHk"   
-//#define HOME_WIFI_SSID     "Mr_Coconut"         // ← tu WiFi doméstico, ej: "MiRedCasa"
-//#define HOME_WIFI_PASS     "Llorosenlalluvia82" 
-// ← contraseña WiFi
-//#define HOME_WIFI_SSID     "iPhone de Francesc "         // ← tu WiFi doméstico, ej: "MiRedCasa"
-//#define HOME_WIFI_PASS     "gp5zoiqszdy9j"         // ← contraseña WiFi
 
 #define HOME_WIFI_TIMEOUT  12000      // ms para intentar conectar (12s)
 
@@ -37,6 +31,10 @@
 
 // USB MIDI HOST (desactivar temporalmente para aislar problemas de arranque/web)
 #define ENABLE_USB_MIDI false
+
+// Daisy-first workflow: no precarga de samples locales en boot de ESP32.
+// Los samples se gestionan desde SD en Daisy vía comandos SD_*.
+#define BOOT_PRELOAD_LOCAL_SAMPLES true
 
 // --- OBJETOS GLOBALES ---
 // NOTE: Sequencer's large pattern arrays (~229 KB) are allocated from PSRAM
@@ -49,6 +47,33 @@ LFOEngine lfoEngine;
 WebInterface webInterface;
 MIDIController midiController;
 Adafruit_NeoPixel rgbLed(RGB_LED_NUM, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);
+
+// Track synth engine map for sequencer tracks:
+// -1 = sample, 0 = 808, 1 = 909, 2 = 505, 3 = 303
+int8_t gTrackSynthEngine[16] = {
+    -1, -1, -1, -1,
+    -1, -1, -1, -1,
+    -1, -1, -1, -1,
+    -1, -1, -1, -1
+};
+
+void setTrackSynthEngine(int track, int8_t engine) {
+    if (track < 0 || track >= 16) return;
+    if (engine < -1 || engine > 3) return;
+    gTrackSynthEngine[track] = engine;
+}
+
+void setAllTrackSynthEngines(int8_t engine) {
+    if (engine < -1 || engine > 3) return;
+    for (int i = 0; i < 16; i++) {
+        gTrackSynthEngine[i] = engine;
+    }
+}
+
+int8_t getTrackSynthEngine(int track) {
+    if (track < 0 || track >= 16) return -1;
+    return gTrackSynthEngine[track];
+}
 
 // Colores por instrumento - 16 instrumentos RGB (formato 0xRRGGBB estándar)
 const uint32_t instrumentColors[16] = {
@@ -175,7 +200,16 @@ void systemTask(void *pvParameters) {
 // Callback que el Sequencer llama cada vez que hay un "trigger" en un step
 // NO enciende el LED (solo secuenciador)
 void onStepTrigger(int track, uint8_t velocity, uint8_t trackVolume, uint32_t noteLenSamples) {
-    spiMaster.triggerSampleSequencer(track, velocity, trackVolume, noteLenSamples);
+    int8_t engine = getTrackSynthEngine(track);
+    if (engine >= 0 && engine <= 3) {
+        float scaled = (velocity / 127.0f)
+                     * (trackVolume / 100.0f)
+                     * (spiMaster.getSequencerVolume() / 100.0f);
+        uint8_t synthVelocity = (uint8_t)constrain((int)roundf(scaled * 127.0f), 1, 127);
+        spiMaster.synthTrigger((uint8_t)engine, (uint8_t)track, synthVelocity);
+    } else {
+        spiMaster.triggerSampleSequencer(track, velocity, trackVolume, noteLenSamples);
+    }
     lfoEngine.onPadTrigger(track);  // LFO retrigger on sequencer hit
 }
 
@@ -194,6 +228,45 @@ void triggerPadWithLED(int track, uint8_t velocity) {
         rgbLed.setBrightness(ledBrightness);
         rgbLed.setPixelColor(0, color);
         rgbLed.show();
+    }
+}
+
+static void applyProfessionalMixBaseline() {
+    // Global post-master defaults: clean and controlled
+    spiMaster.setMasterVolume(88);
+    spiMaster.setSequencerVolume(100);
+    spiMaster.setLiveVolume(100);
+    spiMaster.setLivePitchShift(1.0f);
+
+    spiMaster.setFilterType(FILTER_NONE);
+    spiMaster.setDelayActive(false);
+    spiMaster.setPhaserActive(false);
+    spiMaster.setFlangerActive(false);
+    spiMaster.setCompressorActive(false);
+    spiMaster.setReverbActive(false);
+    spiMaster.setChorusActive(false);
+    spiMaster.setTremoloActive(false);
+    spiMaster.setWaveFolderGain(1.0f);
+    spiMaster.setLimiterActive(true);
+
+    for (int track = 0; track < 16; track++) {
+        spiMaster.clearTrackFilter(track);
+        spiMaster.clearTrackFX(track);
+        spiMaster.clearTrackLiveFX(track);
+        spiMaster.setTrackReverbSend(track, 0);
+        spiMaster.setTrackDelaySend(track, 0);
+        spiMaster.setTrackChorusSend(track, 0);
+        spiMaster.setTrackPan(track, 0);
+        spiMaster.setTrackMute(track, false);
+        spiMaster.setTrackSolo(track, false);
+        spiMaster.setTrackEq(track, 0, 0, 0);
+        spiMaster.setTrackVolume(track, 100);
+        sequencer.setTrackVolume(track, 100);
+    }
+
+    for (int pad = 0; pad < 24; pad++) {
+        spiMaster.clearPadFilter(pad);
+        spiMaster.clearPadFX(pad);
     }
 }
 
@@ -245,134 +318,174 @@ void setup() {
     
     showLoadingSamplesLED();
     delay(300);
-    
-    // 3. Sample Manager - Cargar todos los samples por familia
+
+    // 3. Sample Manager (modo Daisy-first: sin precarga local en boot)
     sampleManager.begin();
-    
-    Serial.println("[STEP 5] Loading all samples from families...");
-    const char* families[] = {"BD", "SD", "CH", "OH", "CY", "CP", "RS", "CB", "LT", "MT", "HT", "MA", "CL", "HC", "MC", "LC"};
-    
-    // ============= RED 808 KARZ - Default Sample Kit =============
-    // Mapping: filename prefix -> family index
-    // 808 BD -> BD(0), 808 SD -> SD(1), 808 HH -> CH(2), 808 OH -> OH(3),
-    // 808 CY -> CY(4), 808 CP -> CP(5), 808 RS -> RS(6), 808 COW -> CB(7),
-    // 808 LT -> LT(8), 808 MT -> MT(9), 808 HT -> HT(10), 808 MA -> MA(11),
-    // 808 CL -> CL(12), 808 HC -> HC(13), 808 MC -> MC(14), 808 LC -> LC(15)
-    struct KarzMapping {
-        const char* prefix;  // Prefix in filename (after "808 ")
-        int padIndex;        // Target pad/family index
-    };
-    const KarzMapping karzMap[] = {
-        {"BD", 0}, {"SD", 1}, {"HH", 2}, {"OH", 3},
-        {"CY", 4}, {"CP", 5}, {"RS", 6}, {"COW", 7},
-        {"LT", 8}, {"MT", 9}, {"HT", 10}, {"MA", 11},
-        {"CL", 12}, {"HC", 13}, {"MC", 14}, {"LC", 15}
-    };
-    const int karzMapSize = sizeof(karzMap) / sizeof(karzMap[0]);
-    
-    bool karzLoaded[16] = {false};
-    int karzCount = 0;
-    
-    // Try loading from RED 808 KARZ first
-    File karzDir = LittleFS.open("/RED 808 KARZ", "r");
-    if (karzDir && karzDir.isDirectory()) {
-        Serial.println("[RED 808 KARZ] Found default kit folder, loading...");
-        File kf = karzDir.openNextFile();
-        while (kf) {
-            if (!kf.isDirectory()) {
-                String kfName = kf.name();
-                int lastSlash = kfName.lastIndexOf('/');
-                if (lastSlash >= 0) kfName = kfName.substring(lastSlash + 1);
-                
-                if (isValidSampleFile(kfName)) {
-                    // Parse: "808 XX ..." -> extract XX
-                    String upper = kfName;
-                    upper.toUpperCase();
-                    
-                    for (int m = 0; m < karzMapSize; m++) {
-                        if (karzLoaded[karzMap[m].padIndex]) continue;
-                        
-                        String searchStr = String("808 ") + String(karzMap[m].prefix);
-                        if (upper.startsWith(searchStr) || upper.startsWith(String("808") + String(karzMap[m].prefix))) {
-                            String fullPath = String("/RED 808 KARZ/") + kfName;
-                            Serial.printf("  [KARZ] %s -> %s (pad %d)... ", kfName.c_str(), families[karzMap[m].padIndex], karzMap[m].padIndex);
-                            
-                            if (sampleManager.loadSample(fullPath.c_str(), karzMap[m].padIndex)) {
-                                Serial.printf("✓ (%d bytes)\n", sampleManager.getSampleLength(karzMap[m].padIndex) * 2);
-                                karzLoaded[karzMap[m].padIndex] = true;
-                                karzCount++;
+    bool shouldPreloadLocalSamples = BOOT_PRELOAD_LOCAL_SAMPLES;
+    if (shouldPreloadLocalSamples) {
+        SdStatusResponse sdStatus = {};
+        if (spiMaster.sdGetStatus(sdStatus) && sdStatus.present) {
+            int loadedMainPads = 0;
+            for (int i = 0; i < 16; i++) {
+                if (sdStatus.samplesLoaded & (1UL << i)) loadedMainPads++;
+            }
+
+            if (loadedMainPads >= 16) {
+                shouldPreloadLocalSamples = false;
+                Serial.printf("[BOOT] Daisy already has %d/16 pads loaded (kit='%s') -> skipping ESP32 sample preload\n",
+                              loadedMainPads, sdStatus.currentKit);
+            } else {
+                Serial.printf("[BOOT] Daisy has %d/16 pads loaded -> ESP32 preload enabled\n", loadedMainPads);
+            }
+        } else {
+            Serial.println("[BOOT] Daisy SD status unavailable -> ESP32 preload enabled");
+        }
+    }
+
+    if (shouldPreloadLocalSamples) {
+        Serial.println("[STEP 5] Loading all samples from families...");
+        const char* families[] = {"BD", "SD", "CH", "OH", "CY", "CP", "RS", "CB", "LT", "MT", "HT", "MA", "CL", "HC", "MC", "LC"};
+
+        // ============= RED 808 KARZ - Default Sample Kit =============
+        // Mapping: filename prefix -> family index
+        // 808 BD -> BD(0), 808 SD -> SD(1), 808 HH -> CH(2), 808 OH -> OH(3),
+        // 808 CY -> CY(4), 808 CP -> CP(5), 808 RS -> RS(6), 808 COW -> CB(7),
+        // 808 LT -> LT(8), 808 MT -> MT(9), 808 HT -> HT(10), 808 MA -> MA(11),
+        // 808 CL -> CL(12), 808 HC -> HC(13), 808 MC -> MC(14), 808 LC -> LC(15)
+        struct KarzMapping {
+            const char* prefix;  // Prefix in filename (after "808 ")
+            int padIndex;        // Target pad/family index
+        };
+        const KarzMapping karzMap[] = {
+            {"BD", 0}, {"SD", 1}, {"HH", 2}, {"OH", 3},
+            {"CY", 4}, {"CP", 5}, {"RS", 6}, {"COW", 7},
+            {"LT", 8}, {"MT", 9}, {"HT", 10}, {"MA", 11},
+            {"CL", 12}, {"HC", 13}, {"MC", 14}, {"LC", 15}
+        };
+        const int karzMapSize = sizeof(karzMap) / sizeof(karzMap[0]);
+
+        bool karzLoaded[16] = {false};
+        int karzCount = 0;
+
+        // Try loading from RED 808 KARZ first
+        File karzDir = LittleFS.open("/RED 808 KARZ", "r");
+        if (karzDir && karzDir.isDirectory()) {
+            Serial.println("[RED 808 KARZ] Found default kit folder, loading...");
+            File kf = karzDir.openNextFile();
+            while (kf) {
+                if (!kf.isDirectory()) {
+                    String kfName = kf.name();
+                    int lastSlash = kfName.lastIndexOf('/');
+                    if (lastSlash >= 0) kfName = kfName.substring(lastSlash + 1);
+
+                    if (isValidSampleFile(kfName)) {
+                        // Parse: "808 XX ..." -> extract XX
+                        String upper = kfName;
+                        upper.toUpperCase();
+
+                        for (int m = 0; m < karzMapSize; m++) {
+                            if (karzLoaded[karzMap[m].padIndex]) continue;
+
+                            String searchStr = String("808 ") + String(karzMap[m].prefix);
+                            if (upper.startsWith(searchStr) || upper.startsWith(String("808") + String(karzMap[m].prefix))) {
+                                String fullPath = String("/RED 808 KARZ/") + kfName;
+                                Serial.printf("  [KARZ] %s -> %s (pad %d)... ", kfName.c_str(), families[karzMap[m].padIndex], karzMap[m].padIndex);
+
+                                if (sampleManager.loadSample(fullPath.c_str(), karzMap[m].padIndex)) {
+                                    Serial.printf("✓ (%d bytes)\n", sampleManager.getSampleLength(karzMap[m].padIndex) * 2);
+                                    karzLoaded[karzMap[m].padIndex] = true;
+                                    karzCount++;
+                                } else {
+                                    Serial.println("✗ FAILED");
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                kf.close();
+                kf = karzDir.openNextFile();
+            }
+            karzDir.close();
+            Serial.printf("[RED 808 KARZ] Loaded %d/%d instruments from default kit\n", karzCount, 16);
+        } else {
+            Serial.println("[RED 808 KARZ] Default kit folder not found, using per-family folders");
+        }
+
+        // Fallback: load missing instruments from individual family folders
+        for (int i = 0; i < 16; i++) {
+            if (karzLoaded[i]) continue;  // Already loaded from KARZ
+
+            String path = String("/") + String(families[i]);
+            Serial.printf("  [%d] %s: Opening %s... ", i, families[i], path.c_str());
+
+            File dir = LittleFS.open(path, "r");
+
+            if (dir && dir.isDirectory()) {
+                Serial.println("OK");
+                File file = dir.openNextFile();
+                bool loaded = false;
+
+                while (file && !loaded) {
+                    if (!file.isDirectory()) {
+                        String filename = file.name();
+                        if (isValidSampleFile(filename)) {
+                            // Extraer solo el nombre del archivo
+                            int lastSlash = filename.lastIndexOf('/');
+                            if (lastSlash >= 0) {
+                                filename = filename.substring(lastSlash + 1);
+                            }
+
+                            String fullPath = String("/") + String(families[i]) + "/" + filename;
+                            Serial.printf("       Loading %s... ", fullPath.c_str());
+
+                            if (sampleManager.loadSample(fullPath.c_str(), i)) {
+                                Serial.printf("✓ (%d bytes)\n", sampleManager.getSampleLength(i) * 2);
+                                loaded = true;
                             } else {
                                 Serial.println("✗ FAILED");
                             }
-                            break;
                         }
                     }
-                }
-            }
-            kf.close();
-            kf = karzDir.openNextFile();
-        }
-        karzDir.close();
-        Serial.printf("[RED 808 KARZ] Loaded %d/%d instruments from default kit\n", karzCount, 16);
-    } else {
-        Serial.println("[RED 808 KARZ] Default kit folder not found, using per-family folders");
-    }
-    
-    // Fallback: load missing instruments from individual family folders
-    for (int i = 0; i < 16; i++) {
-        if (karzLoaded[i]) continue;  // Already loaded from KARZ
-        
-        String path = String("/") + String(families[i]);
-        Serial.printf("  [%d] %s: Opening %s... ", i, families[i], path.c_str());
-        
-        File dir = LittleFS.open(path, "r");
-        
-        if (dir && dir.isDirectory()) {
-            Serial.println("OK");
-            File file = dir.openNextFile();
-            bool loaded = false;
-            
-            while (file && !loaded) {
-                if (!file.isDirectory()) {
-                    String filename = file.name();
-                    if (isValidSampleFile(filename)) {
-                        // Extraer solo el nombre del archivo
-                        int lastSlash = filename.lastIndexOf('/');
-                        if (lastSlash >= 0) {
-                            filename = filename.substring(lastSlash + 1);
-                        }
-                        
-                        String fullPath = String("/") + String(families[i]) + "/" + filename;
-                        Serial.printf("       Loading %s... ", fullPath.c_str());
-                        
-                        if (sampleManager.loadSample(fullPath.c_str(), i)) {
-                            Serial.printf("✓ (%d bytes)\n", sampleManager.getSampleLength(i) * 2);
-                            loaded = true;
-                        } else {
-                            Serial.println("✗ FAILED");
-                        }
+                    file.close();
+                    if (!loaded) {
+                        file = dir.openNextFile();
                     }
                 }
-                file.close();
+
+                dir.close();
+
                 if (!loaded) {
-                    file = dir.openNextFile();
+                    Serial.println("       ✗ No compatible samples (.raw/.wav) found");
                 }
+            } else {
+                Serial.println("✗ Directory not found or not accessible");
             }
-            
-            dir.close();
-            
-            if (!loaded) {
-                Serial.println("       ✗ No compatible samples (.raw/.wav) found");
-            }
-        } else {
-            Serial.println("✗ Directory not found or not accessible");
         }
+
+        Serial.printf("✓ Samples loaded: %d/16\n", sampleManager.getLoadedSamplesCount());
+    } else {
+        Serial.println("[BOOT] Daisy-first mode: skipping local sample preload (ESP32->Daisy transfer not needed)");
     }
-    
-    Serial.printf("✓ Samples loaded: %d/16\n", sampleManager.getLoadedSamplesCount());
 
     // 4. Sequencer Setup
     sequencer.setStepCallback(onStepTrigger);
+    sequencer.setStepAutomationCallback([](int track, int /*step*/,
+                                           bool cutoffEnabled, uint16_t cutoffHz,
+                                           bool reverbEnabled, uint8_t reverbSend,
+                                           bool volumeEnabled, uint8_t volume) {
+        if (track < 0 || track >= 16) return;
+        if (cutoffEnabled) {
+            spiMaster.setTrackFilter(track, FILTER_LOWPASS, (float)cutoffHz, 1.2f, 0.0f);
+        }
+        if (reverbEnabled) {
+            spiMaster.setTrackReverbSend(track, reverbSend);
+        }
+        if (volumeEnabled) {
+            sequencer.setTrackVolume(track, volume);
+            spiMaster.setTrackVolume(track, volume);
+        }
+    });
     
     // Callback para sincronización en tiempo real con la web
     sequencer.setStepChangeCallback([](int newStep) {
@@ -383,6 +496,8 @@ void setup() {
         webInterface.broadcastSongPattern(newPattern, songLength);
     });
     sequencer.setTempo(110); // BPM inicial
+    spiMaster.setTempo(110.0f); // Sync BPM to Daisy transport
+    applyProfessionalMixBaseline();
     
     // === PATRÓN 0: HIP HOP BOOM BAP (16 tracks) ===
     sequencer.selectPattern(0);
@@ -420,6 +535,14 @@ void setup() {
     sequencer.setStep(12, 15, true);
     sequencer.setStep(4, 0, true);   // CY: Cymbal intro
     sequencer.setStep(4, 8, true);   // CY: medio
+    sequencer.setStepCutoffLock(1, 0, true, 340);
+    sequencer.setStepCutoffLock(1, 4, true, 950);
+    sequencer.setStepCutoffLock(1, 8, true, 2600);
+    sequencer.setStepCutoffLock(1, 12, true, 7000);
+    sequencer.setStepReverbSendLock(1, 4, true, 35);
+    sequencer.setStepReverbSendLock(1, 12, true, 55);
+    sequencer.setStepVolumeLock(1, 4, true, 112);
+    sequencer.setStepVolumeLock(1, 12, true, 120);
     
     // === PATRÓN 2: DRUM & BASS (16 tracks) ===
     sequencer.selectPattern(2);
@@ -500,9 +623,61 @@ void setup() {
     sequencer.setStep(4, 0, true);   // CY: Cymbal intro
     sequencer.setStep(4, 8, true);
 
+    // === PATRÓN 5: CINEMATIC HYBRID (16 tracks) ===
+    sequencer.selectPattern(5);
+    sequencer.setStep(0, 0, true);
+    sequencer.setStep(0, 7, true);
+    sequencer.setStep(0, 10, true);
+    sequencer.setStep(0, 14, true);
+    sequencer.setStep(1, 4, true);
+    sequencer.setStep(1, 11, true);
+    sequencer.setStep(1, 12, true);
+    for (int i = 0; i < 16; i += 2) sequencer.setStep(2, i, true);
+    sequencer.setStep(2, 13, true);
+    sequencer.setStep(2, 15, true);
+    sequencer.setStep(3, 3, true);
+    sequencer.setStep(3, 9, true);
+    sequencer.setStep(3, 15, true);
+    sequencer.setStep(4, 0, true);
+    sequencer.setStep(4, 15, true);
+    sequencer.setStep(5, 4, true);
+    sequencer.setStep(5, 12, true);
+    sequencer.setStep(6, 6, true);
+    sequencer.setStep(6, 14, true);
+    sequencer.setStep(7, 5, true);
+    sequencer.setStep(7, 13, true);
+    sequencer.setStep(8, 2, true);
+    sequencer.setStep(8, 10, true);
+    sequencer.setStep(9, 8, true);
+    sequencer.setStep(10, 12, true);
+    sequencer.setStep(11, 1, true);
+    sequencer.setStep(11, 5, true);
+    sequencer.setStep(11, 9, true);
+    sequencer.setStep(11, 13, true);
+    sequencer.setStep(12, 7, true);
+    sequencer.setStep(12, 15, true);
+    sequencer.setStep(13, 3, true);
+    sequencer.setStep(13, 11, true);
+    sequencer.setStep(14, 6, true);
+    sequencer.setStep(14, 14, true);
+    sequencer.setStep(15, 0, true);
+    sequencer.setStep(15, 8, true);
+    // Professional transitions through automation locks
+    sequencer.setStepCutoffLock(0, 0, true, 320);
+    sequencer.setStepCutoffLock(0, 8, true, 1400);
+    sequencer.setStepCutoffLock(0, 12, true, 4200);
+    sequencer.setStepCutoffLock(0, 15, true, 9000);
+    sequencer.setStepReverbSendLock(1, 4, true, 22);
+    sequencer.setStepReverbSendLock(1, 12, true, 45);
+    sequencer.setStepReverbSendLock(4, 0, true, 60);
+    sequencer.setStepReverbSendLock(4, 15, true, 70);
+    sequencer.setStepVolumeLock(2, 0, true, 105);
+    sequencer.setStepVolumeLock(2, 8, true, 118);
+    sequencer.setStepVolumeLock(2, 15, true, 112);
+
     sequencer.selectPattern(0); // Empezar con Hip Hop
     // sequencer.start(); // DISABLED: User must press PLAY
-    Serial.println("✓ Sequencer: 5 patrones cargados (Hip Hop, Techno, DnB, Breakbeat, House)");
+    Serial.println("✓ Sequencer: 6 patrones cargados (Hip Hop, Techno, DnB, Breakbeat, House, Cinematic Hybrid)");
     Serial.println("   Sequencer en PAUSA - presiona PLAY para iniciar");
 
     // 5. WiFi: STA (red doméstica) con fallback a AP
@@ -592,7 +767,7 @@ void setup() {
     xTaskCreatePinnedToCore(
         systemTask,
         "SystemTask",
-        16384,  // 16KB stack - WiFi/JSON
+        24576,  // 24KB stack - WiFi/JSON/UDP (increased for safety)
         NULL,
         5,
         NULL,

@@ -8,7 +8,7 @@
 #define SPI_MASTER_H
 
 #include <Arduino.h>
-#include <SPI.h>
+#include <HardwareSerial.h>
 #include "protocol.h"
 #include <freertos/semphr.h>
 
@@ -17,24 +17,15 @@
 #define MAX_VOICES 10
 
 // ═══════════════════════════════════════════════════════
-// SPI HARDWARE PINS (ESP32-S3 HSPI)
+// UART TRANSPORT PINS (ESP32-S3 → Daisy Seed)
 // ═══════════════════════════════════════════════════════
-// Modo mínimo: solo 4 líneas SPI + GND
-// Descomenta USE_SPI_SYNC_IRQ cuando añadas SYNC/IRQ
-//#define USE_SPI_SYNC_IRQ  // Habilitar SYNC (GPIO9) e IRQ (GPIO14)
+// Solo 2 cables + GND — mucho más simple que SPI
+// GPIO17 = TX (ESP32 transmite) → Daisy RX (D30, PB15, USART1_RX)
+// GPIO18 = RX (ESP32 recibe)   ← Daisy TX (D29, PB14, USART1_TX)
 
-#define STM32_SPI_CS     10   // HSPI CS
-#define STM32_SPI_MOSI   11   // HSPI MOSI
-#define STM32_SPI_SCK    12   // HSPI SCK
-#define STM32_SPI_MISO   13   // HSPI MISO
-
-#ifdef USE_SPI_SYNC_IRQ
-#define STM32_SPI_SYNC    9   // ESP32 → STM32: command ready pulse
-#define STM32_SPI_IRQ    14   // STM32 → ESP32: data ready / request
-#endif
-
-// SPI Speed: 20 MHz — Daisy Seed (STM32H750 @ 480MHz) lo maneja sin problemas
-#define STM32_SPI_CLOCK  20000000
+#define DAISY_UART_TX    17   // ESP32 TX → Daisy RX
+#define DAISY_UART_RX    18   // ESP32 RX ← Daisy TX
+#define DAISY_UART_BAUD  230400   // 230400: más estable que 1M, menos latencia que 115200
 
 // Audio constants (mirrored from old AudioEngine for compatibility)
 static constexpr int MAX_AUDIO_TRACKS = 16;
@@ -104,8 +95,10 @@ public:
     uint8_t getSequencerVolume();
     void setLiveVolume(uint8_t volume);
     uint8_t getLiveVolume();
+    void setTrackVolume(int track, uint8_t volume);
     void setLivePitchShift(float pitch);
     float getLivePitchShift();
+    void setTempo(float bpm);
     
     // ══════════════════════════════════════════════════
     // GLOBAL FILTER (legacy FX chain)
@@ -195,7 +188,7 @@ public:
 
     // Per-track extended FX
     void setTrackPhaser(int track, bool active, float rate = 1.0f, float depth = 50.0f, float feedback = 50.0f);
-    void setTrackTremolo(int track, bool active, float rate = 4.0f, float depth = 50.0f);
+    void setTrackTremolo(int track, bool active, float rate = 4.0f, float depth = 50.0f, uint8_t wave = 0, uint8_t target = 0);
     void setTrackPitch(int track, int16_t cents);        // -1200..+1200
     void setTrackGate(int track, bool active, float thresholdDb = -40.0f, float attackMs = 1.0f, float releaseMs = 50.0f);
     void setTrackEqLow(int track, int8_t gainDb);        // -12..+12
@@ -344,7 +337,7 @@ public:
     void process();
     
 private:
-    SPIClass* spi;
+    HardwareSerial* daisySerial;
     uint16_t seqNumber;
     uint32_t spiErrorCount;
     bool stm32Connected;
@@ -420,9 +413,7 @@ private:
     bool sendAndReceive(uint8_t cmd, const void* payload, uint16_t payloadLen,
                         void* response, uint16_t responseLen);
     uint16_t crc16(const uint8_t* data, uint16_t len);
-    void csLow();
-    void csHigh();
-    void syncPulse();
+    bool uartReadBytes(uint8_t* buf, uint16_t len, uint32_t timeoutMs);
 };
 
 #endif // SPI_MASTER_H

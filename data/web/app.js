@@ -8,11 +8,15 @@ let padLoopState = {};
 let padFxState = new Array(24).fill(null); // Per-pad FX state (16 main + 8 xtra)
 let trackFxState = new Array(16).fill(null); // Per-track FX state
 let isPlaying = false;
+let currentPatternIndex = 0; // Track current pattern for keyboard nav
+
+const PATTERN_NAMES = ['HIP HOP', 'TECHNO', 'DnB', 'BREAK', 'HOUSE', 'TRAP'];
 
 // Sync LEDs: when ON, live pads flash in rhythm with sequencer
 let syncLedsEnabled = false;
 
 // Sequencer caches
+let currentStepCount = 16;  // 16, 32, or 64
 let stepDots = [];
 let stepColumns = Array.from({ length: 16 }, () => []);
 let lastCurrentStep = null;
@@ -22,7 +26,7 @@ let sequencerViewMode = 'grid'; // 'grid' or 'circular'
 let circularCanvas = null;
 let circularCtx = null;
 let circularAnimationFrame = null;
-let circularSequencerData = Array.from({ length: 16 }, () => Array(16).fill(false));
+let circularSequencerData = Array.from({ length: 16 }, () => Array(currentStepCount).fill(false));
 
 // Sample counts per family
 let sampleCounts = {};
@@ -149,6 +153,8 @@ document.addEventListener('DOMContentLoaded', () => {
     initInstrumentTabs();
     initTabSystem(); // Tab navigation system
     initSyncLeds(); // Sync LEDs toggle
+    initGlobalKitControls();
+    if (typeof initSynthEditor === 'function') initSynthEditor();
     // initAiToggle(); // AI Chat DISABLED
 });
 
@@ -277,25 +283,26 @@ function handleWebSocketMessage(data) {
         case 'pad':
             flashPad(data.pad);
             break;
+        case 'stepCount':
+            if (data.count) {
+                applyStepCount(data.count);
+            }
+            break;
         case 'pattern':
+            if (data.stepCount && data.stepCount !== currentStepCount) {
+                applyStepCount(data.stepCount);
+            }
             loadPatternData(data);
-            // Actualizar botón activo y nombre del patrón si viene el índice
+            // Actualizar patrón actual si viene el índice
             if (data.index !== undefined) {
-                const patternButtons = document.querySelectorAll('.btn-pattern');
-                patternButtons.forEach((btn, idx) => {
-                    if (idx === data.index) {
-                        btn.classList.add('active');
-                        const patternName = btn.textContent.trim();
-                        document.getElementById('currentPatternName').textContent = patternName;
-                        // Update circular pattern name
-                        const circularPatternName = document.getElementById('circularPatternName');
-                        if (circularPatternName) {
-                            circularPatternName.textContent = patternName;
-                        }
-                    } else {
-                        btn.classList.remove('active');
-                    }
-                });
+                currentPatternIndex = data.index;
+                const patternName = data.index < PATTERN_NAMES.length
+                    ? PATTERN_NAMES[data.index]
+                    : `PATTERN ${data.index + 1}`;
+                const nameEl = document.getElementById('currentPatternName');
+                if (nameEl) nameEl.textContent = patternName;
+                const circularPatternName = document.getElementById('circularPatternName');
+                if (circularPatternName) circularPatternName.textContent = patternName;
             }
             break;
         case 'sampleCounts':
@@ -385,6 +392,16 @@ function handleWebSocketMessage(data) {
                         updateTrackVolume(track, volume);
                     }
                 });
+            }
+            break;
+        case 'trackSynthEngineSet':
+            if (data.track !== undefined && data.engine !== undefined) {
+                setSynthEngineExact(data.track, data.engine, false);
+            }
+            break;
+        case 'trackSynthEngines':
+            if (Array.isArray(data.engines)) {
+                syncTrackSynthEnginesFromState(data.engines);
             }
             break;
         case 'trackMuted':
@@ -618,7 +635,7 @@ function handleTrackFxUpdate(data) {
 
 function loadPatternData(data) {
     // Clear circular data
-    circularSequencerData = Array.from({ length: 16 }, () => Array(16).fill(false));
+    circularSequencerData = Array.from({ length: 16 }, () => Array(currentStepCount).fill(false));
     
     // Build a set of steps that should be active
     const shouldBeActive = new Set();
@@ -2225,18 +2242,14 @@ function triggerSynthPad(padIndex) {
     }
 }
 
-// Activar/desactivar engine synth en un pad (toggle)
-function setSynthEngine(padIndex, engine) {
+function updatePadSynthVisual(padIndex, engine) {
     const pad = document.querySelector(`.pad[data-pad="${padIndex}"]`);
     if (!pad) return;
 
-    if (padSynthEngine[padIndex] === engine) {
-        // Deseleccionar — volver a modo sample
-        padSynthEngine[padIndex] = -1;
+    if (engine < 0) {
         pad.classList.remove('synth-mode-active');
         pad.removeAttribute('data-synth-engine');
     } else {
-        padSynthEngine[padIndex] = engine;
         pad.classList.add('synth-mode-active');
         pad.setAttribute('data-synth-engine', engine);
     }
@@ -2246,9 +2259,75 @@ function setSynthEngine(padIndex, engine) {
     if (strip) {
         strip.querySelectorAll('.synth-btn').forEach(btn => {
             const e = parseInt(btn.dataset.engine);
-            btn.classList.toggle('active', padSynthEngine[padIndex] === e);
+            btn.classList.toggle('active', engine === e);
         });
     }
+}
+
+function refreshGlobalKitButtons() {
+    const controls = document.getElementById('globalKitControls');
+    if (!controls) return;
+    const first = padSynthEngine[0];
+    const isUniform = padSynthEngine.every(engine => engine === first);
+    controls.querySelectorAll('.global-kit-btn').forEach(btn => {
+        const btnEngine = parseInt(btn.dataset.engine, 10);
+        btn.classList.toggle('active', isUniform && btnEngine === first);
+    });
+}
+
+function setSynthEngineExact(padIndex, engine, notifyBackend = true, refreshGlobal = true) {
+    if (padIndex < 0 || padIndex >= 16) return;
+    const normalizedEngine = (typeof engine === 'number' && engine >= 0 && engine <= 3) ? engine : -1;
+    if (padSynthEngine[padIndex] === normalizedEngine) {
+        if (refreshGlobal) refreshGlobalKitButtons();
+        return;
+    }
+
+    padSynthEngine[padIndex] = normalizedEngine;
+    updatePadSynthVisual(padIndex, normalizedEngine);
+    if (typeof onSynthEngineChanged === 'function') onSynthEngineChanged(padIndex, normalizedEngine);
+
+    if (notifyBackend) {
+        sendWebSocket({ cmd: 'setTrackSynthEngine', track: padIndex, engine: normalizedEngine });
+    }
+
+    if (refreshGlobal) refreshGlobalKitButtons();
+}
+
+function syncTrackSynthEnginesFromState(engines) {
+    if (!Array.isArray(engines)) return;
+    for (let track = 0; track < 16; track++) {
+        const engine = parseInt(engines[track], 10);
+        setSynthEngineExact(track, Number.isFinite(engine) ? engine : -1, false, false);
+    }
+    refreshGlobalKitButtons();
+}
+
+// Activar/desactivar engine synth en un pad (toggle)
+function setSynthEngine(padIndex, engine) {
+    const nextEngine = (padSynthEngine[padIndex] === engine) ? -1 : engine;
+    setSynthEngineExact(padIndex, nextEngine, true);
+}
+
+function applyGlobalKitToAllPads(engine) {
+    const normalizedEngine = (typeof engine === 'number' && engine >= 0 && engine <= 3) ? engine : -1;
+    sendWebSocket({ cmd: 'applyKitToAllPads', engine: normalizedEngine });
+    for (let pad = 0; pad < 16; pad++) {
+        setSynthEngineExact(pad, normalizedEngine, false, false);
+    }
+    refreshGlobalKitButtons();
+}
+
+function initGlobalKitControls() {
+    const controls = document.getElementById('globalKitControls');
+    if (!controls) return;
+    controls.querySelectorAll('.global-kit-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const engine = parseInt(btn.dataset.engine, 10);
+            applyGlobalKitToAllPads(Number.isFinite(engine) ? engine : -1);
+        });
+    });
+    refreshGlobalKitButtons();
 }
 
 
@@ -2628,6 +2707,260 @@ function createSequencer() {
     }
 }
 
+// ============= STEP COUNT SELECTOR =============
+
+function setStepCount(count) {
+    if (count !== 16 && count !== 32 && count !== 64) return;
+    if (count === currentStepCount) return;
+    sendWebSocket({ cmd: 'setStepCount', count: count });
+    applyStepCount(count);
+}
+
+function applyStepCount(count) {
+    if (count !== 16 && count !== 32 && count !== 64) return;
+    if (count === currentStepCount) return;
+    currentStepCount = count;
+
+    // Update selector buttons
+    document.querySelectorAll('.step-count-btn').forEach(btn => {
+        btn.classList.toggle('active', parseInt(btn.dataset.steps) === count);
+    });
+
+    rebuildSequencerGrid(count);
+}
+
+function rebuildSequencerGrid(stepCount) {
+    const grid = document.getElementById('sequencerGrid');
+    const indicator = document.getElementById('stepIndicator');
+    if (!grid || !indicator) return;
+
+    // Save active steps and note lengths
+    const savedSteps = {};
+    document.querySelectorAll('.seq-step.active').forEach(el => {
+        const key = `${el.dataset.track}-${el.dataset.step}`;
+        savedSteps[key] = {
+            velocity: el.dataset.velocity || '127',
+            notelen: el.dataset.notelen || '1'
+        };
+    });
+
+    // Clear grid and indicator
+    grid.innerHTML = '';
+    indicator.innerHTML = '';
+    stepDots = [];
+    stepColumns = Array.from({ length: stepCount }, () => []);
+    circularSequencerData = Array.from({ length: 16 }, () => Array(stepCount).fill(false));
+    lastCurrentStep = null;
+
+    // Update CSS grid columns
+    // Use CSS class for grid template when 32/64, inline for 16
+    grid.style.gridTemplateColumns = '';
+    if (stepCount <= 16) {
+        grid.style.gridTemplateColumns = `72px repeat(${stepCount}, 1fr) 50px`;
+    }
+
+    const trackNames = ['BD', 'SD', 'CH', 'OH', 'CY', 'CP', 'RS', 'CB', 'LT', 'MT', 'HT', 'MA', 'CL', 'HC', 'MC', 'LC'];
+    const trackColors = [
+        '#ff0000', '#ffa500', '#ffff00', '#00ffff',
+        '#e6194b', '#ff00ff', '#00ff00', '#f58231',
+        '#911eb4', '#46f0f0', '#f032e6', '#bcf60c',
+        '#38ceff', '#fabebe', '#008080', '#484dff'
+    ];
+
+    for (let track = 0; track < 16; track++) {
+        // Track label (same as createSequencer)
+        const label = document.createElement('div');
+        label.className = 'track-label';
+        label.dataset.track = track;
+
+        const volumeBtn = document.createElement('button');
+        volumeBtn.className = 'volume-btn';
+        volumeBtn.setAttribute('aria-label', 'Volume');
+        volumeBtn.title = 'Volume';
+        volumeBtn.textContent = 'V';
+        volumeBtn.dataset.track = track;
+        volumeBtn.style.borderColor = trackColors[track];
+        volumeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showVolumeMenu(track, e.target);
+        });
+
+        const muteBtn = document.createElement('button');
+        muteBtn.className = 'mute-btn';
+        muteBtn.textContent = 'M';
+        muteBtn.title = 'Mute track';
+        muteBtn.dataset.track = track;
+        muteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setTrackMuted(track, !trackMutedState[track], true);
+        });
+
+        const soloBtn = document.createElement('button');
+        soloBtn.className = 'solo-btn';
+        soloBtn.textContent = 'S';
+        soloBtn.title = 'Solo track';
+        soloBtn.dataset.track = track;
+        soloBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setSoloTrack(track);
+        });
+
+        const name = document.createElement('span');
+        name.textContent = trackNames[track];
+        name.style.color = trackColors[track];
+
+        const loopIndicator = document.createElement('span');
+        loopIndicator.className = 'loop-indicator';
+        loopIndicator.textContent = 'LOOP';
+
+        label.appendChild(name);
+        label.appendChild(volumeBtn);
+        label.appendChild(muteBtn);
+        label.appendChild(soloBtn);
+        label.appendChild(loopIndicator);
+        label.style.borderColor = trackColors[track];
+
+        updateTrackLabelBackground(label, track, trackVolumes[track]);
+
+        label.addEventListener('click', (e) => {
+            if (window.selectTrack) window.selectTrack(track);
+        });
+
+        grid.appendChild(label);
+
+        // Steps (dynamic count)
+        for (let step = 0; step < stepCount; step++) {
+            const stepEl = document.createElement('div');
+            stepEl.className = 'seq-step';
+            stepEl.dataset.track = track;
+            stepEl.dataset.step = step;
+            stepEl.dataset.notelen = '1';
+            if (step % 4 === 0) stepEl.classList.add('beat-step');
+            else if (step % 2 === 0) stepEl.classList.add('half-step');
+            // Bar separator every 16 steps
+            if (stepCount > 16 && step > 0 && step % 16 === 0) {
+                stepEl.classList.add('bar-start');
+            }
+
+            const nlBar = document.createElement('div');
+            nlBar.className = 'step-notelen-bar';
+            stepEl.appendChild(nlBar);
+
+            const nlLabel = document.createElement('div');
+            nlLabel.className = 'step-notelen-label';
+            stepEl.appendChild(nlLabel);
+
+            stepEl.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                if (stepEl.classList.contains('active')) {
+                    showNoteLenMenu(e, track, step, stepEl);
+                }
+            });
+
+            let _nlTimer = null;
+            stepEl.addEventListener('touchstart', (e) => {
+                _nlTimer = setTimeout(() => {
+                    _nlTimer = null;
+                    if (stepEl.classList.contains('active')) {
+                        showNoteLenMenu(e.touches[0], track, step, stepEl);
+                    }
+                }, 500);
+            }, { passive: true });
+            stepEl.addEventListener('touchend', () => { if (_nlTimer) clearTimeout(_nlTimer); }, { passive: true });
+            stepEl.addEventListener('touchmove', () => { if (_nlTimer) clearTimeout(_nlTimer); }, { passive: true });
+
+            stepEl.addEventListener('click', () => {
+                toggleStep(track, step, stepEl);
+                if (window.selectCell) window.selectCell(track, step);
+            });
+
+            // Restore saved state
+            const key = `${track}-${step}`;
+            if (savedSteps[key]) {
+                stepEl.classList.add('active');
+                stepEl.dataset.velocity = savedSteps[key].velocity;
+                stepEl.dataset.notelen = savedSteps[key].notelen;
+                if (circularSequencerData[track]) {
+                    circularSequencerData[track][step] = true;
+                }
+            }
+
+            stepColumns[step].push(stepEl);
+            grid.appendChild(stepEl);
+        }
+
+        // FX column (same as createSequencer)
+        const fxCell = document.createElement('div');
+        fxCell.className = 'seq-fx-cell';
+        fxCell.dataset.track = track;
+        fxCell.style.borderColor = trackColors[track];
+
+        const filterBtn = document.createElement('button');
+        filterBtn.className = 'seq-fx-btn seq-filter-btn';
+        filterBtn.title = 'Filtro (F1-F10)';
+        filterBtn.textContent = 'F';
+        filterBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (window.keyboard_controls_module) window.keyboard_controls_module.selectedTrack = track;
+            if (window.showTrackFilterPanel) window.showTrackFilterPanel(track);
+        });
+
+        const trackFxBtn = document.createElement('button');
+        trackFxBtn.className = 'seq-fx-btn seq-dist-btn';
+        trackFxBtn.title = 'Distortion & BitCrush';
+        trackFxBtn.textContent = 'FX';
+        trackFxBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showTrackFxPopup(track);
+        });
+
+        fxCell.appendChild(filterBtn);
+        fxCell.appendChild(trackFxBtn);
+
+        const renderBtn = document.createElement('button');
+        renderBtn.className = 'seq-fx-btn seq-render-btn seq-render-wide';
+        renderBtn.title = 'Render track to WAV';
+        renderBtn.textContent = 'R';
+        renderBtn.dataset.track = track;
+        renderBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (window.renderSingleTrackInline) window.renderSingleTrackInline(track);
+        });
+        fxCell.appendChild(renderBtn);
+        grid.appendChild(fxCell);
+    }
+
+    // Step indicator dots
+    for (let i = 0; i < stepCount; i++) {
+        const dot = document.createElement('div');
+        dot.className = 'step-dot';
+        dot.dataset.step = i;
+        indicator.appendChild(dot);
+        stepDots.push(dot);
+    }
+
+    // Re-apply muted states
+    for (let track = 0; track < 16; track++) {
+        if (trackMutedState[track]) {
+            document.querySelectorAll(`.seq-step[data-track="${track}"]`).forEach(el => {
+                el.classList.add('track-muted');
+            });
+        }
+    }
+
+    // Update min-width for wider grids
+    const minWidth = stepCount <= 16 ? 820 : (stepCount <= 32 ? 1200 : 2200);
+    grid.style.minWidth = minWidth + 'px';
+    if (indicator) indicator.style.minWidth = minWidth + 'px';
+
+    // Apply step-count CSS class for compact layout
+    grid.classList.remove('steps-16', 'steps-32', 'steps-64');
+    grid.classList.add(`steps-${stepCount}`);
+
+    // Update playhead
+    requestAnimationFrame(() => updateSequencerPlayhead(currentStep));
+}
+
 function toggleStep(track, step, element) {
     const isActive = element.classList.toggle('active');
     
@@ -2752,7 +3085,7 @@ function _applyStepUpdate(step) {
         stepDots = Array.from(document.querySelectorAll('.step-dot'));
     }
     if (!stepColumns.length || !stepColumns[0] || stepColumns[0].length === 0) {
-        stepColumns = Array.from({ length: 16 }, () => []);
+        stepColumns = Array.from({ length: currentStepCount }, () => []);
         document.querySelectorAll('.seq-step').forEach(el => {
             const elStep = parseInt(el.dataset.step, 10);
             if (!Number.isNaN(elStep) && elStep >= 0 && elStep < stepColumns.length) {
@@ -2778,6 +3111,23 @@ function _applyStepUpdate(step) {
     nextColumn.forEach(el => el.classList.add('current'));
     updateSequencerPlayhead(step);
 
+    // Auto-scroll grid to keep active step visible (for 32/64 step grids)
+    if (currentStepCount > 16) {
+        const gridWrapper = document.getElementById('sequencerContainer');
+        const stepEl = nextColumn[0];
+        if (gridWrapper && stepEl) {
+            const wrapperRect = gridWrapper.getBoundingClientRect();
+            const stepRect = stepEl.getBoundingClientRect();
+            const margin = wrapperRect.width * 0.15;
+            if (stepRect.right > wrapperRect.right - margin) {
+                gridWrapper.scrollLeft += stepRect.width * 2;
+            } else if (stepRect.left < wrapperRect.left + margin) {
+                // Wrap around: jump to start when step resets
+                if (step === 0) gridWrapper.scrollLeft = 0;
+            }
+        }
+    }
+
     lastCurrentStep = step;
 
     // === SYNC LEDS: flash live pads in rhythm with sequencer ===
@@ -2801,7 +3151,7 @@ function updateSequencerPlayhead(step) {
     const playheadLine = gridWrapper.querySelector('.step-playhead-line');
     if (!playheadLine) return;
 
-    if (typeof step !== 'number' || step < 0 || step > 15) {
+    if (typeof step !== 'number' || step < 0 || step >= currentStepCount) {
         playheadLine.classList.remove('visible');
         return;
     }
@@ -3221,14 +3571,21 @@ function setupControls() {
     // Sequencer volume slider
     const sequencerVolumeSlider = document.getElementById('sequencerVolumeSlider');
     const sequencerVolumeValue = document.getElementById('sequencerVolumeValue');
+    let _seqVolTimer = null;
     
     sequencerVolumeSlider.addEventListener('input', (e) => {
         const volume = e.target.value;
         sequencerVolumeValue.textContent = volume;
         updateSequencerVolumeMeter(parseInt(volume, 10));
+        // Debounced send on input for responsive feel
+        if (_seqVolTimer) clearTimeout(_seqVolTimer);
+        _seqVolTimer = setTimeout(() => {
+            sendWebSocket({ cmd: 'setSequencerVolume', value: parseInt(volume) });
+        }, 80);
     });
     
     sequencerVolumeSlider.addEventListener('change', (e) => {
+        if (_seqVolTimer) clearTimeout(_seqVolTimer);
         const volume = parseInt(e.target.value);
         sendWebSocket({
             cmd: 'setSequencerVolume',
@@ -3239,14 +3596,21 @@ function setupControls() {
     // Live pads volume slider
     const liveVolumeSlider = document.getElementById('liveVolumeSlider');
     const liveVolumeValue = document.getElementById('liveVolumeValue');
+    let _liveVolTimer = null;
     
     liveVolumeSlider.addEventListener('input', (e) => {
         const volume = e.target.value;
         liveVolumeValue.textContent = volume;
         updateLiveVolumeMeter(parseInt(volume, 10));
+        // Debounced send on input for responsive feel
+        if (_liveVolTimer) clearTimeout(_liveVolTimer);
+        _liveVolTimer = setTimeout(() => {
+            sendWebSocket({ cmd: 'setLiveVolume', value: parseInt(volume) });
+        }, 80);
     });
     
     liveVolumeSlider.addEventListener('change', (e) => {
+        if (_liveVolTimer) clearTimeout(_liveVolTimer);
         const volume = parseInt(e.target.value);
         sendWebSocket({
             cmd: 'setLiveVolume',
@@ -3768,6 +4132,15 @@ function updateSequencerState(data) {
         });
     }
 
+    if (Array.isArray(data.trackSynthEngines)) {
+        syncTrackSynthEnginesFromState(data.trackSynthEngines);
+    }
+
+    // Apply step count from state
+    if (data.stepCount && data.stepCount !== currentStepCount) {
+        applyStepCount(data.stepCount);
+    }
+
     if (data.step !== undefined) {
         updateCurrentStep(data.step);
     }
@@ -3780,15 +4153,17 @@ function updateSequencerState(data) {
     
     // Update pattern button
     if (data.pattern !== undefined) {
-        document.querySelectorAll('.btn-pattern').forEach(btn => {
-            btn.classList.toggle('active', parseInt(btn.dataset.pattern) === data.pattern);
-        });
-        
-        // Solo solicitar patrón si cambió (no en cada state update)
-        const currentActiveButton = document.querySelector('.btn-pattern.active');
-        const currentPatternIndex = currentActiveButton ? parseInt(currentActiveButton.dataset.pattern) : -1;
+        // Update pattern tracking
         if (currentPatternIndex !== data.pattern) {
-            // Pattern changed, request new pattern data
+            currentPatternIndex = data.pattern;
+            // Pattern changed, update name and request new data
+            const patternName = data.pattern < PATTERN_NAMES.length
+                ? PATTERN_NAMES[data.pattern]
+                : `PATTERN ${data.pattern + 1}`;
+            const nameEl = document.getElementById('currentPatternName');
+            if (nameEl) nameEl.textContent = patternName;
+            const circEl = document.getElementById('circularPatternName');
+            if (circEl) circEl.textContent = patternName;
             setTimeout(() => {
                 sendWebSocket({ cmd: 'getPattern' });
             }, 100);
@@ -3865,15 +4240,11 @@ function handleSongPatternChange(pattern, songLen) {
     // Called when ESP32 auto-advances pattern in song mode
     songModeActive = true;
     songLength = songLen;
+    currentPatternIndex = pattern;
     updateSongBarHighlight(pattern);
     
     // Request new pattern data for display
     sendWebSocket({ cmd: 'getPattern' });
-    
-    // Update pattern button in controls tab
-    document.querySelectorAll('.btn-pattern').forEach(btn => {
-        btn.classList.toggle('active', parseInt(btn.dataset.pattern) === pattern);
-    });
     
     // Update pattern name display
     const patternName = `BAR ${pattern + 1}`;
@@ -4005,20 +4376,27 @@ function setupKeyboardControls() {
 }
 
 function changePattern(delta) {
-    const patternButtons = Array.from(document.querySelectorAll('.btn-pattern'));
-    if (patternButtons.length === 0) return;
-    const currentIndex = patternButtons.findIndex(btn => btn.classList.contains('active'));
-    const safeIndex = currentIndex >= 0 ? currentIndex : 0;
-    const nextIndex = (safeIndex + delta + patternButtons.length) % patternButtons.length;
-    patternButtons[nextIndex].click();
+    const totalPatterns = Math.max(PATTERN_NAMES.length, 6);
+    const nextIndex = (currentPatternIndex + delta + totalPatterns) % totalPatterns;
+    selectPattern(nextIndex);
 }
 
 function selectPattern(index) {
-    const patternButtons = Array.from(document.querySelectorAll('.btn-pattern'));
-    if (patternButtons.length === 0) return;
-    if (index >= 0 && index < patternButtons.length) {
-        patternButtons[index].click();
-    }
+    if (index < 0 || index >= 128) return;
+    currentPatternIndex = index;
+
+    // Send pattern change to ESP32
+    sendWebSocket({ cmd: 'selectPattern', index: index });
+
+    // Update UI display
+    const name = index < PATTERN_NAMES.length ? PATTERN_NAMES[index] : `PATTERN ${index + 1}`;
+    const el = document.getElementById('currentPatternName');
+    if (el) el.textContent = name;
+    const circEl = document.getElementById('circularPatternName');
+    if (circEl) circEl.textContent = name;
+
+    // Request pattern data from server
+    setTimeout(() => sendWebSocket({ cmd: 'getPattern' }), 50);
 }
 
 
@@ -7070,7 +7448,7 @@ function lfoUpdateCard(pad) {
         wrap.className = 'lfo-scope-wrap';
         wrap.id = `lfoScopeWrap${i}`;
         wrap.style.display = 'none';
-        wrap.innerHTML = `<span class="lfo-scope-label">${names[i]}</span><canvas class="lfo-scope-canvas" id="lfoScope${i}" width="100" height="40"></canvas>`;
+        wrap.innerHTML = `<span class="lfo-scope-label">${names[i]}</span><canvas class="lfo-scope-canvas" id="lfoScope${i}" width="180" height="60"></canvas>`;
         container.appendChild(wrap);
     }
 })();

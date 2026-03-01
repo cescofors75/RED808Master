@@ -113,6 +113,14 @@
                         <span class="sync-leds-slider"></span>
                         <span class="sync-leds-label">💡 SYNC LEDS</span>
                     </label>
+                    <div class="global-kit-controls" id="globalKitControls" title="Aplicar engine global a los 16 pads/sequencer tracks">
+                        <span class="global-kit-label">KIT ALL</span>
+                        <button class="global-kit-btn" data-engine="-1">SMP</button>
+                        <button class="global-kit-btn" data-engine="0">808</button>
+                        <button class="global-kit-btn" data-engine="1">909</button>
+                        <button class="global-kit-btn" data-engine="2">505</button>
+                        <button class="global-kit-btn" data-engine="3">303</button>
+                    </div>
                     <div class="pad-layout-selector">
                         <span class="layout-sel-label">GRID</span>
                         <button class="pls-btn" data-cols="2">2</button>
@@ -201,6 +209,11 @@
                             <span class="seq-btn-icon">🔇</span>
                             <span class="seq-btn-label">MUTE ALL</span>
                         </button>
+                        <div class="step-count-selector" id="stepCountSelector">
+                            <button class="step-count-btn active" data-steps="16" onclick="setStepCount(16)">16</button>
+                            <button class="step-count-btn" data-steps="32" onclick="setStepCount(32)">32</button>
+                            <button class="step-count-btn" data-steps="64" onclick="setStepCount(64)">64</button>
+                        </div>
                         <!-- AI Chat disabled
                         <button id="aiToggleBtn" class="seq-btn seq-btn-ai-toggle" title="Activar/Desactivar AI Chat">
                             <span class="seq-btn-bg"></span>
@@ -1490,6 +1503,7 @@
     </div>
 
     <script src="waveform-visualizer.js" defer></script>
+    <script src="synth-editor.js" defer></script>
     <script src="midi-import.js" defer></script>
     <script src="export-pattern.js" defer></script>
     <!-- <script src="chat-agent.js?v=2" defer></script> -->

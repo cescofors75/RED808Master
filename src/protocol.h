@@ -46,6 +46,21 @@ typedef struct __attribute__((packed)) {
 #define CMD_LIVE_VOLUME       0x12  // Live pad volume (0-180)
 #define CMD_TRACK_VOLUME      0x13  // Per-track volume (0-150)
 #define CMD_LIVE_PITCH        0x14  // Live pitch shift
+#define CMD_TEMPO             0x15  // Global transport BPM (ESP32 master clock -> Daisy sync)
+
+// ───────────────────────────────────────────────────────
+// PROTOCOL BOUNDARY (ESP32 master -> Daisy slave)
+//   TRIGGER         -> CMD_TRIGGER_SEQ / CMD_TRIGGER_LIVE
+//   PARAM_RT        -> existing param commands (filter/fx/track/pad/synth)
+//   SYNC_PATTERN    -> optional metadata command (timing stays on ESP32)
+//   TEMPO           -> CMD_TEMPO
+//   LOAD_SAMPLE     -> CMD_SD_LOAD_SAMPLE / CMD_SD_LOAD_KIT
+//   UPLOAD_*        -> CMD_SAMPLE_BEGIN / CMD_SAMPLE_DATA / CMD_SAMPLE_END
+//   MUTE            -> CMD_TRACK_MUTE
+//   REQ_DIR         -> CMD_SD_LIST_FOLDERS / CMD_SD_LIST_FILES
+// Daisy -> ESP32 should return only ACK/ERR + directory/load status/events.
+// Audio calculations, LFO values, waveform buffers, step timing never cross wire.
+// ───────────────────────────────────────────────────────
 
 // ═══════════════════════════════════════════════════════
 // COMMANDS: GLOBAL FILTER (0x20 - 0x2F)

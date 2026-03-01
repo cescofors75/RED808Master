@@ -133,12 +133,19 @@ body {
     flex: 1;
     -webkit-appearance: none;
     appearance: none;
-    height: 4px;
+    height: 6px;
     border-radius: 999px;
-    background: rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.15);
     outline: none;
     cursor: pointer;
     min-width: 80px;
+    touch-action: auto;
+    -webkit-user-select: none;
+    user-select: none;
+    z-index: 2;
+    padding: 8px 0;
+    margin: -8px 0;
+    background-clip: content-box;
 }
 
 .hdr-slider::-webkit-slider-thumb {
@@ -621,6 +628,50 @@ h2 {
 .pads-header h2 {
     font-size: 1.8em;
     margin: 0;
+}
+
+.global-kit-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.global-kit-label {
+    font-size: 0.65rem;
+    color: rgba(255, 255, 255, 0.62);
+    letter-spacing: 1px;
+    font-weight: 700;
+    margin-right: 2px;
+}
+
+.global-kit-btn {
+    min-width: 38px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(20, 20, 20, 0.85);
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 0.67rem;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.global-kit-btn:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+    color: #fff;
+}
+
+.global-kit-btn.active {
+    background: rgba(255, 0, 0, 0.22);
+    border-color: rgba(255, 0, 0, 0.7);
+    color: #fff;
+    box-shadow: 0 0 10px rgba(255, 0, 0, 0.35);
 }
 
 .btn-load-samples {
@@ -2030,12 +2081,123 @@ body:not(.mono-mode) .pad.tremolo-active {
     font-size: 10px;
 }
 
+/* ── Compact grid for 32/64 step modes ─────────── */
+.sequencer-grid.steps-32 {
+    grid-template-columns: 62px repeat(32, 1fr) 44px;
+    gap: 2px;
+}
+.sequencer-grid.steps-32 .seq-step {
+    height: 36px;
+}
+.sequencer-grid.steps-32 .track-label {
+    height: 36px;
+    font-size: 8px;
+    grid-template-columns: 1fr 18px;
+    gap: 1px;
+    padding: 1px;
+}
+.sequencer-grid.steps-32 .volume-btn,
+.sequencer-grid.steps-32 .solo-btn {
+    max-width: 18px;
+    min-width: 14px;
+    font-size: 7px;
+    border-radius: 2px;
+}
+.sequencer-grid.steps-32 .mute-btn {
+    font-size: 7px;
+    border-radius: 2px;
+}
+.sequencer-grid.steps-32 .seq-fx-cell {
+    height: 36px;
+    gap: 1px;
+    padding: 1px;
+}
+.sequencer-grid.steps-32 .seq-fx-btn {
+    font-size: 7px;
+    border-radius: 2px;
+}
+
+.sequencer-grid.steps-64 {
+    grid-template-columns: 56px repeat(64, 1fr) 40px;
+    gap: 1px;
+}
+.sequencer-grid.steps-64 .seq-step {
+    height: 30px;
+    border-radius: 2px;
+}
+.sequencer-grid.steps-64 .track-label {
+    height: 30px;
+    font-size: 7px;
+    padding: 1px;
+    grid-template-columns: 1fr 14px;
+    gap: 1px;
+}
+.sequencer-grid.steps-64 .track-label > span:not(.loop-indicator) {
+    font-size: 7px;
+}
+.sequencer-grid.steps-64 .volume-btn,
+.sequencer-grid.steps-64 .solo-btn {
+    max-width: 14px;
+    min-width: 10px;
+    font-size: 6px;
+    border-radius: 2px;
+}
+.sequencer-grid.steps-64 .mute-btn {
+    font-size: 6px;
+    border-radius: 2px;
+}
+.sequencer-grid.steps-64 .seq-fx-cell {
+    height: 30px;
+    gap: 1px;
+    padding: 1px;
+}
+.sequencer-grid.steps-64 .seq-fx-btn {
+    font-size: 6px;
+    border-radius: 1px;
+}
+
+
+/* ── Step Count Selector ─────────────────────────────── */
+.step-count-selector {
+    display: flex;
+    gap: 2px;
+    align-items: center;
+    background: rgba(0,0,0,0.4);
+    border-radius: 6px;
+    padding: 2px;
+    border: 1px solid var(--gray);
+}
+.step-count-btn {
+    background: transparent;
+    color: var(--gray-light);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    min-width: 30px;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+}
+.step-count-btn:hover {
+    background: rgba(255,255,255,0.1);
+    color: var(--white);
+}
+.step-count-btn.active {
+    background: var(--red);
+    color: var(--white);
+    border-color: var(--red);
+    box-shadow: 0 0 8px rgba(255,0,0,0.4);
+}
 .sequencer-grid-wrapper {
     width: 100%;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     padding-bottom: 12px;
     position: relative;
+    scroll-behavior: smooth;
 }
 
 .sequencer-grid-wrapper::-webkit-scrollbar {
@@ -2057,9 +2219,9 @@ body:not(.mono-mode) .pad.tremolo-active {
 
 .track-label {
     display: grid;
-    grid-template-columns: 1fr 22px;
+    grid-template-columns: 1fr auto;
     grid-template-rows: 1fr 1fr;
-    gap: 2px;
+    gap: 1px;
     font-size: 10px;
     font-weight: bold;
     border: 2px solid;
@@ -2073,6 +2235,11 @@ body:not(.mono-mode) .pad.tremolo-active {
     height: 44px;
     overflow: hidden;
     white-space: nowrap;
+    min-width: 0;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    align-items: stretch;
+    justify-items: stretch;
 }
 
 /* Nombre instrumento — celda top-left */
@@ -2132,7 +2299,7 @@ body:not(.mono-mode) .pad.tremolo-active {
     height: 100%;
     min-width: 0;
     padding: 0;
-    border: 1.5px solid rgba(255, 100, 100, 0.6);
+    border: 1px solid rgba(255, 100, 100, 0.6);
     border-radius: 3px;
     background: rgba(0, 0, 0, 0.6);
     color: rgba(255, 120, 120, 0.9);
@@ -2145,6 +2312,7 @@ body:not(.mono-mode) .pad.tremolo-active {
     justify-content: center;
     line-height: 1;
     z-index: 2;
+    overflow: hidden;
 }
 
 /* Volume button — celda top-right */
@@ -2153,9 +2321,10 @@ body:not(.mono-mode) .pad.tremolo-active {
     grid-row: 1;
     width: 100%;
     height: 100%;
-    min-width: 0;
+    min-width: 16px;
+    max-width: 24px;
     padding: 0;
-    border: 1.5px solid;
+    border: 1px solid;
     border-radius: 3px;
     background: rgba(255, 255, 255, 0.9);
     color: #333;
@@ -2169,6 +2338,7 @@ body:not(.mono-mode) .pad.tremolo-active {
     line-height: 1;
     z-index: 2;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
 }
 
 .volume-btn:hover {
@@ -2293,9 +2463,10 @@ body:not(.mono-mode) .pad.tremolo-active {
     grid-row: 2;
     width: 100%;
     height: 100%;
-    min-width: 0;
+    min-width: 16px;
+    max-width: 24px;
     padding: 0;
-    border: 1.5px solid rgba(255, 210, 60, 0.6);
+    border: 1px solid rgba(255, 210, 60, 0.6);
     border-radius: 3px;
     background: rgba(0, 0, 0, 0.6);
     color: rgba(255, 210, 60, 0.9);
@@ -2308,6 +2479,7 @@ body:not(.mono-mode) .pad.tremolo-active {
     justify-content: center;
     line-height: 1;
     z-index: 2;
+    overflow: hidden;
 }
 
 .solo-btn:hover {
@@ -2381,6 +2553,14 @@ body:not(.mono-mode) .pad.tremolo-active {
     display: block;
 }
 
+
+/* ── Bar separator for 32/64 step grids ──────────────── */
+.seq-step.bar-start {
+    border-left: 2px solid var(--red) !important;
+}
+.step-dot:nth-child(16n+1):not(:first-child) {
+    margin-left: 2px;
+}
 .seq-step {
     aspect-ratio: auto;
     height: 44px;
@@ -2469,26 +2649,32 @@ body:not(.mono-mode) .pad.tremolo-active {
 /* ===== SEQUENCER FX COLUMN ===== */
 .seq-fx-cell {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
     align-items: stretch;
     justify-items: stretch;
-    gap: 3px;
+    gap: 1px;
     height: 44px;
     background: rgba(30, 30, 40, 0.7);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 3px;
     padding: 1px;
+    min-width: 0;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    overflow: hidden;
 }
 
 .seq-fx-btn {
     width: 100%;
     height: 100%;
+    min-width: 0;
+    min-height: 0;
     border: 1px solid rgba(255, 255, 255, 0.3);
-    border-radius: 3px;
+    border-radius: 2px;
     background: rgba(0, 0, 0, 0.5);
     color: #ccc;
-    font-size: 9px;
+    font-size: 8px;
     font-weight: bold;
     cursor: pointer;
     display: flex;
@@ -2496,6 +2682,9 @@ body:not(.mono-mode) .pad.tremolo-active {
     justify-content: center;
     padding: 0;
     transition: all 0.15s;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .seq-render-wide {
@@ -2722,6 +2911,14 @@ body:not(.mono-mode) .pad.tremolo-active {
     border-color: #ff6666;
 }
 
+
+/* ── Bar separator for 32/64 step grids ──────────────── */
+.seq-step.bar-start {
+    border-left: 2px solid var(--red) !important;
+}
+.step-dot:nth-child(16n+1):not(:first-child) {
+    margin-left: 2px;
+}
 .seq-step {
     box-shadow: inset 0 0 5px rgba(0,0,0,0.5);
 }
@@ -3549,7 +3746,7 @@ body.mono-mode .info-item {
         font-size: 0.9em;
     }
     
-    .sequencer-grid {
+    .sequencer-grid:not(.steps-32):not(.steps-64) {
         grid-template-columns: 45px repeat(16, 1fr) 38px;
         gap: 1.5px;
         font-size: 9px;
@@ -3560,7 +3757,42 @@ body.mono-mode .info-item {
         min-width: 680px;
     }
     
-    .sequencer-grid-wrapper {
+    
+/* ── Step Count Selector ─────────────────────────────── */
+.step-count-selector {
+    display: flex;
+    gap: 2px;
+    align-items: center;
+    background: rgba(0,0,0,0.4);
+    border-radius: 6px;
+    padding: 2px;
+    border: 1px solid var(--gray);
+}
+.step-count-btn {
+    background: transparent;
+    color: var(--gray-light);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    min-width: 30px;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+}
+.step-count-btn:hover {
+    background: rgba(255,255,255,0.1);
+    color: var(--white);
+}
+.step-count-btn.active {
+    background: var(--red);
+    color: var(--white);
+    border-color: var(--red);
+    box-shadow: 0 0 8px rgba(255,0,0,0.4);
+}
+.sequencer-grid-wrapper {
         margin: 0 -5px;
     }
     
@@ -3625,14 +3857,49 @@ body.mono-mode .info-item {
         pointer-events: none !important;
     }
     
-    .sequencer-grid {
+    .sequencer-grid:not(.steps-32):not(.steps-64) {
         grid-template-columns: 35px repeat(16, 1fr) 34px;
         gap: 1px;
         font-size: 7px;
         min-width: 660px;
     }
     
-    .sequencer-grid-wrapper {
+    
+/* ── Step Count Selector ─────────────────────────────── */
+.step-count-selector {
+    display: flex;
+    gap: 2px;
+    align-items: center;
+    background: rgba(0,0,0,0.4);
+    border-radius: 6px;
+    padding: 2px;
+    border: 1px solid var(--gray);
+}
+.step-count-btn {
+    background: transparent;
+    color: var(--gray-light);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    min-width: 30px;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+}
+.step-count-btn:hover {
+    background: rgba(255,255,255,0.1);
+    color: var(--white);
+}
+.step-count-btn.active {
+    background: var(--red);
+    color: var(--white);
+    border-color: var(--red);
+    box-shadow: 0 0 8px rgba(255,0,0,0.4);
+}
+.sequencer-grid-wrapper {
         margin: 0 -10px;
     }
     
@@ -3645,7 +3912,15 @@ body.mono-mode .info-item {
         padding: 2px;
     }
     
-    .seq-step {
+    
+/* ── Bar separator for 32/64 step grids ──────────────── */
+.seq-step.bar-start {
+    border-left: 2px solid var(--red) !important;
+}
+.step-dot:nth-child(16n+1):not(:first-child) {
+    margin-left: 2px;
+}
+.seq-step {
         min-width: 12px;
         min-height: 12px;
     }
@@ -6163,7 +6438,7 @@ body.mono-mode .info-item {
         display: none;
     }
     
-    .sequencer-grid {
+    .sequencer-grid:not(.steps-32):not(.steps-64) {
         grid-template-columns: 40px repeat(16, 1fr) 36px;
         gap: 1.5px;
         font-size: 8px;
@@ -9474,7 +9749,42 @@ body.midi-dialog-open .midi-import-overlay * {
     text-shadow: 0 0 10px rgba(255, 0, 0, 0.6);
 }
 
-#section-sequencer .sequencer-grid-wrapper {
+#section-sequencer 
+/* ── Step Count Selector ─────────────────────────────── */
+.step-count-selector {
+    display: flex;
+    gap: 2px;
+    align-items: center;
+    background: rgba(0,0,0,0.4);
+    border-radius: 6px;
+    padding: 2px;
+    border: 1px solid var(--gray);
+}
+.step-count-btn {
+    background: transparent;
+    color: var(--gray-light);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    min-width: 30px;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+}
+.step-count-btn:hover {
+    background: rgba(255,255,255,0.1);
+    color: var(--white);
+}
+.step-count-btn.active {
+    background: var(--red);
+    color: var(--white);
+    border-color: var(--red);
+    box-shadow: 0 0 8px rgba(255,0,0,0.4);
+}
+.sequencer-grid-wrapper {
     position: relative;
     padding: 10px 10px 14px;
     border-radius: 14px;
@@ -9484,19 +9794,19 @@ body.midi-dialog-open .midi-import-overlay * {
                 inset 0 -1px 0 rgba(0, 0, 0, 0.6);
 }
 
-#section-sequencer .sequencer-grid {
+#section-sequencer .sequencer-grid:not(.steps-32):not(.steps-64) {
     min-width: 960px;
     grid-template-columns: 106px repeat(16, minmax(38px, 1fr)) 86px;
     gap: 4px;
 }
 
-#section-sequencer .track-label {
+#section-sequencer .track-label:not(.steps-32 .track-label):not(.steps-64 .track-label) {
     height: 54px;
     border-radius: 12px;
     border-width: 1px;
-    padding: 5px;
-    grid-template-columns: 1fr 30px;
-    gap: 4px;
+    padding: 4px;
+    grid-template-columns: 1fr 28px;
+    gap: 3px;
     background: linear-gradient(160deg, rgba(255, 255, 255, 0.08), rgba(12, 12, 16, 0.95));
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1),
                 0 3px 10px rgba(0, 0, 0, 0.4);
@@ -9533,12 +9843,12 @@ body.midi-dialog-open .midi-import-overlay * {
                 0 8px 14px rgba(0, 0, 0, 0.34);
 }
 
-#section-sequencer .seq-fx-cell {
+#section-sequencer .seq-fx-cell:not(.steps-32 .seq-fx-cell):not(.steps-64 .seq-fx-cell) {
     height: 58px;
     border-radius: 12px;
     border-width: 1px;
-    gap: 4px;
-    padding: 4px;
+    gap: 3px;
+    padding: 3px;
     background: linear-gradient(160deg, rgba(36, 36, 44, 0.75), rgba(14, 14, 20, 0.9));
 }
 
@@ -9564,7 +9874,15 @@ body.midi-dialog-open .midi-import-overlay * {
     background: linear-gradient(160deg, rgba(255, 90, 90, 0.24), rgba(28, 10, 10, 0.75));
 }
 
-#section-sequencer .seq-step {
+#section-sequencer 
+/* ── Bar separator for 32/64 step grids ──────────────── */
+.seq-step.bar-start {
+    border-left: 2px solid var(--red) !important;
+}
+.step-dot:nth-child(16n+1):not(:first-child) {
+    margin-left: 2px;
+}
+.seq-step {
     height: 48px;
     border-radius: 8px;
     border: 1px solid rgba(255, 255, 255, 0.12);
@@ -9806,13 +10124,17 @@ body.mono-mode #section-sequencer .seq-step[data-track].active {
 }
 
 .hdr-slider {
-    height: 5px;
-    background: rgba(255, 255, 255, 0.1);
+    height: 6px;
+    background: rgba(255, 255, 255, 0.13);
+    touch-action: auto;
+    padding: 8px 0;
+    margin: -8px 0;
+    background-clip: content-box;
 }
 
 .hdr-slider::-webkit-slider-thumb {
-    width: 13px;
-    height: 13px;
+    width: 16px;
+    height: 16px;
 }
 
 .hdr-vsm-btns {
@@ -11076,20 +11398,55 @@ body.embed-mode .tab-content:not(.active) { display: none !important; }
 .lfo-free-row { display: flex; align-items: center; gap: 6px; }
 
 /* LFO Scopes */
-.lfo-scope-section { margin-top: 12px; }
+.lfo-scope-section { margin-top: 16px; }
 .lfo-scopes {
-    display: flex; flex-wrap: wrap; gap: 6px;
+    display: flex; flex-wrap: wrap; gap: 10px;
 }
 .lfo-scope-wrap {
-    display: flex; align-items: center; gap: 4px;
-    background: #0a0a0a; border: 1px solid #333; border-radius: 4px;
-    padding: 2px 6px;
+    display: flex; align-items: center; gap: 6px;
+    background: #0a0a0a; border: 1px solid #444; border-radius: 6px;
+    padding: 4px 8px;
+    min-width: 220px;
 }
 .lfo-scope-label {
-    font-size: 0.65rem; color: #888; min-width: 20px; text-align: center;
+    font-size: 0.75rem; color: #aaa; min-width: 24px; text-align: center;
+    font-weight: bold;
 }
 .lfo-scope-canvas {
-    border-radius: 2px; image-rendering: pixelated;
+    border-radius: 3px; image-rendering: pixelated;
+    width: 180px;
+    height: 60px;
+}
+
+@media (min-width: 1200px) {
+    .lfo-grid {
+        grid-template-columns: repeat(4, minmax(220px, 1fr));
+        gap: 12px;
+    }
+    .lfo-card {
+        padding: 12px;
+        border-radius: 8px;
+    }
+    .lfo-pad-name {
+        font-size: 0.95rem;
+    }
+    .lfo-row {
+        gap: 8px;
+        margin-bottom: 6px;
+    }
+    .lfo-wave-sel, .lfo-div-sel, .lfo-target-sel {
+        font-size: 0.78rem;
+        padding: 4px 6px;
+    }
+    .lfo-label,
+    .lfo-retrig-label,
+    .lfo-depth-val {
+        font-size: 0.76rem;
+    }
+    .lfo-depth-slider,
+    .lfo-free-slider {
+        height: 6px;
+    }
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -11128,6 +11485,18 @@ body.embed-mode .tab-content:not(.active) { display: none !important; }
     touch-action: manipulation;
     user-select: none;
     -webkit-user-select: none;
+}
+
+@media (min-width: 1200px) {
+    .pad-synth-strip {
+        right: 4px;
+        gap: 5px;
+    }
+    .synth-btn {
+        width: 34px;
+        height: 23px;
+        font-size: 8px;
+    }
 }
 
 .synth-btn:hover {
@@ -11230,3 +11599,371 @@ body.embed-mode .tab-content:not(.active) { display: none !important; }
     }
 }
 
+/* ============================================================
+   SYNTH EDITOR: Pad waveform overlay + parameter modal
+   ============================================================ */
+
+/* --- Synth waveform overlay inside pad --- */
+.synth-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 80%;
+    height: 60%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 5;
+}
+.synth-overlay > * {
+    pointer-events: auto;
+}
+
+.synth-pad-waveform {
+    width: 100%;
+    height: 100%;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.15);
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+.synth-pad-waveform:hover {
+    border-color: rgba(255,255,255,0.4);
+}
+
+/* Synth params button — top bar of pad, between Loop and upload */
+.synth-params-btn {
+    position: absolute !important;
+    top: 5px;
+    left: 55px;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    background: rgba(0,0,0,0.75);
+    border: 2px solid rgba(100,200,255,0.5);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    padding: 0;
+    z-index: 100;
+    pointer-events: auto;
+    touch-action: manipulation;
+    isolation: isolate;
+    opacity: 0.8;
+}
+.synth-params-btn:hover {
+    background: rgba(0,0,0,0.9);
+    border-color: rgba(100,200,255,0.8);
+    transform: scale(1.1);
+    opacity: 1;
+}
+.synth-params-btn:active {
+    background: rgba(50,150,255,0.4);
+    transform: scale(0.95);
+    opacity: 1;
+}
+
+/* --- Synth Parameter Modal --- */
+.synth-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+.synth-modal-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.synth-modal {
+    background: linear-gradient(135deg, #1a1c2e 0%, #0d0f1a 100%);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px;
+    width: 90vw;
+    max-width: 640px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 80px rgba(0,0,0,0.8), 0 0 40px rgba(100,100,255,0.08);
+    animation: synthModalIn 0.3s ease;
+}
+
+@keyframes synthModalIn {
+    from { transform: scale(0.85) translateY(30px); opacity: 0; }
+    to   { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* Header */
+.synth-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.synth-modal-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.synth-modal-engine-badge {
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.synth-modal-inst-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #e0e0e0;
+    letter-spacing: 0.5px;
+}
+.synth-modal-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.synth-modal-trigger-btn {
+    padding: 6px 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: rgba(40,200,80,0.2);
+    color: #6f6;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.synth-modal-trigger-btn:hover {
+    background: rgba(40,200,80,0.4);
+    border-color: rgba(100,255,100,0.5);
+}
+.synth-modal-trigger-btn:active {
+    transform: scale(0.95);
+    background: rgba(40,200,80,0.6);
+}
+
+.synth-modal-close-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,60,60,0.15);
+    color: #f66;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+}
+.synth-modal-close-btn:hover {
+    background: rgba(255,60,60,0.35);
+    border-color: rgba(255,80,80,0.6);
+}
+
+/* Waveform area */
+.synth-modal-waveform-wrap {
+    padding: 16px 20px 8px;
+    display: flex;
+    justify-content: center;
+}
+.synth-modal-waveform-wrap canvas {
+    width: 100%;
+    max-width: 600px;
+    height: 120px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+/* Parameter rows */
+.synth-modal-params {
+    padding: 12px 20px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.synth-param-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.synth-param-label {
+    min-width: 85px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #aab;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+.synth-param-slider {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.08);
+    outline: none;
+    cursor: pointer;
+}
+
+/* Slider thumb */
+.synth-param-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid rgba(255,255,255,0.3);
+    box-shadow: 0 0 8px rgba(100,100,255,0.4);
+    cursor: grab;
+    transition: box-shadow 0.15s;
+}
+.synth-param-slider::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 16px rgba(100,150,255,0.7);
+}
+.synth-param-slider::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid rgba(255,255,255,0.3);
+    box-shadow: 0 0 8px rgba(100,100,255,0.4);
+    cursor: grab;
+}
+
+/* Engine-specific slider track colors */
+.synth-modal[data-engine="0"] .synth-param-slider::-webkit-slider-thumb {
+    background: #c0392b;
+    border-color: rgba(192,57,43,0.5);
+    box-shadow: 0 0 10px rgba(192,57,43,0.5);
+}
+.synth-modal[data-engine="1"] .synth-param-slider::-webkit-slider-thumb {
+    background: #0076a8;
+    border-color: rgba(0,118,168,0.5);
+    box-shadow: 0 0 10px rgba(0,118,168,0.5);
+}
+.synth-modal[data-engine="2"] .synth-param-slider::-webkit-slider-thumb {
+    background: #1e8449;
+    border-color: rgba(30,132,73,0.5);
+    box-shadow: 0 0 10px rgba(30,132,73,0.5);
+}
+.synth-modal[data-engine="3"] .synth-param-slider::-webkit-slider-thumb {
+    background: #7d3c98;
+    border-color: rgba(125,60,152,0.5);
+    box-shadow: 0 0 10px rgba(125,60,152,0.5);
+}
+
+.synth-param-value {
+    min-width: 55px;
+    text-align: right;
+    font-size: 12px;
+    font-weight: 500;
+    color: #8cf;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Toggle buttons (e.g. SAW/SQR waveform) */
+.synth-param-toggle-group {
+    display: flex;
+    gap: 4px;
+}
+.synth-param-toggle-btn {
+    padding: 5px 14px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.05);
+    color: #889;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.synth-param-toggle-btn.active {
+    background: rgba(125,60,152,0.35);
+    border-color: rgba(125,60,152,0.7);
+    color: #d8b4fe;
+}
+.synth-param-toggle-btn:hover:not(.active) {
+    background: rgba(255,255,255,0.1);
+    color: #bbc;
+}
+
+/* Compact overlay for small pad sizes (cols-8) */
+.pads-grid.cols-8 .synth-overlay {
+    width: 70%;
+    height: 50%;
+}
+.pads-grid.cols-8 .synth-pad-waveform {
+    width: 100%;
+    height: 100%;
+}
+.pads-grid.cols-8 .synth-params-btn {
+    left: 42px;
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    font-size: 16px;
+}
+
+/* Mobile */
+@media (max-width: 520px) {
+    .synth-modal {
+        width: 96vw;
+        max-height: 95vh;
+        border-radius: 12px;
+    }
+    .synth-modal-header {
+        padding: 12px 14px 10px;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .synth-modal-inst-name {
+        font-size: 14px;
+    }
+    .synth-param-label {
+        min-width: 65px;
+        font-size: 10px;
+    }
+    .synth-param-value {
+        min-width: 42px;
+        font-size: 10px;
+    }
+    .synth-overlay {
+        right: 28px;
+    }
+    .synth-pad-waveform {
+        height: 28px;
+        max-width: 80px;
+    }
+    .synth-params-btn {
+        width: 24px;
+        height: 16px;
+        font-size: 9px;
+    }
+}

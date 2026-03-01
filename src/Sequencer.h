@@ -10,7 +10,7 @@
 #include <Arduino.h>
 
 #define MAX_PATTERNS 128
-#define STEPS_PER_PATTERN 16
+#define STEPS_PER_PATTERN 64
 #define MAX_TRACKS 16
 
 // Loop types for pads
@@ -34,6 +34,10 @@ struct PatternData {
   uint8_t ratchets[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
   bool    stepVolumeLockEnabled[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
   uint8_t stepVolumeLockValue[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+  bool    stepCutoffLockEnabled[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+  uint16_t stepCutoffLockHz[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+  bool    stepReverbSendLockEnabled[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+  uint8_t stepReverbSendLockValue[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
 };
 // sizeof(PatternData) ≈ 229 KB  →  allocated from 8 MB PSRAM, not DRAM
 
@@ -94,9 +98,20 @@ public:
   bool hasStepVolumeLock(int pattern, int track, int step);
   uint8_t getStepVolumeLock(int track, int step);
   uint8_t getStepVolumeLock(int pattern, int track, int step);
+
+  // Parameter automation per-step (timing source = sequencer)
+  void setStepCutoffLock(int track, int step, bool enabled, uint16_t cutoffHz);
+  void setStepCutoffLock(int pattern, int track, int step, bool enabled, uint16_t cutoffHz);
+  bool hasStepCutoffLock(int track, int step);
+  uint16_t getStepCutoffLock(int track, int step);
+
+  void setStepReverbSendLock(int track, int step, bool enabled, uint8_t sendLevel);
+  void setStepReverbSendLock(int pattern, int track, int step, bool enabled, uint8_t sendLevel);
+  bool hasStepReverbSendLock(int track, int step);
+  uint8_t getStepReverbSendLock(int track, int step);
   
   // Bulk pattern writing (for reliable MIDI import)
-  void setPatternBulk(int pattern, const bool stepsData[16][16], const uint8_t velsData[16][16]);
+  void setPatternBulk(int pattern, const bool stepsData[MAX_TRACKS][STEPS_PER_PATTERN], const uint8_t velsData[MAX_TRACKS][STEPS_PER_PATTERN]);
   
   // Pattern management
   void selectPattern(int pattern);
@@ -112,6 +127,10 @@ public:
   uint8_t getTrackVolume(int track);
   
   // Song mode (auto-chain patterns)
+    // Pattern length (16/32/64)
+  void setPatternLength(int len);
+  int getPatternLength();
+
   void setSongMode(bool enabled);
   bool isSongMode();
   void setSongLength(int length);
@@ -132,9 +151,14 @@ public:
   // Callbacks
   // noteLenSamples: 0 = full sample, >0 = cut after N samples (note length)
   typedef void (*StepCallback)(int track, uint8_t velocity, uint8_t trackVolume, uint32_t noteLenSamples);
+  typedef void (*StepAutomationCallback)(int track, int step,
+                                         bool cutoffEnabled, uint16_t cutoffHz,
+                                         bool reverbEnabled, uint8_t reverbSend,
+                                         bool volumeEnabled, uint8_t volume);
   typedef void (*StepChangeCallback)(int newStep);
   typedef void (*PatternChangeCallback)(int newPattern, int songLength);
   void setStepCallback(StepCallback callback);
+  void setStepAutomationCallback(StepAutomationCallback callback);
   void setStepChangeCallback(StepChangeCallback callback);
   void setPatternChangeCallback(PatternChangeCallback callback);
   
@@ -143,6 +167,7 @@ private:
   PatternData* pd;
   
   bool playing;
+  int patternLength;  // Active step count: 16, 32, or 64
   int currentPattern;
   int currentStep;
   float tempo; // BPM
@@ -155,6 +180,7 @@ private:
   uint8_t trackVolume[MAX_TRACKS]; // Volume per track (0-150)
   
   StepCallback stepCallback;
+  StepAutomationCallback stepAutomationCallback;
   StepChangeCallback stepChangeCallback;
   PatternChangeCallback patternChangeCallback;
   

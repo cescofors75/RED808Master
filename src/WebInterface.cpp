@@ -21,6 +21,10 @@ extern SampleManager sampleManager;
 extern LFOEngine lfoEngine;
 extern void triggerPadWithLED(int track, uint8_t velocity);  // Función que enciende LED
 extern void setLedMonoMode(bool enabled);
+extern int8_t gTrackSynthEngine[16];
+extern void setTrackSynthEngine(int track, int8_t engine);
+extern void setAllTrackSynthEngines(int8_t engine);
+static constexpr bool kStrictProtocolBoundary = true;
 
 static bool isSupportedSampleFile(const String& filename) {
   String lower = filename;
@@ -71,6 +75,7 @@ static void populateStateDocument(DynamicJsonDocument& doc) {
   doc["psramFree"] = sampleManager.getFreePSRAM();
   doc["songMode"] = sequencer.isSongMode();
   doc["songLength"] = sequencer.getSongLength();
+  doc["stepCount"] = sequencer.getPatternLength();
   doc["humanizeTimingMs"] = sequencer.getHumanizeTimingMs();
   doc["humanizeVelocity"] = sequencer.getHumanizeVelocityAmount();
   doc["heap"] = ESP.getFreeHeap();
@@ -90,6 +95,11 @@ static void populateStateDocument(DynamicJsonDocument& doc) {
   JsonArray trackVolumes = doc.createNestedArray("trackVolumes");
   for (int track = 0; track < MAX_TRACKS; track++) {
     trackVolumes.add(sequencer.getTrackVolume(track));
+  }
+
+  JsonArray trackSynthEngines = doc.createNestedArray("trackSynthEngines");
+  for (int track = 0; track < MAX_TRACKS; track++) {
+    trackSynthEngines.add((int)gTrackSynthEngine[track]);
   }
 
   // Compact samples: only send loaded sample info (not empty pads)
@@ -121,10 +131,22 @@ static void populateStateDocument(DynamicJsonDocument& doc) {
     trackFilters.add((int)filterType);
   }
   
-  // Daisy SD card info (from cached status)
-  doc["sdPresent"] = spiMaster.hasSdCard();
-  doc["sdKit"] = spiMaster.getCurrentKitName();
-  doc["sdPadsLoaded"] = spiMaster.getTotalPadsLoaded();
+  // Daisy SD card info (explicit SD status query in strict boundary mode)
+  SdStatusResponse sdStat = {};
+  if (spiMaster.sdGetStatus(sdStat)) {
+    doc["sdPresent"] = (bool)sdStat.present;
+    doc["sdKit"] = String(sdStat.currentKit);
+    uint32_t mask = sdStat.samplesLoaded;
+    int loadedCount = 0;
+    for (int i = 0; i < 24; i++) {
+      if (mask & (1UL << i)) loadedCount++;
+    }
+    doc["sdPadsLoaded"] = loadedCount;
+  } else {
+    doc["sdPresent"] = false;
+    doc["sdKit"] = "";
+    doc["sdPadsLoaded"] = 0;
+  }
   
   // LFO active count
   int lfoCount = 0;
@@ -323,7 +345,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     if (LittleFS.exists("/web/index.html.gz")) {
       AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/index.html.gz", "text/html");
       response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "max-age=86400");
+      response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       request->send(response);
     } else {
       request->send(LittleFS, "/web/index.html", "text/html");
@@ -334,7 +356,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     if (LittleFS.exists("/web/index.html.gz")) {
       AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/index.html.gz", "text/html");
       response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "max-age=86400");
+      response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       request->send(response);
     } else {
       request->send(LittleFS, "/web/index.html", "text/html");
@@ -345,7 +367,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     if (LittleFS.exists("/web/app.js.gz")) {
       AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/app.js.gz", "application/javascript");
       response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "max-age=86400");
+      response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       request->send(response);
     } else {
       request->send(LittleFS, "/web/app.js", "application/javascript");
@@ -356,7 +378,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     if (LittleFS.exists("/web/style.css.gz")) {
       AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/style.css.gz", "text/css");
       response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "max-age=86400");
+      response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       request->send(response);
     } else {
       request->send(LittleFS, "/web/style.css", "text/css");
@@ -367,7 +389,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     if (LittleFS.exists("/web/keyboard-controls.js.gz")) {
       AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/keyboard-controls.js.gz", "application/javascript");
       response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "max-age=86400");
+      response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       request->send(response);
     } else {
       request->send(LittleFS, "/web/keyboard-controls.js", "application/javascript");
@@ -378,7 +400,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     if (LittleFS.exists("/web/keyboard-styles.css.gz")) {
       AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/keyboard-styles.css.gz", "text/css");
       response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "max-age=86400");
+      response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       request->send(response);
     } else {
       request->send(LittleFS, "/web/keyboard-styles.css", "text/css");
@@ -389,7 +411,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     if (LittleFS.exists("/web/midi-import.js.gz")) {
       AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/midi-import.js.gz", "application/javascript");
       response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "max-age=86400");
+      response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       request->send(response);
     } else {
       request->send(LittleFS, "/web/midi-import.js", "application/javascript");
@@ -493,7 +515,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   
   // Fallback para otros archivos estáticos (favicon, etc)
   server->serveStatic("/", LittleFS, "/web/")
-    .setCacheControl("max-age=86400");
+    .setCacheControl("no-cache, no-store, must-revalidate");
   
   // API REST
   server->on("/api/trigger", HTTP_POST, [](AsyncWebServerRequest *request){
@@ -522,6 +544,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     if (request->hasParam("value", true)) {
       float tempo = request->getParam("value", true)->value().toFloat();
       sequencer.setTempo(tempo);
+      spiMaster.setTempo(tempo);
       request->send(200, "text/plain", "OK");
     }
   });
@@ -549,7 +572,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     
     for (int track = 0; track < 16; track++) {
       JsonArray trackSteps = doc.createNestedArray(String(track));
-      for (int step = 0; step < 16; step++) {
+      for (int step = 0; step < sequencer.getPatternLength(); step++) {
         trackSteps.add(sequencer.getStep(track, step));
       }
     }
@@ -562,6 +585,20 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   // Endpoint para info del sistema (para dashboard /adm)
   server->on("/api/sysinfo", HTTP_GET, [this](AsyncWebServerRequest *request){
     StaticJsonDocument<3072> doc;
+
+    // Daisy status refresh for admin telemetry
+    spiMaster.requestStatus();
+    spiMaster.requestPeaks();
+    static uint32_t lastPingMs = 0;
+    static bool lastPingOk = false;
+    static float lastPingMsValue = -1.0f;
+    uint32_t nowMs = millis();
+    if (nowMs - lastPingMs > 5000) {
+      uint32_t rttUs = 0;
+      lastPingOk = spiMaster.ping(rttUs);
+      lastPingMsValue = lastPingOk ? ((float)rttUs / 1000.0f) : -1.0f;
+      lastPingMs = nowMs;
+    }
     
     // Info de memoria
     doc["heapFree"] = ESP.getFreeHeap();
@@ -622,6 +659,22 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     doc["pattern"] = sequencer.getCurrentPattern();
     doc["samplesLoaded"] = sampleManager.getLoadedSamplesCount();
     doc["memoryUsed"] = sampleManager.getTotalMemoryUsed();
+
+    // Daisy realtime telemetry
+    doc["daisyConnected"] = spiMaster.isConnected();
+    doc["daisyPingOk"] = lastPingOk;
+    doc["daisyRttMs"] = lastPingMsValue;
+    doc["daisyVoices"] = spiMaster.getActiveVoices();
+    doc["daisyCpu"] = spiMaster.getCpuLoad();
+    doc["daisyMasterPeak"] = spiMaster.getMasterPeak();
+    doc["daisyKit"] = String(spiMaster.getCurrentKitName());
+
+    float peaks[16];
+    spiMaster.getTrackPeaks(peaks, 16);
+    JsonArray peaksArray = doc.createNestedArray("daisyTrackPeaks");
+    for (int i = 0; i < 16; i++) {
+      peaksArray.add(peaks[i]);
+    }
     
     // Info MIDI USB
     if (midiController) {
@@ -1166,15 +1219,16 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             if (_wsFreeAfter && _wsReassemblyBuf) { free(_wsReassemblyBuf); _wsReassemblyBuf = nullptr; }
             return;
           }
-          DynamicJsonDocument bulkDoc(16384);
+          DynamicJsonDocument bulkDoc(32768);  // Larger to support 64-step patterns
           DeserializationError bulkErr = deserializeJson(bulkDoc, (char*)data);
           if (!bulkErr) {
             int pattern = bulkDoc["p"].as<int>();
             // p = -1 means current pattern (single bar import)
             if (pattern < 0) pattern = sequencer.getCurrentPattern();
             if (pattern >= 0 && pattern < MAX_PATTERNS) {
-              bool stepsData[16][16] = {};
-              uint8_t velsData[16][16];
+              bool stepsData[MAX_TRACKS][STEPS_PER_PATTERN] = {};
+              uint8_t velsData[MAX_TRACKS][STEPS_PER_PATTERN];
+              memset(velsData, 127, sizeof(velsData));
               memset(velsData, 127, sizeof(velsData));
               
               JsonArray sArr = bulkDoc["s"].as<JsonArray>();
@@ -1182,12 +1236,12 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
               
               for (int t = 0; t < 16 && t < (int)sArr.size(); t++) {
                 JsonArray trackSteps = sArr[t].as<JsonArray>();
-                for (int s = 0; s < 16 && s < (int)trackSteps.size(); s++) {
+                for (int s = 0; s < STEPS_PER_PATTERN && s < (int)trackSteps.size(); s++) {
                   stepsData[t][s] = trackSteps[s].as<int>() != 0;
                 }
                 if (vArr && t < (int)vArr.size()) {
                   JsonArray trackVels = vArr[t].as<JsonArray>();
-                  for (int s = 0; s < 16 && s < (int)trackVels.size(); s++) {
+                  for (int s = 0; s < STEPS_PER_PATTERN && s < (int)trackVels.size(); s++) {
                     int v = trackVels[s].as<int>();
                     velsData[t][s] = (v > 0 && v <= 127) ? v : 127;
                   }
@@ -1243,14 +1297,16 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
               return;
             }
             yield();
-            DynamicJsonDocument responseDoc(16384);  // 6 structures × 16×16 values needs 13-15KB
+            int stepCount = sequencer.getPatternLength();
+            DynamicJsonDocument responseDoc(stepCount > 16 ? 32768 : 16384);  // Dynamic size for step count
+            responseDoc["stepCount"] = stepCount;  // 6 structures × 16×16 values needs 13-15KB
             responseDoc["type"] = "pattern";
             responseDoc["index"] = pattern;
             
             // Send steps (active/inactive) - 16 tracks activos
             for (int track = 0; track < 16; track++) {
               JsonArray trackSteps = responseDoc.createNestedArray(String(track));
-              for (int step = 0; step < 16; step++) {
+              for (int step = 0; step < stepCount; step++) {
                 trackSteps.add(sequencer.getStep(track, step));
               }
             }
@@ -1259,7 +1315,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             JsonObject velocitiesObj = responseDoc.createNestedObject("velocities");
             for (int track = 0; track < 16; track++) {
               JsonArray trackVels = velocitiesObj.createNestedArray(String(track));
-              for (int step = 0; step < 16; step++) {
+              for (int step = 0; step < stepCount; step++) {
                 trackVels.add(sequencer.getStepVelocity(track, step));
               }
             }
@@ -1268,7 +1324,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             JsonObject noteLensObj = responseDoc.createNestedObject("noteLens");
             for (int track = 0; track < 16; track++) {
               JsonArray trackNL = noteLensObj.createNestedArray(String(track));
-              for (int step = 0; step < 16; step++) {
+              for (int step = 0; step < stepCount; step++) {
                 trackNL.add(sequencer.getStepNoteLen(track, step));
               }
             }
@@ -1276,7 +1332,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             JsonObject volumeLocksObj = responseDoc.createNestedObject("volumeLocks");
             for (int track = 0; track < 16; track++) {
               JsonArray trackLocks = volumeLocksObj.createNestedArray(String(track));
-              for (int step = 0; step < 16; step++) {
+              for (int step = 0; step < stepCount; step++) {
                 if (sequencer.hasStepVolumeLock(track, step)) {
                   trackLocks.add(sequencer.getStepVolumeLock(track, step));
                 } else {
@@ -1288,7 +1344,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             JsonObject probabilitiesObj = responseDoc.createNestedObject("probabilities");
             for (int track = 0; track < 16; track++) {
               JsonArray trackProb = probabilitiesObj.createNestedArray(String(track));
-              for (int step = 0; step < 16; step++) {
+              for (int step = 0; step < stepCount; step++) {
                 trackProb.add(sequencer.getStepProbability(track, step));
               }
             }
@@ -1296,8 +1352,32 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             JsonObject ratchetsObj = responseDoc.createNestedObject("ratchets");
             for (int track = 0; track < 16; track++) {
               JsonArray trackRat = ratchetsObj.createNestedArray(String(track));
-              for (int step = 0; step < 16; step++) {
+              for (int step = 0; step < stepCount; step++) {
                 trackRat.add(sequencer.getStepRatchet(track, step));
+              }
+            }
+
+            JsonObject cutoffLocksObj = responseDoc.createNestedObject("cutoffLocks");
+            for (int track = 0; track < 16; track++) {
+              JsonArray trackLocks = cutoffLocksObj.createNestedArray(String(track));
+              for (int step = 0; step < stepCount; step++) {
+                if (sequencer.hasStepCutoffLock(track, step)) {
+                  trackLocks.add((int)sequencer.getStepCutoffLock(track, step));
+                } else {
+                  trackLocks.add(-1);
+                }
+              }
+            }
+
+            JsonObject reverbLocksObj = responseDoc.createNestedObject("reverbLocks");
+            for (int track = 0; track < 16; track++) {
+              JsonArray trackLocks = reverbLocksObj.createNestedArray(String(track));
+              for (int step = 0; step < stepCount; step++) {
+                if (sequencer.hasStepReverbSendLock(track, step)) {
+                  trackLocks.add((int)sequencer.getStepReverbSendLock(track, step));
+                } else {
+                  trackLocks.add(-1);
+                }
               }
             }
             
@@ -1538,19 +1618,21 @@ void WebInterface::update() {
   
   unsigned long now = millis();
   
-  // Broadcast audio levels cada 100ms (10fps) — protocolo binario ultra-eficiente
+  // Broadcast audio levels for all WS clients (main UI + /adm)
   static unsigned long lastAudioLevels = 0;
   if (now - lastAudioLevels >= 100 && ws->count() > 0) {
     lastAudioLevels = now;
-    
-    // Check heap health before broadcasting — skip if low memory
-    if (ESP.getFreeHeap() < 20000) {
-      // Low memory — skip this broadcast cycle
-    } else {
-      // Binary protocol: [0xAA][16 track peaks 0-255][master peak 0-255] = 18 bytes
+
+    static unsigned long lastPeakPoll = 0;
+    if (now - lastPeakPoll >= 120) {
+      spiMaster.requestPeaks();
+      lastPeakPoll = now;
+    }
+
+    if (ESP.getFreeHeap() >= 20000) {
       uint8_t levelBuf[18];
-      levelBuf[0] = 0xAA;  // Magic byte: audio levels message
-      
+      levelBuf[0] = 0xAA;
+
       float peaks[16];
       spiMaster.getTrackPeaks(peaks, 16);
       for (int i = 0; i < 16; i++) {
@@ -1563,7 +1645,7 @@ void WebInterface::update() {
       if (mp < 0.0f) mp = 0.0f;
       if (mp > 1.0f) mp = 1.0f;
       levelBuf[17] = (uint8_t)(mp * 255.0f);
-      
+
       ws->binaryAll(levelBuf, 18);
     }
   }
@@ -1663,7 +1745,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "setStep") {
     int track = doc["track"];
     int step = doc["step"];
-    if (track < 0 || track >= 16 || step < 0 || step >= 16) return;
+    if (track < 0 || track >= MAX_TRACKS || step < 0 || step >= STEPS_PER_PATTERN) return;
     bool active = doc["active"];
     bool silent = doc.containsKey("silent") && doc["silent"].as<bool>();
     uint8_t noteLen = doc.containsKey("noteLen") ? (uint8_t)doc["noteLen"].as<int>() : 1;
@@ -1732,11 +1814,23 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "tempo") {
     float tempo = doc["value"];
     sequencer.setTempo(tempo);
+    spiMaster.setTempo(tempo);
     StaticJsonDocument<96> resp;
     resp["type"] = "tempoChange";
     resp["tempo"] = tempo;
     String out; serializeJson(resp, out);
     if (ws) ws->textAll(out);
+  }
+  else if (cmd == "setStepCount") {
+    int count = doc["count"];
+    if (count == 16 || count == 32 || count == 64) {
+      sequencer.setPatternLength(count);
+      StaticJsonDocument<96> resp;
+      resp["type"] = "stepCount";
+      resp["count"] = count;
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
   }
   else if (cmd == "selectPattern") {
     int pattern = doc["index"];
@@ -1761,14 +1855,16 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       return;
     }
     yield();
+    int stepCount = sequencer.getPatternLength();
     // 5 data structures × 16 tracks × 16 steps — needs ~11-13KB ArduinoJson pool
-    DynamicJsonDocument patternDoc(14336);
+    DynamicJsonDocument patternDoc(stepCount > 16 ? 32768 : 14336);
     patternDoc["type"] = "pattern";
     patternDoc["index"] = pattern;
+    patternDoc["stepCount"] = stepCount;
     
     for (int track = 0; track < 16; track++) {
       JsonArray trackSteps = patternDoc.createNestedArray(String(track));
-      for (int step = 0; step < 16; step++) {
+      for (int step = 0; step < stepCount; step++) {
         trackSteps.add(sequencer.getStep(track, step));
       }
     }
@@ -1776,7 +1872,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     JsonObject velocitiesObj = patternDoc.createNestedObject("velocities");
     for (int track = 0; track < 16; track++) {
       JsonArray trackVels = velocitiesObj.createNestedArray(String(track));
-      for (int step = 0; step < 16; step++) {
+      for (int step = 0; step < stepCount; step++) {
         trackVels.add(sequencer.getStepVelocity(track, step));
       }
     }
@@ -1784,7 +1880,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     JsonObject volumeLocksObj = patternDoc.createNestedObject("volumeLocks");
     for (int track = 0; track < 16; track++) {
       JsonArray trackLocks = volumeLocksObj.createNestedArray(String(track));
-      for (int step = 0; step < 16; step++) {
+      for (int step = 0; step < stepCount; step++) {
         if (sequencer.hasStepVolumeLock(track, step)) {
           trackLocks.add(sequencer.getStepVolumeLock(track, step));
         } else {
@@ -1796,7 +1892,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     JsonObject probabilitiesObj = patternDoc.createNestedObject("probabilities");
     for (int track = 0; track < 16; track++) {
       JsonArray trackProb = probabilitiesObj.createNestedArray(String(track));
-      for (int step = 0; step < 16; step++) {
+      for (int step = 0; step < stepCount; step++) {
         trackProb.add(sequencer.getStepProbability(track, step));
       }
     }
@@ -1804,8 +1900,32 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     JsonObject ratchetsObj = patternDoc.createNestedObject("ratchets");
     for (int track = 0; track < 16; track++) {
       JsonArray trackRat = ratchetsObj.createNestedArray(String(track));
-      for (int step = 0; step < 16; step++) {
+      for (int step = 0; step < stepCount; step++) {
         trackRat.add(sequencer.getStepRatchet(track, step));
+      }
+    }
+
+    JsonObject cutoffLocksObj = patternDoc.createNestedObject("cutoffLocks");
+    for (int track = 0; track < 16; track++) {
+      JsonArray trackLocks = cutoffLocksObj.createNestedArray(String(track));
+      for (int step = 0; step < stepCount; step++) {
+        if (sequencer.hasStepCutoffLock(track, step)) {
+          trackLocks.add((int)sequencer.getStepCutoffLock(track, step));
+        } else {
+          trackLocks.add(-1);
+        }
+      }
+    }
+
+    JsonObject reverbLocksObj = patternDoc.createNestedObject("reverbLocks");
+    for (int track = 0; track < 16; track++) {
+      JsonArray trackLocks = reverbLocksObj.createNestedArray(String(track));
+      for (int step = 0; step < stepCount; step++) {
+        if (sequencer.hasStepReverbSendLock(track, step)) {
+          trackLocks.add((int)sequencer.getStepReverbSendLock(track, step));
+        } else {
+          trackLocks.add(-1);
+        }
       }
     }
     
@@ -1978,11 +2098,20 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       }
       
       sequencer.toggleLoop(track);
+      bool loopNow = sequencer.isLooping(track);
+
+      // ALSO set audio-level loop on Daisy so sample loops continuously
+      // even when sequencer is stopped
+      spiMaster.setPadLoop(track, loopNow);
+      if (loopNow) {
+        // Trigger the sample so it starts playing immediately
+        spiMaster.triggerSampleLive(track, 127);
+      }
       
       StaticJsonDocument<192> responseDoc;
       responseDoc["type"] = "loopState";
       responseDoc["track"] = track;
-      responseDoc["active"] = sequencer.isLooping(track);
+      responseDoc["active"] = loopNow;
       responseDoc["paused"] = sequencer.isLoopPaused(track);
       responseDoc["loopType"] = (int)sequencer.getLoopType(track);
       
@@ -2243,6 +2372,314 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     String out; serializeJson(resp, out);
     if (ws) ws->textAll(out);
   }
+  else if (cmd == "setReverbActive") {
+    bool active = doc["value"];
+    spiMaster.setReverbActive(active);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "reverbActive"; resp["value"] = active;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
+  }
+  else if (cmd == "setReverbFeedback") {
+    float v = doc["value"];
+    float feedback = (v > 1.0f) ? (v / 100.0f) : v;
+    spiMaster.setReverbFeedback(feedback);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "reverbFeedback"; resp["value"] = feedback;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
+  }
+  else if (cmd == "setReverbLpFreq") {
+    float hz = doc["value"];
+    spiMaster.setReverbLpFreq(hz);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "reverbLpFreq"; resp["value"] = hz;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
+  }
+  else if (cmd == "setReverbMix") {
+    float v = doc["value"];
+    float mix = (v > 1.0f) ? (v / 100.0f) : v;
+    spiMaster.setReverbMix(mix);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "reverbMix"; resp["value"] = mix;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
+  }
+  else if (cmd == "setChorusActive") {
+    bool active = doc["value"];
+    spiMaster.setChorusActive(active);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "chorusActive"; resp["value"] = active;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
+  }
+  else if (cmd == "setChorusRate") {
+    float rate = doc["value"];
+    spiMaster.setChorusRate(rate);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "chorusRate"; resp["value"] = rate;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
+  }
+  else if (cmd == "setChorusDepth") {
+    float v = doc["value"];
+    float depth = (v > 1.0f) ? (v / 100.0f) : v;
+    spiMaster.setChorusDepth(depth);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "chorusDepth"; resp["value"] = depth;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
+  }
+  else if (cmd == "setChorusMix") {
+    float v = doc["value"];
+    float mix = (v > 1.0f) ? (v / 100.0f) : v;
+    spiMaster.setChorusMix(mix);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "chorusMix"; resp["value"] = mix;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
+  }
+  else if (cmd == "setTremoloActive") {
+    bool active = doc["value"];
+    spiMaster.setTremoloActive(active);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "tremoloActive"; resp["value"] = active;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
+  }
+  else if (cmd == "setTremoloRate") {
+    float rate = doc["value"];
+    spiMaster.setTremoloRate(rate);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "tremoloRate"; resp["value"] = rate;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
+  }
+  else if (cmd == "setTremoloDepth") {
+    float v = doc["value"];
+    float depth = (v > 1.0f) ? (v / 100.0f) : v;
+    spiMaster.setTremoloDepth(depth);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "tremoloDepth"; resp["value"] = depth;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
+  }
+  else if (cmd == "setWavefolderGain") {
+    float gain = doc["value"];
+    spiMaster.setWaveFolderGain(gain);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "wavefolderGain"; resp["value"] = gain;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
+  }
+  else if (cmd == "setLimiterActive") {
+    bool active = doc["value"];
+    spiMaster.setLimiterActive(active);
+    StaticJsonDocument<96> resp;
+    resp["type"] = "masterFx"; resp["param"] = "limiterActive"; resp["value"] = active;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
+  }
+  else if (cmd == "setTrackReverbSend") {
+    int track = doc["track"];
+    int level = doc["value"];
+    if (track >= 0 && track < 16) {
+      spiMaster.setTrackReverbSend(track, (uint8_t)constrain(level, 0, 100));
+      StaticJsonDocument<128> resp;
+      resp["type"] = "trackFxSet";
+      resp["track"] = track;
+      resp["fx"] = "reverbSend";
+      resp["value"] = constrain(level, 0, 100);
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
+  else if (cmd == "setTrackDelaySend") {
+    int track = doc["track"];
+    int level = doc["value"];
+    if (track >= 0 && track < 16) {
+      spiMaster.setTrackDelaySend(track, (uint8_t)constrain(level, 0, 100));
+      StaticJsonDocument<128> resp;
+      resp["type"] = "trackFxSet";
+      resp["track"] = track;
+      resp["fx"] = "delaySend";
+      resp["value"] = constrain(level, 0, 100);
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
+  else if (cmd == "setTrackChorusSend") {
+    int track = doc["track"];
+    int level = doc["value"];
+    if (track >= 0 && track < 16) {
+      spiMaster.setTrackChorusSend(track, (uint8_t)constrain(level, 0, 100));
+      StaticJsonDocument<128> resp;
+      resp["type"] = "trackFxSet";
+      resp["track"] = track;
+      resp["fx"] = "chorusSend";
+      resp["value"] = constrain(level, 0, 100);
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
+  else if (cmd == "setTrackPan") {
+    int track = doc["track"];
+    int pan = doc["value"];
+    if (track >= 0 && track < 16) {
+      spiMaster.setTrackPan(track, (int8_t)constrain(pan, -100, 100));
+      StaticJsonDocument<128> resp;
+      resp["type"] = "trackFxSet";
+      resp["track"] = track;
+      resp["fx"] = "pan";
+      resp["value"] = constrain(pan, -100, 100);
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
+  else if (cmd == "setTrackDspMute") {
+    int track = doc["track"];
+    bool mute = doc["value"];
+    if (track >= 0 && track < 16) {
+      spiMaster.setTrackMute(track, mute);
+      StaticJsonDocument<128> resp;
+      resp["type"] = "trackFxSet";
+      resp["track"] = track;
+      resp["fx"] = "dspMute";
+      resp["value"] = mute;
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
+  else if (cmd == "setTrackSolo") {
+    int track = doc["track"];
+    bool solo = doc["value"];
+    if (track >= 0 && track < 16) {
+      spiMaster.setTrackSolo(track, solo);
+      StaticJsonDocument<128> resp;
+      resp["type"] = "trackFxSet";
+      resp["track"] = track;
+      resp["fx"] = "solo";
+      resp["value"] = solo;
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
+  else if (cmd == "setTrackPhaser") {
+    int track = doc["track"];
+    if (track >= 0 && track < 16) {
+      bool active = doc.containsKey("active") ? doc["active"].as<bool>() : true;
+      float rate = doc.containsKey("rate") ? doc["rate"].as<float>() : 1.0f;
+      float depth = doc.containsKey("depth") ? doc["depth"].as<float>() : 50.0f;
+      float feedback = doc.containsKey("feedback") ? doc["feedback"].as<float>() : 50.0f;
+      spiMaster.setTrackPhaser(track, active, rate, depth, feedback);
+      StaticJsonDocument<192> resp;
+      resp["type"] = "trackFxSet";
+      resp["track"] = track;
+      resp["fx"] = "phaser";
+      resp["active"] = active;
+      resp["rate"] = rate;
+      resp["depth"] = depth;
+      resp["feedback"] = feedback;
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
+  else if (cmd == "setTrackTremolo") {
+    int track = doc["track"];
+    if (track >= 0 && track < 16) {
+      bool active = doc.containsKey("active") ? doc["active"].as<bool>() : true;
+      float rate = doc.containsKey("rate") ? doc["rate"].as<float>() : 4.0f;
+      float depth = doc.containsKey("depth") ? doc["depth"].as<float>() : 50.0f;
+      uint8_t wave = doc.containsKey("wave") ? doc["wave"].as<uint8_t>() : 0;
+      uint8_t target = doc.containsKey("target") ? doc["target"].as<uint8_t>() : 0;
+      spiMaster.setTrackTremolo(track, active, rate, depth, wave, target);
+      StaticJsonDocument<192> resp;
+      resp["type"] = "trackFxSet";
+      resp["track"] = track;
+      resp["fx"] = "tremolo";
+      resp["active"] = active;
+      resp["rate"] = rate;
+      resp["depth"] = depth;
+      resp["wave"] = wave;
+      resp["target"] = target;
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
+  else if (cmd == "setTrackPitch") {
+    int track = doc["track"];
+    int cents = doc["value"];
+    if (track >= 0 && track < 16) {
+      spiMaster.setTrackPitch(track, (int16_t)constrain(cents, -1200, 1200));
+      StaticJsonDocument<128> resp;
+      resp["type"] = "trackFxSet";
+      resp["track"] = track;
+      resp["fx"] = "pitchCents";
+      resp["value"] = constrain(cents, -1200, 1200);
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
+  else if (cmd == "setTrackGate") {
+    int track = doc["track"];
+    if (track >= 0 && track < 16) {
+      bool active = doc.containsKey("active") ? doc["active"].as<bool>() : true;
+      float threshold = doc.containsKey("threshold") ? doc["threshold"].as<float>() : -40.0f;
+      float attack = doc.containsKey("attack") ? doc["attack"].as<float>() : 1.0f;
+      float release = doc.containsKey("release") ? doc["release"].as<float>() : 50.0f;
+      spiMaster.setTrackGate(track, active, threshold, attack, release);
+      StaticJsonDocument<192> resp;
+      resp["type"] = "trackFxSet";
+      resp["track"] = track;
+      resp["fx"] = "gate";
+      resp["active"] = active;
+      resp["threshold"] = threshold;
+      resp["attack"] = attack;
+      resp["release"] = release;
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
+  else if (cmd == "setTrackEq") {
+    int track = doc["track"];
+    if (track >= 0 && track < 16) {
+      int low = doc.containsKey("low") ? doc["low"].as<int>() : 0;
+      int mid = doc.containsKey("mid") ? doc["mid"].as<int>() : 0;
+      int high = doc.containsKey("high") ? doc["high"].as<int>() : 0;
+      spiMaster.setTrackEq(track, (int8_t)constrain(low, -12, 12), (int8_t)constrain(mid, -12, 12), (int8_t)constrain(high, -12, 12));
+      StaticJsonDocument<192> resp;
+      resp["type"] = "trackFxSet";
+      resp["track"] = track;
+      resp["fx"] = "eq";
+      resp["low"] = constrain(low, -12, 12);
+      resp["mid"] = constrain(mid, -12, 12);
+      resp["high"] = constrain(high, -12, 12);
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
+  else if (cmd == "setTrackEqLow") {
+    int track = doc["track"];
+    int value = doc["value"];
+    if (track >= 0 && track < 16) {
+      spiMaster.setTrackEqLow(track, (int8_t)constrain(value, -12, 12));
+    }
+  }
+  else if (cmd == "setTrackEqMid") {
+    int track = doc["track"];
+    int value = doc["value"];
+    if (track >= 0 && track < 16) {
+      spiMaster.setTrackEqMid(track, (int8_t)constrain(value, -12, 12));
+    }
+  }
+  else if (cmd == "setTrackEqHigh") {
+    int track = doc["track"];
+    int value = doc["value"];
+    if (track >= 0 && track < 16) {
+      spiMaster.setTrackEqHigh(track, (int8_t)constrain(value, -12, 12));
+    }
+  }
   // ============= Per-Pad / Per-Track FX Commands =============
   else if (cmd == "setPadDistortion") {
     int pad = doc["pad"];
@@ -2378,7 +2815,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   // ============= STUTTER Command =============
   else if (cmd == "setStutter") {
-    bool value = doc["value"];
+    bool value = false;
+    if (doc.containsKey("value")) {
+      value = doc["value"].as<bool>();
+    } else if (doc.containsKey("active")) {
+      value = doc["active"].as<bool>();
+    }
     int interval = doc.containsKey("interval") ? (int)doc["interval"] : 100;
     StaticJsonDocument<128> resp;
     resp["type"] = "trackFxUpdate";
@@ -2788,7 +3230,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int step = doc["step"];
     bool enabled = doc.containsKey("enabled") ? doc["enabled"].as<bool>() : true;
     int volume = doc.containsKey("volume") ? doc["volume"].as<int>() : 100;
-    if (track < 0 || track >= 16 || step < 0 || step >= 16) return;
+    if (track < 0 || track >= MAX_TRACKS || step < 0 || step >= STEPS_PER_PATTERN) return;
 
     if (doc.containsKey("pattern")) {
       int pattern = doc["pattern"].as<int>();
@@ -2813,7 +3255,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int track = doc["track"];
     int step = doc["step"];
     int probability = doc.containsKey("probability") ? doc["probability"].as<int>() : 100;
-    if (track < 0 || track >= 16 || step < 0 || step >= 16) return;
+    if (track < 0 || track >= MAX_TRACKS || step < 0 || step >= STEPS_PER_PATTERN) return;
 
     if (doc.containsKey("pattern")) {
       int pattern = doc["pattern"].as<int>();
@@ -2833,11 +3275,63 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     serializeJson(responseDoc, output);
     if (ws) ws->textAll(output);
   }
+  else if (cmd == "setStepCutoffLock") {
+    int track = doc["track"];
+    int step = doc["step"];
+    bool enabled = doc.containsKey("enabled") ? doc["enabled"].as<bool>() : true;
+    int cutoff = doc.containsKey("cutoff") ? doc["cutoff"].as<int>() : 1000;
+    if (track < 0 || track >= MAX_TRACKS || step < 0 || step >= STEPS_PER_PATTERN) return;
+
+    if (doc.containsKey("pattern")) {
+      int pattern = doc["pattern"].as<int>();
+      if (pattern >= 0 && pattern < MAX_PATTERNS) {
+        sequencer.setStepCutoffLock(pattern, track, step, enabled, (uint16_t)constrain(cutoff, 20, 20000));
+      }
+    } else {
+      sequencer.setStepCutoffLock(track, step, enabled, (uint16_t)constrain(cutoff, 20, 20000));
+    }
+
+    StaticJsonDocument<160> responseDoc;
+    responseDoc["type"] = "stepCutoffLockSet";
+    responseDoc["track"] = track;
+    responseDoc["step"] = step;
+    responseDoc["enabled"] = enabled;
+    responseDoc["cutoff"] = constrain(cutoff, 20, 20000);
+    String output;
+    serializeJson(responseDoc, output);
+    if (ws) ws->textAll(output);
+  }
+  else if (cmd == "setStepReverbSendLock") {
+    int track = doc["track"];
+    int step = doc["step"];
+    bool enabled = doc.containsKey("enabled") ? doc["enabled"].as<bool>() : true;
+    int level = doc.containsKey("value") ? doc["value"].as<int>() : 0;
+    if (track < 0 || track >= MAX_TRACKS || step < 0 || step >= STEPS_PER_PATTERN) return;
+
+    if (doc.containsKey("pattern")) {
+      int pattern = doc["pattern"].as<int>();
+      if (pattern >= 0 && pattern < MAX_PATTERNS) {
+        sequencer.setStepReverbSendLock(pattern, track, step, enabled, (uint8_t)constrain(level, 0, 100));
+      }
+    } else {
+      sequencer.setStepReverbSendLock(track, step, enabled, (uint8_t)constrain(level, 0, 100));
+    }
+
+    StaticJsonDocument<160> responseDoc;
+    responseDoc["type"] = "stepReverbLockSet";
+    responseDoc["track"] = track;
+    responseDoc["step"] = step;
+    responseDoc["enabled"] = enabled;
+    responseDoc["value"] = constrain(level, 0, 100);
+    String output;
+    serializeJson(responseDoc, output);
+    if (ws) ws->textAll(output);
+  }
   else if (cmd == "setStepRatchet") {
     int track = doc["track"];
     int step = doc["step"];
     int ratchet = doc.containsKey("ratchet") ? doc["ratchet"].as<int>() : 1;
-    if (track < 0 || track >= 16 || step < 0 || step >= 16) return;
+    if (track < 0 || track >= MAX_TRACKS || step < 0 || step >= STEPS_PER_PATTERN) return;
 
     if (doc.containsKey("pattern")) {
       int pattern = doc["pattern"].as<int>();
@@ -2873,7 +3367,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "getStepVolumeLock") {
     int track = doc["track"];
     int step = doc["step"];
-    if (track < 0 || track >= 16 || step < 0 || step >= 16) return;
+    if (track < 0 || track >= MAX_TRACKS || step < 0 || step >= STEPS_PER_PATTERN) return;
 
     bool enabled = sequencer.hasStepVolumeLock(track, step);
     int volume = enabled ? sequencer.getStepVolumeLock(track, step) : 0;
@@ -2884,6 +3378,42 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     responseDoc["step"] = step;
     responseDoc["enabled"] = enabled;
     responseDoc["volume"] = volume;
+    String output;
+    serializeJson(responseDoc, output);
+    if (ws) ws->textAll(output);
+  }
+  else if (cmd == "getStepCutoffLock") {
+    int track = doc["track"];
+    int step = doc["step"];
+    if (track < 0 || track >= MAX_TRACKS || step < 0 || step >= STEPS_PER_PATTERN) return;
+
+    bool enabled = sequencer.hasStepCutoffLock(track, step);
+    int cutoff = enabled ? (int)sequencer.getStepCutoffLock(track, step) : 0;
+
+    StaticJsonDocument<160> responseDoc;
+    responseDoc["type"] = "stepCutoffLock";
+    responseDoc["track"] = track;
+    responseDoc["step"] = step;
+    responseDoc["enabled"] = enabled;
+    responseDoc["cutoff"] = cutoff;
+    String output;
+    serializeJson(responseDoc, output);
+    if (ws) ws->textAll(output);
+  }
+  else if (cmd == "getStepReverbSendLock") {
+    int track = doc["track"];
+    int step = doc["step"];
+    if (track < 0 || track >= MAX_TRACKS || step < 0 || step >= STEPS_PER_PATTERN) return;
+
+    bool enabled = sequencer.hasStepReverbSendLock(track, step);
+    int level = enabled ? (int)sequencer.getStepReverbSendLock(track, step) : 0;
+
+    StaticJsonDocument<160> responseDoc;
+    responseDoc["type"] = "stepReverbLock";
+    responseDoc["track"] = track;
+    responseDoc["step"] = step;
+    responseDoc["enabled"] = enabled;
+    responseDoc["value"] = level;
     String output;
     serializeJson(responseDoc, output);
     if (ws) ws->textAll(output);
@@ -2925,6 +3455,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     }
     
     sequencer.setTrackVolume(track, volume);
+    spiMaster.setTrackVolume(track, (uint8_t)constrain(volume, 0, 150));
     
     // Broadcast to all clients
     StaticJsonDocument<128> responseDoc;
@@ -2961,6 +3492,44 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       volumes.add(sequencer.getTrackVolume(track));
     }
     
+    String output;
+    serializeJson(responseDoc, output);
+    if (ws) ws->textAll(output);
+  }
+  else if (cmd == "setTrackSynthEngine") {
+    int track = doc["track"];
+    int engine = doc["engine"];
+    if (track < 0 || track >= 16 || engine < -1 || engine > 3) {
+      Serial.printf("[WS] Invalid setTrackSynthEngine track=%d engine=%d\n", track, engine);
+      return;
+    }
+
+    setTrackSynthEngine(track, (int8_t)engine);
+
+    StaticJsonDocument<128> responseDoc;
+    responseDoc["type"] = "trackSynthEngineSet";
+    responseDoc["track"] = track;
+    responseDoc["engine"] = engine;
+    String output;
+    serializeJson(responseDoc, output);
+    if (ws) ws->textAll(output);
+  }
+  else if (cmd == "applyKitToAllPads") {
+    int engine = doc["engine"];
+    if (engine < -1 || engine > 3) {
+      Serial.printf("[WS] Invalid applyKitToAllPads engine=%d\n", engine);
+      return;
+    }
+
+    setAllTrackSynthEngines((int8_t)engine);
+
+    StaticJsonDocument<256> responseDoc;
+    responseDoc["type"] = "trackSynthEngines";
+    JsonArray engines = responseDoc.createNestedArray("engines");
+    for (int track = 0; track < 16; track++) {
+      engines.add((int)gTrackSynthEngine[track]);
+    }
+
     String output;
     serializeJson(responseDoc, output);
     if (ws) ws->textAll(output);
@@ -3201,7 +3770,9 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     uint8_t engine     = doc["engine"]     | 0;
     uint8_t instrument = doc["instrument"] | 0;
     uint8_t velocity   = doc["velocity"]   | 100;
-    spiMaster.synthTrigger(engine, instrument, velocity);
+    float scaled = (velocity / 127.0f) * (spiMaster.getLiveVolume() / 100.0f);
+    uint8_t outVelocity = (uint8_t)constrain((int)roundf(scaled * 127.0f), 1, 127);
+    spiMaster.synthTrigger(engine, instrument, outVelocity);
   }
 
   // {"cmd":"synthParam","engine":0,"instrument":0,"paramId":0,"value":0.5}
@@ -3246,24 +3817,29 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
 }
 
-// Actualizar o registrar cliente UDP
 void WebInterface::updateUdpClient(IPAddress ip, uint16_t port) {
-  String key = ip.toString();
-  
-  if (udpClients.find(key) != udpClients.end()) {
-    // Cliente existente, solo actualizar timestamp y contador (sin Serial.printf)
-    udpClients[key].lastSeen = millis();
-    udpClients[key].packetCount++;
+  // Use fixed-size key buffer to avoid String heap allocation/fragmentation
+  char key[16];
+  snprintf(key, sizeof(key), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+  String sKey(key);
+
+  auto it = udpClients.find(sKey);
+  if (it != udpClients.end()) {
+    it->second.lastSeen = millis();
+    it->second.packetCount++;
   } else {
-    // Nuevo cliente - solo loguear nuevos
+    if (udpClients.size() >= 10) {
+      cleanupStaleUdpClients();
+      if (udpClients.size() >= 10) return;
+    }
     UdpClient client;
     client.ip = ip;
     client.port = port;
     client.lastSeen = millis();
     client.packetCount = 1;
-    udpClients[key] = client;
-    Serial.printf("[UDP] New client: %s:%d (total: %d)\n", 
-                  ip.toString().c_str(), port, udpClients.size());
+    udpClients[sKey] = client;
+    Serial.printf("[UDP] New client: %s:%d (total: %d)\n",
+                  key, port, udpClients.size());
   }
 }
 
@@ -3285,36 +3861,67 @@ void WebInterface::cleanupStaleUdpClients() {
   }
 }
 
-// Manejar paquetes UDP entrantes
+// Manejar paquetes UDP entrantes (with crash protection)
 void WebInterface::handleUdp() {
   int packetSize = udp.parsePacket();
   if (packetSize <= 0) return;
-  
+
+  // ── Heap guard: skip processing if memory is critical ──
+  uint32_t freeHeap = ESP.getFreeHeap();
+  if (freeHeap < 20000) {
+    char drain[64];
+    while (udp.available()) udp.read(drain, sizeof(drain));
+    Serial.printf("[UDP] SKIP: heap critical (%d)\n", freeHeap);
+    return;
+  }
+
+  // ── Rate limit: max 50 packets/second ──
+  static unsigned long lastUdpProcess = 0;
+  static uint8_t udpBurstCount = 0;
+  unsigned long now = millis();
+  if (now - lastUdpProcess < 20) {
+    udpBurstCount++;
+    if (udpBurstCount > 5) {
+      char drain[64];
+      while (udp.available()) udp.read(drain, sizeof(drain));
+      return;
+    }
+  } else {
+    udpBurstCount = 0;
+  }
+  lastUdpProcess = now;
+
+  // ── Reject oversized packets ──
+  if (packetSize > 500) {
+    char drain[64];
+    while (udp.available()) udp.read(drain, sizeof(drain));
+    udp.beginPacket(udp.remoteIP(), udp.remotePort());
+    udp.print("{\"s\":\"err\",\"m\":\"too_large\"}");
+    udp.endPacket();
+    return;
+  }
+
   char incomingPacket[512];
   int len = udp.read(incomingPacket, 511);
   if (len <= 0) return;
-  
   incomingPacket[len] = 0;
-  
-  // Registrar cliente UDP
+
   updateUdpClient(udp.remoteIP(), udp.remotePort());
-  
-  // Parsear JSON
+
   StaticJsonDocument<512> doc;
   DeserializationError error = deserializeJson(doc, incomingPacket);
-  
+
   if (!error) {
     processCommand(doc);
-    
-    // Respuesta compacta
     udp.beginPacket(udp.remoteIP(), udp.remotePort());
     udp.print("{\"s\":\"ok\"}");
     udp.endPacket();
   } else {
     udp.beginPacket(udp.remoteIP(), udp.remotePort());
-    udp.print("{\"s\":\"err\"}");
+    udp.print("{\"s\":\"err\",\"m\":\"parse\"}");
     udp.endPacket();
   }
+  yield();
 }
 
 // ========================================

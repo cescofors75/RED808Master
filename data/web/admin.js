@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.binaryType = 'arraybuffer';
 
   ws.onopen = () => {
     wsConnected = true;
@@ -46,8 +47,23 @@ function connectWS() {
   };
   ws.onerror = () => admLog('WS error', 'err');
   ws.onmessage = e => {
+    if (e.data instanceof ArrayBuffer) {
+      handleBinaryFrame(new Uint8Array(e.data));
+      return;
+    }
     try { handleWsMsg(JSON.parse(e.data)); } catch (_) { }
   };
+}
+
+function handleBinaryFrame(v) {
+  if (!v || v.length < 2) return;
+  // 0xAA + 16 tracks + master
+  if (v[0] === 0xAA && v.length >= 18) {
+    const peaks = [];
+    for (let i = 0; i < 16; i++) peaks.push((v[i + 1] || 0) / 255);
+    const master = (v[17] || 0) / 255;
+    updatePeaks(peaks, master);
+  }
 }
 
 function handleWsMsg(d) {
@@ -165,6 +181,20 @@ function updateDashboard(d) {
   // WS / UDP clients
   if (d.wsClientList)  updateWsClients(d.wsClientList);
   if (d.udpClientList) updateUdpClients(d.udpClientList);
+
+  // Daisy telemetry from /api/sysinfo
+  const daisyConnected = !!d.daisyConnected;
+  setBadge('daisy-badge', daisyConnected ? 'CONECTADO' : 'SIN CONEXIÓN',
+           daisyConnected ? 'badge-ok' : 'badge-dim');
+  setEl('ds-conn', daisyConnected ? 'OK' : 'OFFLINE');
+  setEl('ds-rtt', d.daisyRttMs != null && d.daisyRttMs >= 0 ? `${Number(d.daisyRttMs).toFixed(2)} ms` : '--');
+  setEl('ds-samples', d.samplesLoaded != null ? d.samplesLoaded : '--');
+  setEl('ds-voices', d.daisyVoices != null ? `${d.daisyVoices} voces` : '--');
+  setEl('ds-uptime', d.uptime != null ? fmtUptime(d.uptime) : '--');
+
+  if (Array.isArray(d.daisyTrackPeaks)) {
+    updatePeaks(d.daisyTrackPeaks, d.daisyMasterPeak);
+  }
 
   // Sequencer (sysinfo también incluye estos campos)
   if (d.tempo   != null) { setEl('seq-bpm', d.tempo + ' BPM'); setEl('sv-bpm', d.tempo); }

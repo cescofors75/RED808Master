@@ -1,6 +1,6 @@
 # RED808 — Daisy Seed: Guía de implementación del Slave Audio
 > Documento para el equipo de desarrollo del slave Daisy Seed
-> Generado: 25/02/2026 — Verificado contra firmware ESP32-S3 v1.0
+> Actualizado: 27/02/2026 — Transporte cambiado de SPI a **UART** (GPIO17 TX verificado)
 
 ---
 
@@ -8,8 +8,8 @@
 
 1. [Resumen del proyecto](#1-resumen-del-proyecto)
 2. [Hardware — Daisy Seed](#2-hardware--daisy-seed)
-3. [Protocolo SPI — Formato de paquete](#3-protocolo-spi--formato-de-paquete)
-4. [Transacción SPI — Flujo CS](#4-transacción-spi--flujo-cs)
+3. [Protocolo UART — Formato de paquete](#3-protocolo-uart--formato-de-paquete)
+4. [Recepción UART — Flujo de bytes](#4-recepción-uart--flujo-de-bytes)
 5. [CRC16-Modbus](#5-crc16-modbus)
 6. [Tabla completa de comandos](#6-tabla-completa-de-comandos)
 7. [Payloads — Definición exacta de cada struct](#7-payloads--definición-exacta-de-cada-struct)
@@ -33,34 +33,41 @@
 | **Master** | ESP32-S3 N16R8 | Web UI, secuenciador, MIDI, WiFi, control |
 | **Slave** | **Daisy Seed** (STM32H750 + WM8731) | Motor de audio, DSP, efectos, samples |
 
-La comunicación es **SPI**: el ESP32 (master) envía comandos, la Daisy (slave) reproduce audio.
+La comunicación es **UART** (115200 8N1): el ESP32 (master) envía comandos, la Daisy (slave) reproduce audio.
 
 **Ventajas de la Daisy Seed para este proyecto:**
 - **64 MB SDRAM** — cabe todo el kit de samples en RAM (los samples son ~500 KB total)
 - **WM8731 codec integrado** — audio estéreo 44.1/48 kHz sin hardware externo
 - **480 MHz Cortex-M7** — DSP de sobra para 16+ voces + FX chain
 - **DaisySP** — librería DSP con filtros, delay, reverb, compressor, chorus, etc.
-- **libDaisy** — SPI slave DMA, AudioCallback, FatFS para SD card
+- **libDaisy** — UartHandler, AudioCallback, FatFS para SD card
 
 ---
 
 ## 2. Hardware — Daisy Seed
 
-### 2.1 Pinout SPI — Daisy Seed ↔ ESP32-S3
+### 2.1 Pinout UART — Daisy Seed ↔ ESP32-S3
 
-| Señal    | Daisy Seed pin | Pin físico STM32H750 | ESP32-S3 GPIO | Notas |
-|----------|----------------|----------------------|---------------|-------|
-| SCK      | D10            | PC10 (SPI3_SCK)      | GPIO 12       | |
-| MOSI     | D9             | PC11 (SPI3_MISO)⚠    | GPIO 11       | Daisy recibe aquí |
-| MISO     | D8             | PC12 (SPI3_MOSI)⚠    | GPIO 13       | Daisy transmite aquí |
-| NSS / CS | D7             | PA15 (SPI3_NSS)      | GPIO 10       | **Hardware NSS obligatorio** |
-| GND      | GND            | GND                  | GND           | |
+> ⚠ **Transporte UART** (SPI descartado). Solo 3 cables necesarios.
 
-> ⚠ Verificar en tu Daisy que SPI3 usa PC11=MISO y PC12=MOSI. Alternativa: **SPI1** en D25/D26/D27/D28 (PA5/PA6/PA7/PA4).
+| Señal    | Daisy Seed pin | Columna / posición física   | STM32H750   | ESP32-S3 GPIO | Notas |
+|----------|----------------|-----------------------------|-------------|---------------|-------|
+| **RX**   | **D14**        | **Izquierda, pin 15 desde USB (abajo)** | PB7 (USART1_RX) | **GPIO17 (TX)** | ESP32 transmite → Daisy recibe |
+| **TX**   | **D13**        | Izquierda, pin 14 desde USB (abajo) | PB6 (USART1_TX) | **GPIO18 (RX)** | Daisy transmite → ESP32 recibe |
+| GND      | GND            | —                           | GND         | GND           | Tierra común obligatoria |
 
-- **SPI Mode 0** (CPOL=0, CPHA=0), MSB first, 8-bit
-- **Clock:** 2 MHz durante bring-up → se subirá a **20 MHz** una vez estable
-- **NSS mode:** Hardware — el flanco rising dispara la ISR del slave
+**Configuración UART:**
+- **Periférico Daisy:** USART1
+- **Baud rate:** 115200
+- **Formato:** 8N1 (8 bits, sin paridad, 1 stop bit)
+- **GPIO17 TX verificado** con tester: 1.60V medidos ✅
+
+**Conexión:**
+```
+ESP32 GPIO17 (TX) ──────→ Daisy D14 (PB7 USART1_RX)  [columna izq, pin 15 desde USB]
+ESP32 GPIO18 (RX) ←────── Daisy D13 (PB6 USART1_TX)  [columna izq, pin 14 desde USB]
+ESP32 GND         ──────── Daisy GND
+```
 
 ### 2.2 Pinout SD Card (opcional pero recomendado)
 
