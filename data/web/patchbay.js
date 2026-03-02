@@ -643,8 +643,6 @@ function resetFirmwareFX() {
       sendCmd('setTrackCompressor', { track, active: false, threshold: 60, ratio: 4 });
     }, delay);
   }
-  /* Also reset master-level FX that might be stale */
-  setTimeout(() => sendCmd('setPhaserActive', { value: false }), 16 * WS_BOOT_SYNC_DELAY_MS);
   console.log('[PATCH] Firmware FX reset enviado (canvas vacío).');
 }
 
@@ -653,8 +651,8 @@ function syncConnectionsAfterReconnect() {
   queuedWsPayloads.length = 0;
   if (wsFlushTimer) { clearTimeout(wsFlushTimer); wsFlushTimer = null; }
 
-  /* FASE 1 — limpiar TODOS los FX del firmware (filtros, distortion, echo, flanger,
-     compressor, phaser). Evita cualquier FX colgado de sesiones anteriores.
+    /* FASE 1 — limpiar FX de track del firmware (filtros, distortion, echo, flanger,
+      compressor). Evita cualquier FX colgado de sesiones anteriores.
      Se hace SIEMPRE, incluso con canvas vacío: patchbay es la fuente de verdad. */
   const RESET_SPAN = 16 * WS_BOOT_SYNC_DELAY_MS; // 16 × 34ms = 544ms
   for (let t = 0; t < 16; t++) {
@@ -667,12 +665,10 @@ function syncConnectionsAfterReconnect() {
       sendCmd('setTrackCompressor', { track, active: false, threshold: 60, ratio: 4 });
     }, track * WS_BOOT_SYNC_DELAY_MS);
   }
-  /* Phaser es master-level */
-  setTimeout(() => sendCmd('setPhaserActive', { value: false }), RESET_SPAN);
 
   /* FASE 2 — re-aplicar cables (si los hay) DESPUÉS de que termine el reset */
   if (!Array.isArray(cables) || cables.length === 0) {
-    console.log('[PATCH] Canvas vacío — firmware FX limpiado (todos: filter, fx, echo, flanger, comp, phaser).');
+    console.log('[PATCH] Canvas vacío — firmware FX de track limpiado (filter, fx, echo, flanger, comp).');
     return;
   }
   const total = cables.length;
@@ -934,6 +930,10 @@ function handleWSMessage(msg) {
     setTrackVolume(msg.track, msg.volume);
   }
 
+  if (msg.type === 'masterFx') {
+    applyMasterFxMessage(msg.param, msg.value);
+  }
+
   /* Update sample names on pads if available */
   if (msg.type === 'sampleLoaded' || msg.type === 'kitLoaded') {
     // Could update pad labels here
@@ -995,6 +995,159 @@ function handleWSMessage(msg) {
   if (Array.isArray(msg.trackFilters)) {
     saveFirmwareFiltersToShared(msg.trackFilters);
   }
+}
+
+function postSyncModuleUI(mod) {
+  const btn = document.getElementById(postToggleId(mod));
+  const modEl = btn ? btn.closest('.post-module') : null;
+  if (btn) {
+    btn.textContent = postState[mod] ? 'ON' : 'OFF';
+    btn.classList.toggle('on', postState[mod]);
+  }
+  if (modEl) modEl.classList.toggle('active', postState[mod]);
+}
+
+function applyMasterFxMessage(param, value) {
+  const setSlider = (id, val, textId = null, suffix = '') => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = val;
+    if (textId) {
+      const tx = document.getElementById(textId);
+      if (tx) tx.textContent = `${val}${suffix}`;
+    }
+  };
+
+  switch(param) {
+    case 'filterType': {
+      const sel = document.getElementById('postFilterType');
+      if (sel) sel.value = parseInt(value, 10);
+      postState.filter = parseInt(value, 10) > 0;
+      postSyncModuleUI('filter');
+      break;
+    }
+    case 'filterCutoff':
+      setSlider('postFilterCutoff', Math.round(value), 'postFilterCutoffVal');
+      break;
+    case 'filterResonance': {
+      const reson = Math.round(parseFloat(value) * 100);
+      setSlider('postFilterReso', reson, 'postFilterResoVal', '');
+      const tx = document.getElementById('postFilterResoVal');
+      if (tx) tx.textContent = parseFloat(value).toFixed(1);
+      break;
+    }
+
+    case 'distortion':
+      setSlider('postDistAmount', Math.round(value), 'postDistAmountVal');
+      break;
+    case 'distortionMode': {
+      const sel = document.getElementById('postDistMode');
+      if (sel) sel.value = parseInt(value, 10);
+      break;
+    }
+
+    case 'bitCrush':
+      setSlider('postBitBits', parseInt(value, 10), 'postBitBitsVal');
+      break;
+    case 'sampleRate': {
+      const sr = parseInt(value, 10);
+      setSlider('postBitRate', sr, 'postBitRateVal');
+      const tx = document.getElementById('postBitRateVal');
+      if (tx) tx.textContent = sr >= 1000 ? (sr / 1000).toFixed(1) + 'k' : String(sr);
+      break;
+    }
+
+    case 'phaserActive':
+      postState.phaser = !!value;
+      postSyncModuleUI('phaser');
+      break;
+    case 'phaserRate':
+      setSlider('postPhaserRate', Math.round(value), 'postPhaserRateVal');
+      break;
+    case 'phaserDepth':
+      setSlider('postPhaserDepth', Math.round(value), 'postPhaserDepthVal');
+      break;
+    case 'phaserFeedback':
+      setSlider('postPhaserFb', Math.round(value), 'postPhaserFbVal');
+      break;
+
+    case 'flangerActive':
+      postState.flanger = !!value;
+      postSyncModuleUI('flanger');
+      break;
+    case 'flangerRate':
+      setSlider('postFlangerRate', Math.round(value), 'postFlangerRateVal');
+      break;
+    case 'flangerDepth':
+      setSlider('postFlangerDepth', Math.round(value), 'postFlangerDepthVal');
+      break;
+    case 'flangerFeedback':
+      setSlider('postFlangerFb', Math.round(value), 'postFlangerFbVal');
+      break;
+    case 'flangerMix':
+      setSlider('postFlangerMix', Math.round(value), 'postFlangerMixVal');
+      break;
+
+    case 'delayActive':
+      postState.delay = !!value;
+      postSyncModuleUI('delay');
+      break;
+    case 'delayTime': {
+      const ms = Math.round(value);
+      setSlider('postDelayTime', ms, 'postDelayTimeVal');
+      const tx = document.getElementById('postDelayTimeVal');
+      if (tx) tx.textContent = ms + 'ms';
+      break;
+    }
+    case 'delayFeedback':
+      setSlider('postDelayFb', Math.round(value), 'postDelayFbVal');
+      break;
+    case 'delayMix':
+      setSlider('postDelayMix', Math.round(value), 'postDelayMixVal');
+      break;
+
+    case 'compressorActive':
+      postState.compressor = !!value;
+      postSyncModuleUI('compressor');
+      break;
+    case 'compressorThreshold': {
+      const t = Math.round(value);
+      setSlider('postCompThresh', t, 'postCompThreshVal');
+      const tx = document.getElementById('postCompThreshVal');
+      if (tx) tx.textContent = t + 'dB';
+      break;
+    }
+    case 'compressorRatio': {
+      const ratio = parseFloat(value);
+      const ratioRaw = Math.round(ratio * 10);
+      setSlider('postCompRatio', ratioRaw, 'postCompRatioVal');
+      const tx = document.getElementById('postCompRatioVal');
+      if (tx) tx.textContent = ratio.toFixed(1);
+      break;
+    }
+    case 'compressorAttack': {
+      const a = Math.round(value);
+      setSlider('postCompAtk', a, 'postCompAtkVal');
+      const tx = document.getElementById('postCompAtkVal');
+      if (tx) tx.textContent = a + 'ms';
+      break;
+    }
+    case 'compressorRelease': {
+      const r = Math.round(value);
+      setSlider('postCompRel', r, 'postCompRelVal');
+      const tx = document.getElementById('postCompRelVal');
+      if (tx) tx.textContent = r + 'ms';
+      break;
+    }
+    case 'compressorMakeupGain': {
+      const g = Math.round(value);
+      setSlider('postCompGain', g, 'postCompGainVal');
+      const tx = document.getElementById('postCompGainVal');
+      if (tx) tx.textContent = g + 'dB';
+      break;
+    }
+  }
+  updateStatus();
 }
 
 function applyTempoVisuals() {
@@ -3357,8 +3510,8 @@ window.postSendFilter = function() {
   const reso = resoRaw / 100;
   document.getElementById('postFilterCutoffVal').textContent = cutoff >= 1000 ? (cutoff/1000).toFixed(1)+'k' : cutoff;
   document.getElementById('postFilterResoVal').textContent = reso.toFixed(1);
-  if (!postState.filter) { sendCmd('setFilterType', { value: 0 }); return; }
-  sendCmd('setFilterType', { value: type });
+  if (!postState.filter) { sendCmd('setFilter', { type: 0 }); return; }
+  sendCmd('setFilter', { type });
   sendCmd('setFilterCutoff', { value: cutoff });
   sendCmd('setFilterResonance', { value: reso });
 }
@@ -3369,7 +3522,7 @@ window.postSendDist = function() {
   const mode = parseInt(document.getElementById('postDistMode').value);
   document.getElementById('postDistAmountVal').textContent = amount;
   if (!postState.distortion) { sendCmd('setDistortion', { value: 0 }); return; }
-  sendCmd('setDistortion', { value: amount / 100 });
+  sendCmd('setDistortion', { value: amount });
   sendCmd('setDistortionMode', { value: mode });
 }
 
@@ -3380,11 +3533,11 @@ window.postSendBit = function() {
   document.getElementById('postBitBitsVal').textContent = bits;
   document.getElementById('postBitRateVal').textContent = rate >= 1000 ? (rate/1000).toFixed(1)+'k' : rate;
   if (!postState.bitcrusher) {
-    sendCmd('setBitDepth', { value: 16 });
+    sendCmd('setBitCrush', { value: 16 });
     sendCmd('setSampleRate', { value: 44100 });
     return;
   }
-  sendCmd('setBitDepth', { value: bits });
+  sendCmd('setBitCrush', { value: bits });
   sendCmd('setSampleRate', { value: rate });
 }
 
@@ -3465,9 +3618,9 @@ window.postClearAll = function() {
     if (modEl) modEl.classList.remove('active');
   });
   /* Send resets to firmware */
-  sendCmd('setFilterType', { value: 0 });
+  sendCmd('setFilter', { type: 0 });
   sendCmd('setDistortion', { value: 0 });
-  sendCmd('setBitDepth', { value: 16 });
+  sendCmd('setBitCrush', { value: 16 });
   sendCmd('setSampleRate', { value: 44100 });
   sendCmd('setPhaserActive', { value: false });
   sendCmd('setFlangerActive', { value: false });

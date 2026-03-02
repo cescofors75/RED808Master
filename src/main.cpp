@@ -34,7 +34,7 @@
 
 // Daisy-first workflow: no precarga de samples locales en boot de ESP32.
 // Los samples se gestionan desde SD en Daisy vía comandos SD_*.
-#define BOOT_PRELOAD_LOCAL_SAMPLES true
+#define BOOT_PRELOAD_LOCAL_SAMPLES false
 
 // --- OBJETOS GLOBALES ---
 // NOTE: Sequencer's large pattern arrays (~229 KB) are allocated from PSRAM
@@ -74,6 +74,11 @@ int8_t getTrackSynthEngine(int track) {
     if (track < 0 || track >= 16) return -1;
     return gTrackSynthEngine[track];
 }
+
+static const uint8_t PAD_303_NOTES[16] = {
+    48, 50, 52, 53, 55, 57, 59, 60,
+    62, 64, 65, 67, 69, 71, 72, 74
+};
 
 // Colores por instrumento - 16 instrumentos RGB (formato 0xRRGGBB estándar)
 const uint32_t instrumentColors[16] = {
@@ -217,7 +222,20 @@ void onStepTrigger(int track, uint8_t velocity, uint8_t trackVolume, uint32_t no
 // Esta SÍ enciende el LED RGB
 void triggerPadWithLED(int track, uint8_t velocity) {
     Serial.printf("[PAD] trigger pad=%d vel=%d\n", track, velocity);
-    spiMaster.triggerSampleLive(track, velocity);
+    int8_t engine = getTrackSynthEngine(track);
+    if (track >= 0 && track < 16 && engine >= 0 && engine <= 3) {
+        uint8_t liveVol = spiMaster.getLiveVolume();
+        float scaled = (velocity / 127.0f) * (liveVol / 100.0f);
+        uint8_t synthVelocity = (uint8_t)constrain((int)roundf(scaled * 127.0f), 1, 127);
+        if (engine == 3) {
+            uint8_t midiNote = PAD_303_NOTES[track];
+            spiMaster.synth303NoteOn(midiNote, false, false);
+        } else {
+            spiMaster.synthTrigger((uint8_t)engine, (uint8_t)track, synthVelocity);
+        }
+    } else {
+        spiMaster.triggerSampleLive(track, velocity);
+    }
     lfoEngine.onPadTrigger(track);  // LFO retrigger
     
     // Iluminar LED RGB con color del instrumento (solo pads principales 0-15)
@@ -233,7 +251,7 @@ void triggerPadWithLED(int track, uint8_t velocity) {
 
 static void applyProfessionalMixBaseline() {
     // Global post-master defaults: clean and controlled
-    spiMaster.setMasterVolume(88);
+    spiMaster.setMasterVolume(100);
     spiMaster.setSequencerVolume(100);
     spiMaster.setLiveVolume(100);
     spiMaster.setLivePitchShift(1.0f);
@@ -339,6 +357,26 @@ void setup() {
             }
         } else {
             Serial.println("[BOOT] Daisy SD status unavailable -> ESP32 preload enabled");
+        }
+    } else {
+        SdStatusResponse sdStatus = {};
+        if (spiMaster.sdGetStatus(sdStatus) && sdStatus.present) {
+            int loadedMainPads = 0;
+            for (int i = 0; i < 16; i++) {
+                if (sdStatus.samplesLoaded & (1UL << i)) loadedMainPads++;
+            }
+
+            if (loadedMainPads == 0) {
+                const char* defaultKit = "RED 808 KARZ";
+                bool sent = spiMaster.sdLoadKit(defaultKit, 0, 16);
+                Serial.printf("[BOOT] Daisy-first fallback: no pads loaded -> load kit '%s' (%s)\n",
+                              defaultKit, sent ? "sent" : "FAIL");
+            } else {
+                Serial.printf("[BOOT] Daisy-first: Daisy already has %d/16 pads loaded (kit='%s')\n",
+                              loadedMainPads, sdStatus.currentKit);
+            }
+        } else {
+            Serial.println("[BOOT] Daisy-first: SD status unavailable at boot");
         }
     }
 

@@ -8,6 +8,8 @@ let padLoopState = {};
 let padFxState = new Array(24).fill(null); // Per-pad FX state (16 main + 8 xtra)
 let trackFxState = new Array(16).fill(null); // Per-track FX state
 let isPlaying = false;
+const SYNTH_SWITCH_DEBOUNCE_MS = 220;
+let lastSynthSwitchMs = new Array(16).fill(0);
 let currentPatternIndex = 0; // Track current pattern for keyboard nav
 
 const PATTERN_NAMES = ['HIP HOP', 'TECHNO', 'DnB', 'BREAK', 'HOUSE', 'TRAP'];
@@ -519,6 +521,9 @@ function handleWebSocketMessage(data) {
             break;
         case 'sdLoadSampleAck':
             sdLog(`Pad ${data.pad} ← ${data.file} ${data.ok ? '✓' : '✗'}`);
+            if (data.ok && typeof data.pad === 'number' && data.file) {
+                applyDaisySampleMetadata(data.pad, data.file, data.size);
+            }
             break;
         case 'sdUnloadKitAck':
             sdLog('Kit unloaded');
@@ -1621,14 +1626,24 @@ function updateTrackStepDots(track) {
         let sw = stepEl.querySelector('.step-synth-wave');
         if (hasSynthWave) {
             if (!sw) {
-                sw = document.createElement('i');
+                sw = document.createElement('div');
                 sw.className = 'step-synth-wave';
-                sw.textContent = '∿';
                 stepEl.appendChild(sw);
             }
+            sw.innerHTML = buildStepSynthWaveSvg(synthEngine);
             sw.dataset.engine = String(synthEngine);
+
+            let sl = stepEl.querySelector('.step-synth-label');
+            if (!sl) {
+                sl = document.createElement('i');
+                sl.className = 'step-synth-label';
+                stepEl.appendChild(sl);
+            }
+            sl.textContent = SYNTH_ENGINE_LABELS[synthEngine] || 'SYN';
         } else if (sw) {
             sw.remove();
+            const sl = stepEl.querySelector('.step-synth-label');
+            if (sl) sl.remove();
         }
 
         // Filter dot — top-right, visible only on active steps (CSS)
@@ -1653,6 +1668,17 @@ function updateTrackStepDots(track) {
     }
 }
 window.updateTrackStepDots = updateTrackStepDots;
+
+function buildStepSynthWaveSvg(engine) {
+    const shapes = {
+        0: 'M0,16 L8,16 L12,3 L18,24 L24,16 L32,16 L38,6 L44,20 L52,16 L60,16',
+        1: 'M0,16 L8,16 L12,4 L16,28 L20,4 L24,28 L28,4 L32,28 L36,4 L40,16 L60,16',
+        2: 'M0,20 L6,20 L8,12 L12,12 L14,24 L18,24 L20,8 L24,8 L26,20 L32,20 L36,14 L40,14 L44,22 L60,22',
+        3: 'M0,20 L6,6 L12,20 L18,10 L24,20 L30,8 L36,20 L42,12 L48,20 L54,14 L60,20'
+    };
+    const d = shapes[engine] || shapes[0];
+    return `<svg viewBox="0 0 60 32" preserveAspectRatio="none" aria-hidden="true"><path class="step-synth-wave-line" d="${d}"/></svg>`;
+}
 
 /* ── Sync FX from Patchbay localStorage ── */
 function syncFxFromPatchbay() {
@@ -2336,6 +2362,13 @@ function syncTrackSynthEnginesFromState(engines) {
 
 // Activar/desactivar engine synth en un pad (toggle)
 function setSynthEngine(padIndex, engine) {
+    const now = performance.now();
+    if (padIndex >= 0 && padIndex < lastSynthSwitchMs.length) {
+        if (now - lastSynthSwitchMs[padIndex] < SYNTH_SWITCH_DEBOUNCE_MS) {
+            return;
+        }
+        lastSynthSwitchMs[padIndex] = now;
+    }
     const nextEngine = (padSynthEngine[padIndex] === engine) ? -1 : engine;
     setSynthEngineExact(padIndex, nextEngine, true);
 }
@@ -4488,8 +4521,8 @@ function adjustVolume(change) {
         let currentVolume = parseInt(liveVolumeSlider.value);
         let newVolume = currentVolume + change;
         
-        // Limitar entre 0 y 100
-        newVolume = Math.max(0, Math.min(100, newVolume));
+        // Limitar entre 0 y 150
+        newVolume = Math.max(0, Math.min(150, newVolume));
         
         liveVolumeSlider.value = newVolume;
         liveVolumeValue.textContent = newVolume;
@@ -4511,8 +4544,8 @@ function adjustSequencerVolume(change) {
         let currentVolume = parseInt(sequencerVolumeSlider.value);
         let newVolume = currentVolume + change;
         
-        // Limitar entre 0 y 100
-        newVolume = Math.max(0, Math.min(100, newVolume));
+        // Limitar entre 0 y 150
+        newVolume = Math.max(0, Math.min(150, newVolume));
         
         sequencerVolumeSlider.value = newVolume;
         sequencerVolumeValue.textContent = newVolume;
@@ -5088,6 +5121,20 @@ function updatePadInfo(data) {
         pendingAutoPlayPad = null;
         setTimeout(() => triggerPad(padIndex), 80);
     }
+}
+
+function applyDaisySampleMetadata(padIndex, filename, sizeBytes = 0) {
+    if (typeof padIndex !== 'number' || padIndex < 0 || padIndex >= padSampleMetadata.length || !filename) {
+        return;
+    }
+    const bytes = (typeof sizeBytes === 'number' && Number.isFinite(sizeBytes)) ? sizeBytes : 0;
+    padSampleMetadata[padIndex] = {
+        filename,
+        sizeKB: (bytes / 1024).toFixed(1),
+        format: inferFormatFromName(filename),
+        quality: 'Daisy SD'
+    };
+    refreshPadSampleInfo(padIndex);
 }
 
 // ============= FILTER PRESET SYSTEM =============
@@ -6373,7 +6420,7 @@ function showVolumeMenu(track, button) {
     slider.type = 'range';
     slider.className = 'volume-slider';
     slider.min = '0';
-    slider.max = '100';
+    slider.max = '150';
     slider.value = trackVolumes[track];
     slider.orient = 'vertical'; // Para navegadores antiguos
     
@@ -7262,6 +7309,18 @@ function sdHandleEvent(data) {
     const name = evtNames[data.event] || `Event ${data.event}`;
     const extra = data.name ? ` "${data.name}"` : '';
     sdLog(`${name}${extra} (${data.padCount} pads)`);
+    if (data.event === 4 && data.name) {
+        const pads = [];
+        const maskLo = (typeof data.maskLo === 'number' ? data.maskLo : 0) & 0xFF;
+        const maskHi = (typeof data.maskHi === 'number' ? data.maskHi : 0) & 0xFF;
+        const maskXtra = (typeof data.maskXtra === 'number' ? data.maskXtra : 0) & 0xFF;
+        for (let bit = 0; bit < 8; bit++) {
+            if (maskLo & (1 << bit)) pads.push(bit);
+            if (maskHi & (1 << bit)) pads.push(8 + bit);
+            if (maskXtra & (1 << bit)) pads.push(16 + bit);
+        }
+        pads.forEach((pad) => applyDaisySampleMetadata(pad, data.name));
+    }
     if (data.event === 1 || data.event === 3 || data.event === 4) sdRefreshStatus();
 }
 

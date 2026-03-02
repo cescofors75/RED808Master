@@ -25,6 +25,26 @@ extern int8_t gTrackSynthEngine[16];
 extern void setTrackSynthEngine(int track, int8_t engine);
 extern void setAllTrackSynthEngines(int8_t engine);
 static constexpr bool kStrictProtocolBoundary = true;
+static String gDaisyPadFiles[MAX_PADS];
+
+static void setDaisyPadFile(int padIndex, const String& fileName) {
+  if (padIndex < 0 || padIndex >= MAX_PADS) return;
+  gDaisyPadFiles[padIndex] = fileName;
+}
+
+static void clearDaisyPadFiles() {
+  for (int i = 0; i < MAX_PADS; i++) {
+    gDaisyPadFiles[i] = "";
+  }
+}
+
+static void clearDaisyPadFilesNotInMask(uint32_t loadedMask) {
+  for (int i = 0; i < MAX_PADS; i++) {
+    if ((loadedMask & (1UL << i)) == 0) {
+      gDaisyPadFiles[i] = "";
+    }
+  }
+}
 
 static bool isSupportedSampleFile(const String& filename) {
   String lower = filename;
@@ -63,6 +83,19 @@ static bool readWavInfo(File& file, uint32_t& rate, uint16_t& channels, uint16_t
 }
 
 static void populateStateDocument(DynamicJsonDocument& doc) {
+  SdStatusResponse sdStat = {};
+  bool sdOk = spiMaster.sdGetStatus(sdStat);
+  uint32_t sdLoadedMask = sdOk ? sdStat.samplesLoaded : 0;
+  if (sdOk) {
+    clearDaisyPadFilesNotInMask(sdLoadedMask);
+  }
+
+  int sdLoadedCount = 0;
+  for (int i = 0; i < MAX_PADS; i++) {
+    if (sdLoadedMask & (1UL << i)) sdLoadedCount++;
+  }
+
+  int localLoadedCount = sampleManager.getLoadedSamplesCount();
   doc["type"] = "state";
   doc["playing"] = sequencer.isPlaying();
   doc["tempo"] = sequencer.getTempo();
@@ -70,7 +103,7 @@ static void populateStateDocument(DynamicJsonDocument& doc) {
   doc["step"] = sequencer.getCurrentStep();
   doc["sequencerVolume"] = spiMaster.getSequencerVolume();
   doc["liveVolume"] = spiMaster.getLiveVolume();
-  doc["samplesLoaded"] = sampleManager.getLoadedSamplesCount();
+  doc["samplesLoaded"] = max(localLoadedCount, sdLoadedCount);
   doc["memoryUsed"] = sampleManager.getTotalMemoryUsed();
   doc["psramFree"] = sampleManager.getFreePSRAM();
   doc["songMode"] = sequencer.isSongMode();
@@ -105,15 +138,19 @@ static void populateStateDocument(DynamicJsonDocument& doc) {
   // Compact samples: only send loaded sample info (not empty pads)
   JsonArray sampleArray = doc.createNestedArray("samples");
   for (int pad = 0; pad < MAX_SAMPLES; pad++) {
-    bool loaded = sampleManager.isSampleLoaded(pad);
+    bool loadedLocal = sampleManager.isSampleLoaded(pad);
+    bool loadedDaisy = (sdLoadedMask & (1UL << pad)) != 0;
+    bool loaded = loadedLocal || loadedDaisy;
     if (loaded) {
       JsonObject sampleObj = sampleArray.createNestedObject();
       sampleObj["pad"] = pad;
       sampleObj["loaded"] = true;
-      const char* name = sampleManager.getSampleName(pad);
-      sampleObj["name"] = name ? name : "";
-      sampleObj["size"] = sampleManager.getSampleLength(pad) * 2;
-      sampleObj["format"] = detectSampleFormat(name);
+      const char* localName = sampleManager.getSampleName(pad);
+      String daisyName = gDaisyPadFiles[pad];
+      const char* finalName = (loadedLocal && localName) ? localName : daisyName.c_str();
+      sampleObj["name"] = finalName ? finalName : "";
+      sampleObj["size"] = loadedLocal ? (sampleManager.getSampleLength(pad) * 2) : 0;
+      sampleObj["format"] = detectSampleFormat(finalName);
     }
   }
   
@@ -132,20 +169,16 @@ static void populateStateDocument(DynamicJsonDocument& doc) {
   }
   
   // Daisy SD card info (explicit SD status query in strict boundary mode)
-  SdStatusResponse sdStat = {};
-  if (spiMaster.sdGetStatus(sdStat)) {
+  if (sdOk) {
     doc["sdPresent"] = (bool)sdStat.present;
     doc["sdKit"] = String(sdStat.currentKit);
-    uint32_t mask = sdStat.samplesLoaded;
-    int loadedCount = 0;
-    for (int i = 0; i < 24; i++) {
-      if (mask & (1UL << i)) loadedCount++;
-    }
-    doc["sdPadsLoaded"] = loadedCount;
+    doc["sdPadsLoaded"] = sdLoadedCount;
+    doc["sdLoadedMask"] = sdLoadedMask;
   } else {
     doc["sdPresent"] = false;
     doc["sdKit"] = "";
     doc["sdPadsLoaded"] = 0;
+    doc["sdLoadedMask"] = 0;
   }
   
   // LFO active count
@@ -1938,33 +1971,29 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     const char* filename = doc["filename"];
     int padIndex = doc["pad"];
     if (padIndex < 0 || padIndex >= 16) return;
-    
-    float trimStart = doc.containsKey("trimStart") ? (float)doc["trimStart"] : 0.0f;
-    float trimEnd = doc.containsKey("trimEnd") ? (float)doc["trimEnd"] : 1.0f;
-    float fadeIn  = doc.containsKey("fadeIn")  ? (float)doc["fadeIn"]  / 1000.0f : 0.0f;  // ms → sec
-    float fadeOut = doc.containsKey("fadeOut") ? (float)doc["fadeOut"] / 1000.0f : 0.0f;  // ms → sec
-    
-    String fullPath = String("/") + String(family) + String("/") + String(filename);
-    
+    if (!family || !filename) return;
+
     yield();
-    
-    if (sampleManager.loadSample(fullPath.c_str(), padIndex)) {
-      // Apply trim if specified (not default 0-1)
-      if (trimStart > 0.001f || trimEnd < 0.999f) {
-        sampleManager.trimSample(padIndex, trimStart, trimEnd);
-      }
-      // Apply fade in/out if specified
-      if (fadeIn > 0.001f || fadeOut > 0.001f) {
-        sampleManager.applyFade(padIndex, fadeIn, fadeOut);
-      }
-      
+    SdFileInfoResponse info = {};
+    spiMaster.sdGetFileInfo(family, filename, info);
+
+    bool ok = spiMaster.sdLoadSample(padIndex, family, filename);
+    if (ok) {
+      setDaisyPadFile(padIndex, String(filename));
+
       StaticJsonDocument<256> responseDoc;
       responseDoc["type"] = "sampleLoaded";
       responseDoc["pad"] = padIndex;
       responseDoc["filename"] = filename;
-      responseDoc["size"] = sampleManager.getSampleLength(padIndex) * 2;
+      responseDoc["size"] = info.sizeBytes;
       responseDoc["format"] = detectSampleFormat(filename);
-      
+
+      if (info.sampleRate > 0 && info.bitsPerSample > 0) {
+        char quality[24];
+        snprintf(quality, sizeof(quality), "%uHz • %u-bit", (unsigned int)info.sampleRate, (unsigned int)info.bitsPerSample);
+        responseDoc["quality"] = quality;
+      }
+
       String output;
       serializeJson(responseDoc, output);
       if (ws) ws->textAll(output);
@@ -3010,7 +3039,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     }
   }
   else if (cmd == "setSequencerVolume") {
-    int volume = doc["value"];
+    int volume = constrain((int)doc["value"], 0, 150);
     spiMaster.setSequencerVolume(volume);
     
     // Broadcast volume change to all clients
@@ -3023,7 +3052,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     if (ws) ws->textAll(output);
   }
   else if (cmd == "setLiveVolume") {
-    int volume = doc["value"];
+    int volume = constrain((int)doc["value"], 0, 150);
     spiMaster.setLiveVolume(volume);
     
     // Broadcast volume change to all clients
@@ -3448,7 +3477,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   // ============= NEW: Track Volume Commands =============
   else if (cmd == "setTrackVolume") {
     int track = doc["track"];
-    int volume = doc["volume"];
+    int volume = constrain((int)doc["volume"], 0, 150);
     if (track < 0 || track >= 16) {
       Serial.printf("[WS] Invalid track %d (must be 0-15)\n", track);
       return;
@@ -3578,6 +3607,9 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       uint8_t startPad = doc.containsKey("startPad") ? doc["startPad"].as<uint8_t>() : 0;
       uint8_t maxPads  = doc.containsKey("maxPads")  ? doc["maxPads"].as<uint8_t>()  : 16;
       bool ok = spiMaster.sdLoadKit(kit, startPad, maxPads);
+      if (ok) {
+        clearDaisyPadFiles();
+      }
       StaticJsonDocument<192> resp;
       resp["type"] = "sdLoadKitAck";
       resp["kit"] = kit;
@@ -3590,6 +3622,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "sdUnloadKit") {
     spiMaster.sdUnloadKit();
+    clearDaisyPadFiles();
     StaticJsonDocument<64> resp;
     resp["type"] = "sdUnloadKitAck";
     resp["ok"] = true;
@@ -3602,11 +3635,18 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     const char* folder = doc["folder"];
     const char* file   = doc["file"];
     if (folder && file && pad >= 0 && pad < 24) {
+      SdFileInfoResponse info = {};
+      spiMaster.sdGetFileInfo(folder, file, info);
       bool ok = spiMaster.sdLoadSample(pad, folder, file);
+      if (ok) {
+        setDaisyPadFile(pad, String(file));
+      }
       StaticJsonDocument<192> resp;
       resp["type"] = "sdLoadSampleAck";
       resp["pad"]  = pad;
+      resp["folder"] = folder;
       resp["file"] = file;
+      resp["size"] = info.sizeBytes;
       resp["ok"]   = ok;
       String output;
       serializeJson(resp, output);
@@ -3650,12 +3690,18 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "sdGetStatus") {
     SdStatusResponse sdStat;
     if (spiMaster.sdGetStatus(sdStat)) {
+      clearDaisyPadFilesNotInMask(sdStat.samplesLoaded);
+      int loadedCount = 0;
+      for (int i = 0; i < MAX_PADS; i++) {
+        if (sdStat.samplesLoaded & (1UL << i)) loadedCount++;
+      }
       StaticJsonDocument<256> resp;
       resp["type"]      = "sdStatus";
       resp["present"]   = (bool)sdStat.present;
       resp["totalMB"]   = sdStat.totalMB;
       resp["freeMB"]    = sdStat.freeMB;
-      resp["loaded"]    = sdStat.samplesLoaded;
+      resp["loaded"]    = loadedCount;
+      resp["loadedMask"] = sdStat.samplesLoaded;
       resp["kit"]       = String(sdStat.currentKit);
       String output;
       serializeJson(resp, output);
