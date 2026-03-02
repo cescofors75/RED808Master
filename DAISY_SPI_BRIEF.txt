@@ -1,0 +1,161 @@
+================================================================================
+RED808 — DAISY SEED SLAVE SPI: CONFIGURACION COMPLETA
+================================================================================
+Proyecto: RED808 Drum Machine
+Master:   ESP32-S3
+Slave:    Daisy Seed (STM32H750 + codec WM8731)
+Fecha:    2026-03-02
+================================================================================
+
+
+1. CABLEADO FISICO
+================================================================================
+
+Daisy Seed lado DERECHO (USB arriba), contar pines desde el USB hacia abajo:
+
+  Pos  8   D7   PG10   SPI1_NSS  (CS)    <-- ESP32-S3 GPIO7   [cable cualquier color]
+  Pos  9   D8   PG11   SPI1_SCK  (SCK)   <-- ESP32-S3 GPIO4   [cable amarillo]
+  Pos 10   D9   PB4    SPI1_MISO (MISO)  --> ESP32-S3 GPIO6   [cable verde]
+  Pos 11   D10  PB5    SPI1_MOSI (MOSI)  <-- ESP32-S3 GPIO5   [cable azul]
+           GND                            --- ESP32-S3 GND     [cable negro]  OBLIGATORIO
+
+NOTAS:
+  - Usar SPI_1 (NO SPI_3 — SPI_3 ocupa pines de SD/SAI y conflicta)
+  - Nivel logico 3.3V en Daisy y ESP32-S3 — compatible directo, sin adaptador
+  - GND comun obligatorio entre las dos placas
+  - Cables cortos < 20 cm recomendado
+
+
+2. CODIGO LIBDAISY — INIT SPI SLAVE
+================================================================================
+
+SpiHandle spi_slave;
+
+void InitSPI() {
+    SpiHandle::Config spi_config;
+    spi_config.periph          = SpiHandle::Config::Peripheral::SPI_1;
+    spi_config.direction       = SpiHandle::Config::Direction::TWO_LINES;
+    spi_config.mode            = SpiHandle::Config::Mode::SLAVE;
+    spi_config.datasize        = 8;
+    spi_config.clock_polarity  = SpiHandle::Config::ClockPolarity::LOW;    // CPOL=0
+    spi_config.clock_phase     = SpiHandle::Config::ClockPhase::ONE_EDGE;  // CPHA=0 -> Mode 0
+    spi_config.nss             = SpiHandle::Config::NSS::HARD_INPUT;
+    spi_config.baudPrescaler   = SpiHandle::Config::BaudPrescaler::PS_64;  // ~2 MHz
+
+    spi_config.pin_config.nss  = seed.GetPin(7);   // D7  PG10 -- CS
+    spi_config.pin_config.sclk = seed.GetPin(8);   // D8  PG11 -- SCK
+    spi_config.pin_config.miso = seed.GetPin(9);   // D9  PB4  -- MISO (Daisy -> ESP32)
+    spi_config.pin_config.mosi = seed.GetPin(10);  // D10 PB5  -- MOSI (ESP32 -> Daisy)
+
+    spi_slave.Init(spi_config);
+}
+
+
+3. FORMATO DE PAQUETES SPI
+================================================================================
+
+Todo paquete = Header 8 bytes + Payload N bytes
+
+HEADER (packed, little-endian):
+  [0]     uint8_t  magic      ESP32->Daisy: siempre 0xA5
+  [1]     uint8_t  cmd        codigo de comando
+  [2-3]   uint16_t length     bytes de payload que siguen
+  [4]     uint8_t  sequence   numero de secuencia (0-255, wraps)
+  [5]     uint8_t  reserved   siempre 0
+  [6-7]   uint16_t checksum   CRC16-Modbus del payload (0 si length==0)
+
+RESPUESTA SLAVE (header identico):
+  [0]     uint8_t  magic      Daisy->ESP32: siempre 0x5A
+  [1]     uint8_t  cmd        eco del cmd recibido
+  [2-3]   uint16_t length     bytes de respuesta
+  [4]     uint8_t  sequence   eco del sequence
+  [5]     uint8_t  reserved   0
+  [6-7]   uint16_t checksum   CRC16-Modbus de la respuesta
+
+TIMING:
+  - CS baja -> enviar Header+Payload -> CS sube      (Transaccion 1)
+  - Esperar minimo 500 us
+  - CS baja -> clockear Header+Respuesta -> CS sube  (Transaccion 2, solo si cmd tiene respuesta)
+
+CRC16-Modbus (calcular SOLO sobre payload, no header):
+  uint16_t crc = 0xFFFF;
+  for cada byte b:
+      crc ^= b;
+      for 8 bits:
+          if (crc & 1) crc = (crc >> 1) ^ 0xA001;
+          else         crc >>= 1;
+  return crc;
+
+
+4. TABLA DE COMANDOS FASE 1 (minimo para funcionar)
+================================================================================
+
+CMD              HEX    RESPUESTA   PAYLOAD
+---------------------------------------------------------------------------
+CMD_PING         0xEE   SI          PingPayload(4B)  -> PongResponse(8B)
+CMD_TRIGGER_SEQ  0x01   NO          pad(1) vel(1) vol(1) res(1) maxSamples(4)
+CMD_TRIGGER_LIVE 0x02   NO          pad(1) vel(1)
+CMD_TRIGGER_STOP 0x03   NO          pad(1)
+CMD_TRIGGER_STOP_ALL 0x04 NO        (sin payload)
+CMD_MASTER_VOLUME 0x10  NO          volume(1)  [0-127]
+CMD_TRACK_VOLUME  0x13  NO          pad(1) volume(1)
+CMD_SAMPLE_BEGIN  0xA0  SI          SampleBeginPayload -> ack(1)
+CMD_SAMPLE_DATA   0xA1  NO          SampleDataHeader(8) + PCM data (max 512B)
+CMD_SAMPLE_END    0xA2  SI          pad(1) -> ack(1)
+
+
+5. STRUCT PING (lo primero que llega — confirma el link)
+================================================================================
+
+typedef struct {
+    uint32_t timestamp;   // millis() del ESP32
+} PingPayload;            // 4 bytes
+
+typedef struct {
+    uint32_t timestamp;   // eco del timestamp recibido
+    uint32_t uptime;      // millis() de la Daisy
+} PongResponse;           // 8 bytes
+
+El ESP32 espera recibir magic=0x5A + cmd=0xEE para marcar el link como activo.
+Si la Daisy no responde al PING, el ESP32 reintenta cada 3 segundos indefinidamente.
+
+
+6. CHECKLIST PARA EQUIPO DAISY
+================================================================================
+
+[ ] Usar SPI_1 con seed.GetPin(7/8/9/10)  ->  D7/D8/D9/D10
+[ ] Mode SLAVE  (el ESP32 es MASTER, genera SCK y CS)
+[ ] Mode 0  (CPOL=0, CPHA=0)
+[ ] NSS HARD_INPUT  (hardware CS, no software)
+[ ] Responder 0x5A al PING (cmd=0xEE) con PongResponse de 8 bytes
+[ ] GND comun con ESP32 conectado fisicamente
+[ ] Audio sample rate: 44100 Hz mono 16-bit signed PCM
+    -> seed.SetAudioSampleRate(SaiHandle::Config::SampleRate::SAI_44KHZ)
+[ ] Block size recomendado: 128
+    -> seed.SetAudioBlockSize(128)
+
+
+7. AUDIO OUT (jack 3.5mm TRS)
+================================================================================
+
+  Daisy AUDIO OUT L  -->  Jack TIP    (L)
+  Daisy AUDIO OUT R  -->  Jack RING   (R)
+  Daisy AGND         -->  Jack SLEEVE (GND audio)
+
+  Los pines de audio NO son GPIO digitales. Salen del codec WM8731 integrado.
+  En el carrier board / baseboard de Daisy estos van a conectores fisicos.
+
+
+8. REFERENCIA DE CODIGO COMPLETO
+================================================================================
+
+El archivo red808_daisy.cpp completo (slave de referencia con SPI + audio + DSP)
+esta documentado en:
+  - DAISY_SLAVE_GUIDE.md   seccion 9
+  - STM32_SLAVE_PROTOCOL.md seccion 15.4
+
+Repositorio: https://github.com/cescofors75/RED808Master
+
+================================================================================
+FIN DEL DOCUMENTO
+================================================================================

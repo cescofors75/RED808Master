@@ -8,7 +8,6 @@
 #define SPI_MASTER_H
 
 #include <Arduino.h>
-#include <HardwareSerial.h>
 #include "protocol.h"
 #include <freertos/semphr.h>
 
@@ -17,15 +16,22 @@
 #define MAX_VOICES 10
 
 // ═══════════════════════════════════════════════════════
-// UART TRANSPORT PINS (ESP32-S3 → Daisy Seed)
+// SPI TRANSPORT PINS (ESP32-S3 → Daisy/STM32)
 // ═══════════════════════════════════════════════════════
-// Solo 2 cables + GND — mucho más simple que SPI
-// GPIO17 = TX (ESP32 transmite) → Daisy RX (D30, PB15, USART1_RX)
-// GPIO18 = RX (ESP32 recibe)   ← Daisy TX (D29, PB14, USART1_TX)
+// Bus HSPI (SPI3) — separado del display ST7789 que usa FSPI (SPI2)
+// Wiring master (ESP32) -> slave (Daisy SPI1) — pines oficiales Electrosmith:
+//   GPIO7 = CS  → Daisy D7  (PG10, SPI1_NSS)  — lado derecho pin 8
+//   GPIO4 = SCK → Daisy D8  (PG11, SPI1_SCK)  — lado derecho pin 9
+//   GPIO6 = MISO← Daisy D9  (PB4,  SPI1_MISO) — lado derecho pin 10
+//   GPIO5 = MOSI→ Daisy D10 (PB5,  SPI1_MOSI) — lado derecho pin 11
+// SPI mode 0, MSB first, 2 MHz (subir a 10-20 MHz una vez estable)
 
-#define DAISY_UART_TX    17   // ESP32 TX → Daisy RX
-#define DAISY_UART_RX    18   // ESP32 RX ← Daisy TX
-#define DAISY_UART_BAUD  230400   // 230400: más estable que 1M, menos latencia que 115200
+#define DAISY_SPI_CS               7
+#define DAISY_SPI_SCK              4
+#define DAISY_SPI_MOSI             5
+#define DAISY_SPI_MISO             6
+#define DAISY_SPI_CLOCK_HZ    2000000UL
+#define DAISY_SPI_RESPONSE_GAP_US  500
 
 // Audio constants (mirrored from old AudioEngine for compatibility)
 static constexpr int MAX_AUDIO_TRACKS = 16;
@@ -337,7 +343,6 @@ public:
     void process();
     
 private:
-    HardwareSerial* daisySerial;
     uint16_t seqNumber;
     uint32_t spiErrorCount;
     bool stm32Connected;
@@ -413,7 +418,6 @@ private:
     bool sendAndReceive(uint8_t cmd, const void* payload, uint16_t payloadLen,
                         void* response, uint16_t responseLen);
     uint16_t crc16(const uint8_t* data, uint16_t len);
-    bool uartReadBytes(uint8_t* buf, uint16_t len, uint32_t timeoutMs);
 };
 
 #endif // SPI_MASTER_H

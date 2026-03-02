@@ -5,6 +5,10 @@
  */
 
 #include "SPIMaster.h"
+#include <SPI.h>
+
+// Bus HSPI (SPI3) — separado del display ST7789 que usa FSPI/SPI2
+static SPIClass daisySpi(HSPI);
 
 // ═══════════════════════════════════════════════════════
 // SPI DEBUG — Activar/desactivar logs por Serial
@@ -154,7 +158,7 @@ static const FilterPreset filterPresets[] = {
 // CONSTRUCTOR / DESTRUCTOR
 // ═══════════════════════════════════════════════════════
 
-SPIMaster::SPIMaster() : daisySerial(nullptr), seqNumber(0), spiErrorCount(0), stm32Connected(false), spiMutex(nullptr) {
+SPIMaster::SPIMaster() : seqNumber(0), spiErrorCount(0), stm32Connected(false), spiMutex(nullptr) {
     spiMutex = xSemaphoreCreateMutex();
     // Initialize cached state
     cachedMasterVolume = 100;
@@ -211,10 +215,7 @@ SPIMaster::SPIMaster() : daisySerial(nullptr), seqNumber(0), spiErrorCount(0), s
 }
 
 SPIMaster::~SPIMaster() {
-    if (daisySerial) {
-        daisySerial->end();
-        daisySerial = nullptr;
-    }
+    daisySpi.end();
     if (spiMutex) {
         vSemaphoreDelete(spiMutex);
         spiMutex = nullptr;
@@ -226,55 +227,35 @@ SPIMaster::~SPIMaster() {
 // ═══════════════════════════════════════════════════════
 
 bool SPIMaster::begin() {
-    // Initialize UART1 for Daisy Seed communication
-    daisySerial = &Serial1;
-    // Must be set before begin() on ESP32 Arduino core
-    daisySerial->setRxBufferSize(1024);
-    daisySerial->begin(DAISY_UART_BAUD, SERIAL_8N1, DAISY_UART_RX, DAISY_UART_TX);
-    
-    Serial.println("[UART] Transport initialized for Daisy Seed");
-    Serial.printf("[UART] TX=GPIO%d  RX=GPIO%d  Baud=%d\n",
-                  DAISY_UART_TX, DAISY_UART_RX, DAISY_UART_BAUD);
-    
-    // Flush any garbage
-    delay(50);
-    while (daisySerial->available()) daisySerial->read();
+    pinMode(DAISY_SPI_CS, OUTPUT);
+    digitalWrite(DAISY_SPI_CS, HIGH);
+    daisySpi.begin(DAISY_SPI_SCK, DAISY_SPI_MISO, DAISY_SPI_MOSI, DAISY_SPI_CS);
+
+    Serial.println("[SPI] Transport initialized for Daisy/STM32 slave");
+    Serial.printf("[SPI] CS=GPIO%d SCK=GPIO%d MOSI=GPIO%d MISO=GPIO%d CLK=%luHz\n",
+                  DAISY_SPI_CS, DAISY_SPI_SCK, DAISY_SPI_MOSI, DAISY_SPI_MISO,
+                  (unsigned long)DAISY_SPI_CLOCK_HZ);
     
     // Try to connect to Daisy
     uint32_t rtt;
     for (int attempt = 0; attempt < 10; attempt++) {
         if (ping(rtt)) {
             stm32Connected = true;
-            Serial.printf("[UART] Daisy connected! RTT: %d us\n", rtt);
+            Serial.printf("[SPI] Daisy connected! RTT: %d us\n", rtt);
             return true;
         }
         delay(200);
-        Serial.printf("[UART] Ping attempt %d/10...\n", attempt + 1);
+        Serial.printf("[SPI] Ping attempt %d/10...\n", attempt + 1);
     }
     
-    Serial.println("[UART] WARNING: Daisy not responding at boot");
-    Serial.println("[UART] Continuing boot and retrying in background");
+    Serial.println("[SPI] WARNING: Daisy not responding at boot");
+    Serial.println("[SPI] Continuing boot and retrying in background");
     return true;
 }
 
 // ═══════════════════════════════════════════════════════
-// UART LOW-LEVEL
+// SPI LOW-LEVEL
 // ═══════════════════════════════════════════════════════
-
-bool SPIMaster::uartReadBytes(uint8_t* buf, uint16_t len, uint32_t timeoutMs) {
-    uint32_t start = millis();
-    uint16_t received = 0;
-    while (received < len) {
-        if (daisySerial->available()) {
-            buf[received++] = daisySerial->read();
-        } else if (millis() - start > timeoutMs) {
-            return false; // Timeout
-        } else {
-            delayMicroseconds(10);
-        }
-    }
-    return true;
-}
 
 uint16_t SPIMaster::crc16(const uint8_t* data, uint16_t len) {
     uint16_t crc = 0xFFFF;
@@ -309,7 +290,7 @@ bool SPIMaster::sendCommand(uint8_t cmd, const void* payload, uint16_t payloadLe
     
     // Acquire mutex (thread safety Core0 ↔ Core1)
     if (xSemaphoreTake(spiMutex, pdMS_TO_TICKS(30)) != pdTRUE) {
-        Serial.printf("[UART] MUTEX TIMEOUT cmd=0x%02X\n", cmd);
+        Serial.printf("[SPI] MUTEX TIMEOUT cmd=0x%02X\n", cmd);
         return false;
     }
     
@@ -319,13 +300,23 @@ bool SPIMaster::sendCommand(uint8_t cmd, const void* payload, uint16_t payloadLe
         Serial.printf("[TRIG] seq=%u pad=%u vel=%u\n", header.sequence, p[0], p[1]);
     }
 
-    // Send header (8 bytes) + payload over UART
-    daisySerial->write((uint8_t*)&header, sizeof(SPIPacketHeader));
-    if (payload && payloadLen > 0) {
-        daisySerial->write((const uint8_t*)payload, payloadLen);
+    const uint16_t totalLen = sizeof(SPIPacketHeader) + payloadLen;
+    if (totalLen > sizeof(txBuffer)) {
+        xSemaphoreGive(spiMutex);
+        Serial.printf("[SPI] TX packet too large: %u\n", totalLen);
+        return false;
     }
-    // Non-blocking for RT path: avoid per-command stall/jitter.
-    // Daisy command parser consumes bytes asynchronously via DMA.
+
+    memcpy(txBuffer, &header, sizeof(SPIPacketHeader));
+    if (payload && payloadLen > 0) {
+        memcpy(txBuffer + sizeof(SPIPacketHeader), payload, payloadLen);
+    }
+
+    daisySpi.beginTransaction(SPISettings(DAISY_SPI_CLOCK_HZ, MSBFIRST, SPI_MODE0));
+    digitalWrite(DAISY_SPI_CS, LOW);
+    daisySpi.transferBytes(txBuffer, rxBuffer, totalLen);
+    digitalWrite(DAISY_SPI_CS, HIGH);
+    daisySpi.endTransaction();
     
     xSemaphoreGive(spiMutex);
     
@@ -347,53 +338,67 @@ bool SPIMaster::sendAndReceive(uint8_t cmd, const void* payload, uint16_t payloa
     }
     
     if (xSemaphoreTake(spiMutex, pdMS_TO_TICKS(50)) != pdTRUE) {
-        Serial.printf("[UART] MUTEX TIMEOUT cmd=0x%02X (sendAndReceive)\n", cmd);
+        Serial.printf("[SPI] MUTEX TIMEOUT cmd=0x%02X (sendAndReceive)\n", cmd);
         return false;
     }
-    
-    // Flush RX buffer before sending
-    while (daisySerial->available()) daisySerial->read();
-    
-    // Send header + payload over UART
-    daisySerial->write((uint8_t*)&header, sizeof(SPIPacketHeader));
-    if (payload && payloadLen > 0) {
-        daisySerial->write((const uint8_t*)payload, payloadLen);
+
+    const uint16_t totalLen = sizeof(SPIPacketHeader) + payloadLen;
+    if (totalLen > sizeof(txBuffer)) {
+        xSemaphoreGive(spiMutex);
+        Serial.printf("[SPI] TX packet too large: %u\n", totalLen);
+        return false;
     }
-    daisySerial->flush();
-    
-    // Read response header (8 bytes) with timeout
+
+    memcpy(txBuffer, &header, sizeof(SPIPacketHeader));
+    if (payload && payloadLen > 0) {
+        memcpy(txBuffer + sizeof(SPIPacketHeader), payload, payloadLen);
+    }
+
+    daisySpi.beginTransaction(SPISettings(DAISY_SPI_CLOCK_HZ, MSBFIRST, SPI_MODE0));
+    digitalWrite(DAISY_SPI_CS, LOW);
+    daisySpi.transferBytes(txBuffer, rxBuffer, totalLen);
+    digitalWrite(DAISY_SPI_CS, HIGH);
+    daisySpi.endTransaction();
+
+    delayMicroseconds(DAISY_SPI_RESPONSE_GAP_US);
+
+    // Read response header + payload (segunda transacción CS)
     SPIPacketHeader respHeader;
     bool success = false;
-    
-    if (uartReadBytes((uint8_t*)&respHeader, sizeof(SPIPacketHeader), 50)) {
-        if (respHeader.magic == SPI_MAGIC_RESP && respHeader.length <= responseLen) {
-            if (respHeader.length > 0 && response) {
-                if (uartReadBytes((uint8_t*)response, respHeader.length, 50)) {
-                    success = true;
-                }
-            } else {
-                success = true;
-            }
-            if (success && shouldLogCmd(cmd)) {
-                Serial.printf("[RX] #%03d %-9s OK len=%d\n",
-                              respHeader.sequence, spiCmdName(cmd), respHeader.length);
-            }
-        } else {
-            spiErrorCount++;
-            if (shouldLogCmd(cmd)) {
-                const uint8_t* raw = (const uint8_t*)&respHeader;
-                Serial.printf("[RX] FAIL magic=0x%02X cmd=0x%02X len=%d (err=%d)\n",
-                              respHeader.magic, respHeader.cmd,
-                              respHeader.length, spiErrorCount);
-                Serial.printf("     raw: %02X %02X %02X %02X %02X %02X %02X %02X\n",
-                              raw[0], raw[1], raw[2], raw[3],
-                              raw[4], raw[5], raw[6], raw[7]);
-            }
+
+    memset(txBuffer, 0xFF, sizeof(SPIPacketHeader));
+    daisySpi.beginTransaction(SPISettings(DAISY_SPI_CLOCK_HZ, MSBFIRST, SPI_MODE0));
+    digitalWrite(DAISY_SPI_CS, LOW);
+    daisySpi.transferBytes(txBuffer, reinterpret_cast<uint8_t*>(&respHeader), sizeof(SPIPacketHeader));
+
+    if (respHeader.magic == SPI_MAGIC_RESP &&
+        respHeader.cmd == cmd &&
+        respHeader.length <= responseLen &&
+        respHeader.length <= (SPI_MAX_PAYLOAD - sizeof(SPIPacketHeader))) {
+        if (respHeader.length > 0 && response) {
+            memset(txBuffer, 0xFF, respHeader.length);
+            daisySpi.transferBytes(txBuffer, static_cast<uint8_t*>(response), respHeader.length);
+        }
+        success = true;
+        if (shouldLogCmd(cmd)) {
+            Serial.printf("[RX] #%03d %-9s OK len=%d\n",
+                          respHeader.sequence, spiCmdName(cmd), respHeader.length);
         }
     } else {
         spiErrorCount++;
-        // Timeout — no response
+        if (shouldLogCmd(cmd)) {
+            const uint8_t* raw = reinterpret_cast<const uint8_t*>(&respHeader);
+            Serial.printf("[RX] FAIL magic=0x%02X cmd=0x%02X len=%d (err=%d)\n",
+                          respHeader.magic, respHeader.cmd,
+                          respHeader.length, spiErrorCount);
+            Serial.printf("     raw: %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                          raw[0], raw[1], raw[2], raw[3],
+                          raw[4], raw[5], raw[6], raw[7]);
+        }
     }
+
+    digitalWrite(DAISY_SPI_CS, HIGH);
+    daisySpi.endTransaction();
     
     xSemaphoreGive(spiMutex);
     
@@ -425,7 +430,7 @@ void SPIMaster::process() {
         if (millis() - lastStatusPoll > 500) {
             if (!requestStatus() && stm32Connected) {
                 stm32Connected = false;
-                Serial.println("[UART] Link lost - switching to reconnect mode");
+                Serial.println("[SPI] Link lost - switching to reconnect mode");
             }
             lastStatusPoll = millis();
 
@@ -448,11 +453,17 @@ void SPIMaster::process() {
     // Retry connection if not connected
     if (!stm32Connected) {
         static uint32_t lastRetry = 0;
-        if (millis() - lastRetry > 5000) {
+        static uint32_t retryCount = 0;
+        if (millis() - lastRetry > 3000) {
             uint32_t rtt;
+            retryCount++;
+            Serial.printf("[SPI] Retry #%lu — PING CS=GPIO%d SCK=GPIO%d MOSI=GPIO%d MISO=GPIO%d\n",
+                          retryCount, DAISY_SPI_CS, DAISY_SPI_SCK, DAISY_SPI_MOSI, DAISY_SPI_MISO);
             if (ping(rtt)) {
                 stm32Connected = true;
-                Serial.printf("[UART] Daisy reconnected! RTT: %d us\n", rtt);
+                Serial.printf("[SPI] Daisy CONECTADA! RTT: %lu us\n", rtt);
+            } else {
+                Serial.printf("[SPI] Daisy NO responde (intento %lu) — verifica cables D7/D8/D9/D10\n", retryCount);
             }
             lastRetry = millis();
         }
