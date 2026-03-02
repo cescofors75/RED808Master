@@ -515,6 +515,18 @@ void setup() {
     sequencer.setStep(7, 5, true);   // CB: Cowbell groove
     sequencer.setStep(7, 13, true);  // CB: Cowbell extra
     sequencer.setStep(4, 15, true);  // CY: Cymbal crash final
+    // Extra percusión para ocupar más tracks (8-15)
+    sequencer.setStep(8, 2, true);   // LT
+    sequencer.setStep(8, 11, true);
+    sequencer.setStep(9, 6, true);   // MT
+    sequencer.setStep(10, 14, true); // HT
+    sequencer.setStep(11, 1, true);  // MA
+    sequencer.setStep(11, 9, true);
+    sequencer.setStep(12, 3, true);  // CL
+    sequencer.setStep(12, 15, true);
+    sequencer.setStep(13, 10, true); // HC
+    sequencer.setStep(14, 12, true); // MC
+    sequencer.setStep(15, 0, true);  // LC
     
     // === PATRÓN 1: TECHNO DETROIT (16 tracks) ===
     sequencer.selectPattern(1);
@@ -535,6 +547,15 @@ void setup() {
     sequencer.setStep(12, 15, true);
     sequencer.setStep(4, 0, true);   // CY: Cymbal intro
     sequencer.setStep(4, 8, true);   // CY: medio
+    // Toms/congas para expandir instrumentación completa
+    sequencer.setStep(8, 8, true);   // LT
+    sequencer.setStep(9, 10, true);  // MT
+    sequencer.setStep(10, 14, true); // HT
+    sequencer.setStep(11, 3, true);  // MA
+    sequencer.setStep(11, 11, true);
+    sequencer.setStep(13, 6, true);  // HC
+    sequencer.setStep(14, 13, true); // MC
+    sequencer.setStep(15, 15, true); // LC
     sequencer.setStepCutoffLock(1, 0, true, 340);
     sequencer.setStepCutoffLock(1, 4, true, 950);
     sequencer.setStepCutoffLock(1, 8, true, 2600);
@@ -563,6 +584,19 @@ void setup() {
     sequencer.setStep(4, 0, true);   // CY: Cymbal intro
     sequencer.setStep(4, 8, true);
     sequencer.setStep(4, 15, true);
+    // Más capas para 16 tracks
+    sequencer.setStep(7, 3, true);   // CB
+    sequencer.setStep(7, 11, true);
+    sequencer.setStep(8, 5, true);   // LT
+    sequencer.setStep(9, 9, true);   // MT
+    sequencer.setStep(10, 13, true); // HT
+    sequencer.setStep(11, 2, true);  // MA
+    sequencer.setStep(11, 6, true);
+    sequencer.setStep(12, 1, true);  // CL
+    sequencer.setStep(12, 9, true);
+    sequencer.setStep(13, 7, true);  // HC
+    sequencer.setStep(14, 14, true); // MC
+    sequencer.setStep(15, 12, true); // LC
     
     // === PATRÓN 3: LATIN PERCUSSION (16 tracks) ===
     sequencer.selectPattern(3);
@@ -603,6 +637,13 @@ void setup() {
     sequencer.setStep(11, 11, true);
     sequencer.setStep(11, 13, true);
     sequencer.setStep(11, 15, true);
+    // Refuerzo de kit completo (cymbal/toms)
+    sequencer.setStep(3, 15, true);  // OH cierre
+    sequencer.setStep(4, 0, true);   // CY
+    sequencer.setStep(4, 8, true);
+    sequencer.setStep(8, 4, true);   // LT
+    sequencer.setStep(9, 8, true);   // MT
+    sequencer.setStep(10, 12, true); // HT
     
     // === PATRÓN 4: CHICAGO HOUSE (16 tracks) ===
     sequencer.selectPattern(4);
@@ -622,6 +663,18 @@ void setup() {
     sequencer.setStep(6, 13, true);
     sequencer.setStep(4, 0, true);   // CY: Cymbal intro
     sequencer.setStep(4, 8, true);
+    // Añadir instrumentos restantes para full groove 16-track
+    sequencer.setStep(7, 3, true);   // CB
+    sequencer.setStep(7, 11, true);
+    sequencer.setStep(8, 6, true);   // LT
+    sequencer.setStep(9, 10, true);  // MT
+    sequencer.setStep(10, 14, true); // HT
+    sequencer.setStep(11, 1, true);  // MA
+    sequencer.setStep(11, 5, true);
+    sequencer.setStep(12, 7, true);  // CL
+    sequencer.setStep(13, 9, true);  // HC
+    sequencer.setStep(14, 13, true); // MC
+    sequencer.setStep(15, 15, true); // LC
 
     // === PATRÓN 5: CINEMATIC HYBRID (16 tracks) ===
     sequencer.selectPattern(5);

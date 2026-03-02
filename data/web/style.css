@@ -2619,6 +2619,26 @@ body:not(.mono-mode) .pad.tremolo-active {
     right: 9px;
 }
 
+/* Synth waveform marker on active steps (808/909/505/303 tracks) */
+.step-synth-wave {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -52%);
+    font-style: normal;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: -1px;
+    color: rgba(255, 255, 255, 0.92);
+    text-shadow: 0 0 6px rgba(0, 0, 0, 0.65), 0 0 8px rgba(255, 255, 255, 0.5);
+    pointer-events: none;
+    z-index: 4;
+    display: none;
+}
+.seq-step.synth-wave-step.active .step-synth-wave {
+    display: block;
+}
+
 .seq-step.looping {
     box-shadow: 0 0 10px rgba(255, 255, 255, 0.15), inset 0 0 6px rgba(255, 255, 255, 0.15);
     border-color: rgba(255, 255, 255, 0.35);

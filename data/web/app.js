@@ -1594,6 +1594,15 @@ function updateTrackStepDots(track) {
     const fx   = trackFxState[track];
     const eff  = trackFxEffects[track];
     const live = trackLiveFxState[track];
+    let synthEngine = (typeof padSynthEngine[track] === 'number') ? padSynthEngine[track] : -1;
+    if (synthEngine < 0) {
+        const padEl = document.querySelector(`.pad[data-pad="${track}"]`);
+        if (padEl && padEl.dataset && padEl.dataset.synthEngine !== undefined) {
+            const parsed = parseInt(padEl.dataset.synthEngine, 10);
+            if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 3) synthEngine = parsed;
+        }
+    }
+    const hasSynthWave = synthEngine >= 0;
     const hasFx = !!(
         (fx   && ((fx.distortion > 0) || (fx.bitcrush !== undefined && fx.bitcrush < 16))) ||
         (eff  && (eff.reverse || (eff.pitch !== undefined && eff.pitch !== 1.0) || eff.stutter)) ||
@@ -1601,6 +1610,27 @@ function updateTrackStepDots(track) {
     );
 
     document.querySelectorAll(`.seq-step[data-track="${track}"]`).forEach(stepEl => {
+        stepEl.classList.toggle('synth-wave-step', hasSynthWave);
+        if (hasSynthWave) {
+            stepEl.dataset.synthEngine = String(synthEngine);
+        } else {
+            delete stepEl.dataset.synthEngine;
+        }
+
+        // Synth wave marker — visible on active steps via CSS
+        let sw = stepEl.querySelector('.step-synth-wave');
+        if (hasSynthWave) {
+            if (!sw) {
+                sw = document.createElement('i');
+                sw.className = 'step-synth-wave';
+                sw.textContent = '∿';
+                stepEl.appendChild(sw);
+            }
+            sw.dataset.engine = String(synthEngine);
+        } else if (sw) {
+            sw.remove();
+        }
+
         // Filter dot — top-right, visible only on active steps (CSS)
         let fd = stepEl.querySelector('.step-filter-dot');
         if (filterType > 0) {
@@ -2285,6 +2315,7 @@ function setSynthEngineExact(padIndex, engine, notifyBackend = true, refreshGlob
 
     padSynthEngine[padIndex] = normalizedEngine;
     updatePadSynthVisual(padIndex, normalizedEngine);
+    updateTrackStepDots(padIndex);
     if (typeof onSynthEngineChanged === 'function') onSynthEngineChanged(padIndex, normalizedEngine);
 
     if (notifyBackend) {
@@ -2677,6 +2708,9 @@ function createSequencer() {
         fxCell.appendChild(renderBtn);
 
         grid.appendChild(fxCell);
+
+        // Apply per-track overlays (filter/FX/synth-wave) after row creation
+        updateTrackStepDots(track);
     }
     
     // Step indicator dots
@@ -2928,6 +2962,9 @@ function rebuildSequencerGrid(stepCount) {
         });
         fxCell.appendChild(renderBtn);
         grid.appendChild(fxCell);
+
+        // Re-apply per-track overlays after rebuilding each row
+        updateTrackStepDots(track);
     }
 
     // Step indicator dots
