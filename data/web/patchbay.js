@@ -651,36 +651,20 @@ function syncConnectionsAfterReconnect() {
   queuedWsPayloads.length = 0;
   if (wsFlushTimer) { clearTimeout(wsFlushTimer); wsFlushTimer = null; }
 
-    /* FASE 1 — limpiar FX de track del firmware (filtros, distortion, echo, flanger,
-      compressor). Evita cualquier FX colgado de sesiones anteriores.
-     Se hace SIEMPRE, incluso con canvas vacío: patchbay es la fuente de verdad. */
-  const RESET_SPAN = 16 * WS_BOOT_SYNC_DELAY_MS; // 16 × 34ms = 544ms
-  for (let t = 0; t < 16; t++) {
-    const track = t;
-    setTimeout(() => {
-      sendCmd('clearTrackFilter',   { track });
-      sendCmd('clearTrackFX',       { track });
-      sendCmd('setTrackEcho',       { track, active: false, time: 200, feedback: 40, mix: 50 });
-      sendCmd('setTrackFlanger',    { track, active: false, rate: 30, depth: 50, feedback: 40 });
-      sendCmd('setTrackCompressor', { track, active: false, threshold: 60, ratio: 4 });
-    }, track * WS_BOOT_SYNC_DELAY_MS);
-  }
-
-  /* FASE 2 — re-aplicar cables (si los hay) DESPUÉS de que termine el reset */
+  /* Re-aplicar cables existentes sin reset global para no pisar FX de otras vistas */
   if (!Array.isArray(cables) || cables.length === 0) {
-    console.log('[PATCH] Canvas vacío — firmware FX de track limpiado (filter, fx, echo, flanger, comp).');
+    console.log('[PATCH] Reconnect sync: sin cables, no se altera estado global de FX.');
     return;
   }
   const total = cables.length;
   const count = Math.min(total, WS_BOOT_SYNC_MAX_CABLES);
-  const phase2Start = RESET_SPAN + 80; // 80ms margen tras el reset
   for (let i = 0; i < count; i++) {
-    setTimeout(() => applyConnection(cables[i]), phase2Start + i * WS_BOOT_SYNC_DELAY_MS);
+    setTimeout(() => applyConnection(cables[i]), i * WS_BOOT_SYNC_DELAY_MS);
   }
   if (total > count) {
     console.warn(`[PATCH] Sync limitado: ${count}/${total} cables.`);
   }
-  console.log(`[PATCH] Firmware reset completo + re-sync de ${count} cables.`);
+  console.log(`[PATCH] Re-sync de ${count} cables sin reset global.`);
 }
 
 function flushWsQueue() {

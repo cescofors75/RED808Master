@@ -103,13 +103,28 @@ const FILTER_TYPES = [
     { icon: '✨', name: 'HIGH PASS' },
     { icon: '📞', name: 'BAND PASS' },
     { icon: '🕳️', name: 'NOTCH CUT' },
-    { icon: '🔊', name: 'BASS BOOST' },
-    { icon: '🌟', name: 'TREBLE BOOST' },
-    { icon: '⛰️', name: 'PEAK BOOST' },
-    { icon: '🌀', name: 'PHASE' },
+    { icon: '🧭', name: 'ALL PASS' },
+    { icon: '⛰️', name: 'PEAKING' },
+    { icon: '🔊', name: 'LOW SHELF' },
+    { icon: '🌟', name: 'HIGH SHELF' },
     { icon: '⚡', name: 'RESONANT' }
 ];
 window.FILTER_TYPES = FILTER_TYPES;
+
+function getFilterDefaults(filterType) {
+    const defaults = {
+        1: { cutoff: 1000, resonance: 1.0 },
+        2: { cutoff: 1000, resonance: 1.0 },
+        3: { cutoff: 1000, resonance: 2.0 },
+        4: { cutoff: 1000, resonance: 2.0 },
+        5: { cutoff: 1000, resonance: 1.0 },
+        6: { cutoff: 1000, resonance: 1.0, gain: 6.0 },
+        7: { cutoff: 300, resonance: 0.7, gain: 6.0 },
+        8: { cutoff: 6000, resonance: 0.7, gain: 6.0 },
+        9: { cutoff: 800, resonance: 10.0 }
+    };
+    return defaults[filterType] || null;
+}
 
 const instrumentPalette = [
     '#ff0000', '#ffa500', '#ffff00', '#00ffff',
@@ -1184,11 +1199,13 @@ function setPadFilter(padIndex, filterType) {
     
     // Send to ESP32
     if (isConnected) {
-        const msg = {
-            cmd: 'setPadFilter',
-            pad: padIndex,
-            filterType: filterType
-        };
+        const msg = { cmd: 'setPadFilter', pad: padIndex, filterType: filterType };
+        const defaults = getFilterDefaults(filterType);
+        if (defaults) {
+            msg.cutoff = defaults.cutoff;
+            msg.resonance = defaults.resonance;
+            if (defaults.gain !== undefined) msg.gain = defaults.gain;
+        }
         ws.send(JSON.stringify(msg));
     }
     
@@ -1201,32 +1218,20 @@ function setPadFilter(padIndex, filterType) {
 
 // Sync filter from pad to corresponding track
 function syncFilterToTrack(trackIndex, filterType) {
-    const filterShortcuts = {
-        0: { type: 0, name: 'Clear Filter' },
-        1: { type: 1, cutoff: 1000, resonance: 1, name: 'Low Pass' },
-        2: { type: 2, cutoff: 1000, resonance: 1, name: 'High Pass' },
-        3: { type: 3, cutoff: 1000, resonance: 2, name: 'Band Pass' },
-        4: { type: 4, cutoff: 1000, resonance: 2, name: 'Notch' },
-        5: { type: 5, cutoff: 1000, resonance: 1, name: 'All Pass' },
-        6: { type: 6, cutoff: 1000, resonance: 2, gain: 6, name: 'Peaking' },
-        7: { type: 7, cutoff: 500, resonance: 1, gain: 6, name: 'Low Shelf' },
-        8: { type: 8, cutoff: 4000, resonance: 1, gain: 6, name: 'High Shelf' },
-        9: { type: 9, cutoff: 1000, resonance: 10, name: 'Resonant' }
-    };
-    
-    const filter = filterShortcuts[filterType];
-    if (!filter) return;
-    
-    const cmd = {
-        cmd: filter.type === 0 ? 'clearTrackFilter' : 'setTrackFilter',
-        track: trackIndex
-    };
-    if (filter.type !== 0) {
-        cmd.filterType = filter.type;
-        cmd.cutoff = filter.cutoff;
-        cmd.resonance = filter.resonance;
-        if (filter.gain !== undefined) cmd.gain = filter.gain;
+    if (filterType === 0) {
+        sendWebSocket({ cmd: 'clearTrackFilter', track: trackIndex });
+        return;
     }
+    const defaults = getFilterDefaults(filterType);
+    if (!defaults) return;
+    const cmd = {
+        cmd: 'setTrackFilter',
+        track: trackIndex,
+        filterType,
+        cutoff: defaults.cutoff,
+        resonance: defaults.resonance
+    };
+    if (defaults.gain !== undefined) cmd.gain = defaults.gain;
     sendWebSocket(cmd);
 }
 
@@ -1242,11 +1247,14 @@ window.syncFilterToPad = function(padIndex, filterType) {
     padFilterState[padIndex] = filterType;
     updatePadFilterIndicator(padIndex);
     if (isConnected) {
-        ws.send(JSON.stringify({
-            cmd: 'setPadFilter',
-            pad: padIndex,
-            filterType: filterType
-        }));
+        const msg = { cmd: 'setPadFilter', pad: padIndex, filterType: filterType };
+        const defaults = getFilterDefaults(filterType);
+        if (defaults) {
+            msg.cutoff = defaults.cutoff;
+            msg.resonance = defaults.resonance;
+            if (defaults.gain !== undefined) msg.gain = defaults.gain;
+        }
+        ws.send(JSON.stringify(msg));
     }
 };
 
@@ -5146,19 +5154,19 @@ const FILTER_DEMO_PADS = {
     2: [{pad:0, label:'BD', cutoff:800, q:3.0},     {pad:1, label:'SD', cutoff:500, q:3.0}],     // HIGH PASS: kick loses body, snare gets thin
     3: [{pad:1, label:'SD', cutoff:1500, q:5.0},    {pad:4, label:'CY', cutoff:2000, q:4.0}],    // BAND PASS: telephone effect
     4: [{pad:3, label:'OH', cutoff:1200, q:5.0},    {pad:4, label:'CY', cutoff:1200, q:5.0}],    // NOTCH: phaser-like on metals
-    5: [{pad:0, label:'BD', cutoff:80, q:1.5, g:10},{pad:8, label:'LT', cutoff:200, q:1.0, g:8}],// BASS BOOST: sub on kick/tom
-    6: [{pad:2, label:'CH', cutoff:3000, q:1.0, g:9},{pad:1, label:'SD', cutoff:6000, q:1.0, g:7}],// TREBLE BOOST: sizzle
-    7: [{pad:0, label:'BD', cutoff:100, q:3.0, g:10},{pad:1, label:'SD', cutoff:2500, q:4.0, g:9}],// PEAK BOOST: punch
-    8: [{pad:3, label:'OH', cutoff:300, q:5.0},     {pad:4, label:'CY', cutoff:1500, q:3.0}],    // PHASE: swirl on metals
+    5: [{pad:0, label:'BD', cutoff:700, q:0.8},     {pad:4, label:'CY', cutoff:2500, q:1.2}],    // ALL PASS
+    6: [{pad:0, label:'BD', cutoff:120, q:1.0, g:9},{pad:8, label:'LT', cutoff:200, q:1.0, g:7}],// PEAKING
+    7: [{pad:0, label:'BD', cutoff:120, q:0.7, g:9},{pad:8, label:'LT', cutoff:220, q:0.7, g:7}],// LOW SHELF
+    8: [{pad:2, label:'CH', cutoff:5000, q:0.7, g:7},{pad:4, label:'CY', cutoff:7000, q:0.7, g:8}],// HIGH SHELF
     9: [{pad:0, label:'BD', cutoff:300, q:15.0},    {pad:1, label:'SD', cutoff:1000, q:12.0}]    // RESONANT: acid
 };
 window.FILTER_DEMO_PADS = FILTER_DEMO_PADS;
 
 // Preview a filter on a specific pad: apply filter, trigger sound, auto-clear after delay
 function previewFilterOnPad(filterType, padIndex, cutoff, resonance, gain) {
-    const filterNames = ['OFF', 'LOW PASS', 'HIGH PASS', 'BAND PASS', 'NOTCH CUT', 
-                        'BASS BOOST', 'TREBLE BOOST', 'PEAK BOOST', 'PHASE', 'RESONANT'];
-    const filterIcons = ['🚫', '🔥', '✨', '📞', '🕳️', '🔊', '🌟', '⛰️', '🌀', '⚡'];
+    const filterNames = ['OFF', 'LOW PASS', 'HIGH PASS', 'BAND PASS', 'NOTCH CUT',
+                        'ALL PASS', 'PEAKING', 'LOW SHELF', 'HIGH SHELF', 'RESONANT'];
+    const filterIcons = ['🚫', '🔥', '✨', '📞', '🕳️', '🧭', '⛰️', '🔊', '🌟', '⚡'];
 
     // Apply filter to track
     sendWebSocket({
@@ -5197,13 +5205,13 @@ window.previewFilterOnPad = previewFilterOnPad;
 // Now accepts optional resonance and gain for more impactful presets
 function applyFilterPreset(filterType, cutoffFreq, customResonance, customGain) {
     // Use custom values if provided, otherwise sensible defaults per filter type
-    const defaultQ = {0:1, 1:2.0, 2:2.0, 3:3.0, 4:4.0, 5:1.0, 6:1.0, 7:3.0, 8:2.0, 9:10.0};
+    const defaultQ = {0:1, 1:2.0, 2:2.0, 3:3.0, 4:4.0, 5:1.0, 6:1.0, 7:0.7, 8:0.7, 9:10.0};
     const resonance = customResonance || defaultQ[filterType] || 1.5;
-    const gain = customGain || (filterType >= 5 && filterType <= 7 ? 6.0 : 0.0);
+    const gain = customGain || (filterType >= 6 && filterType <= 8 ? 6.0 : 0.0);
     
-    const filterNames = ['OFF', 'LOW PASS', 'HIGH PASS', 'BAND PASS', 'NOTCH CUT', 
-                        'BASS BOOST', 'TREBLE BOOST', 'PEAK BOOST', 'PHASE', 'RESONANT'];
-    const filterIcons = ['🚫', '🔥', '✨', '📞', '🕳️', '🔊', '🌟', '⛰️', '🌀', '⚡'];
+    const filterNames = ['OFF', 'LOW PASS', 'HIGH PASS', 'BAND PASS', 'NOTCH CUT',
+                        'ALL PASS', 'PEAKING', 'LOW SHELF', 'HIGH SHELF', 'RESONANT'];
+    const filterIcons = ['🚫', '🔥', '✨', '📞', '🕳️', '🧭', '⛰️', '🔊', '🌟', '⚡'];
     const filterColors = ['', '#ff6600', '#00ccff', '#ff00ff', '#888888', '#ff4444', '#44ff44', '#ffaa00', '#aa44ff', '#ff0044'];
     
     // Check if track is selected
