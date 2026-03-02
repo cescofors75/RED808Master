@@ -31,7 +31,7 @@
 #define DAISY_SPI_MOSI             5
 #define DAISY_SPI_MISO             6
 #define DAISY_SPI_CLOCK_HZ    2000000UL
-#define DAISY_SPI_RESPONSE_GAP_US  500
+#define DAISY_SPI_RESPONSE_GAP_US  8000   /* 8ms — Daisy necesita tiempo para audio callback (2.67ms) + process */
 
 // Audio constants (mirrored from old AudioEngine for compatibility)
 static constexpr int MAX_AUDIO_TRACKS = 16;
