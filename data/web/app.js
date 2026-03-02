@@ -1394,14 +1394,14 @@ function setPadFxDrive(padIndex, value) {
     padFxState[padIndex].distortion = val;
     const mode = padFxState[padIndex].distMode || 0;
     document.getElementById('padFxDriveVal').textContent = val;
-    sendWebSocket({ cmd: 'setPadDistortion', pad: padIndex, amount: val, mode: mode });
+    sendWebSocketThrottled(`padDist:${padIndex}`, { cmd: 'setPadDistortion', pad: padIndex, amount: val, mode: mode });
     updatePadFxIndicator(padIndex);
     // Sync to track if enabled
     if (padSeqSyncEnabled && padIndex < 16) {
         if (!trackFxState[padIndex]) trackFxState[padIndex] = {};
         trackFxState[padIndex].distortion = val;
         trackFxState[padIndex].distMode = mode;
-        sendWebSocket({ cmd: 'setTrackDistortion', track: padIndex, amount: val, mode: mode });
+        sendWebSocketThrottled(`trkDist:${padIndex}`, { cmd: 'setTrackDistortion', track: padIndex, amount: val, mode: mode });
     }
 }
 
@@ -1410,13 +1410,13 @@ function setPadFxBits(padIndex, value) {
     if (!padFxState[padIndex]) padFxState[padIndex] = {};
     padFxState[padIndex].bitcrush = val;
     document.getElementById('padFxBitsVal').textContent = val;
-    sendWebSocket({ cmd: 'setPadBitCrush', pad: padIndex, value: val });
+    sendWebSocketThrottled(`padBit:${padIndex}`, { cmd: 'setPadBitCrush', pad: padIndex, value: val });
     updatePadFxIndicator(padIndex);
     // Sync to track if enabled
     if (padSeqSyncEnabled && padIndex < 16) {
         if (!trackFxState[padIndex]) trackFxState[padIndex] = {};
         trackFxState[padIndex].bitcrush = val;
-        sendWebSocket({ cmd: 'setTrackBitCrush', track: padIndex, value: val });
+        sendWebSocketThrottled(`trkBit:${padIndex}`, { cmd: 'setTrackBitCrush', track: padIndex, value: val });
     }
 }
 
@@ -1562,7 +1562,7 @@ function setTrackFxEchoParam(trackIndex, param, val) {
     if (!trackLiveFxState[trackIndex]) return;
     trackLiveFxState[trackIndex].echo[param] = val;
     const e = trackLiveFxState[trackIndex].echo;
-    sendWebSocket({ cmd: 'setTrackEcho', track: trackIndex, active: e.active, time: e.time, feedback: e.feedback, mix: e.mix });
+    sendWebSocketThrottled(`trkEcho:${trackIndex}`, { cmd: 'setTrackEcho', track: trackIndex, active: e.active, time: e.time, feedback: e.feedback, mix: e.mix });
     const el = document.getElementById(`trkEcho${param.charAt(0).toUpperCase()+param.slice(1)}Val`);
     if (el) el.textContent = val;
 }
@@ -1579,7 +1579,7 @@ function setTrackFxFlangerParam(trackIndex, param, val) {
     if (!trackLiveFxState[trackIndex]) return;
     trackLiveFxState[trackIndex].flanger[param] = val;
     const f = trackLiveFxState[trackIndex].flanger;
-    sendWebSocket({ cmd: 'setTrackFlanger', track: trackIndex, active: f.active, rate: f.rate, depth: f.depth, feedback: f.feedback });
+    sendWebSocketThrottled(`trkFlanger:${trackIndex}`, { cmd: 'setTrackFlanger', track: trackIndex, active: f.active, rate: f.rate, depth: f.depth, feedback: f.feedback });
     const el = document.getElementById(`trkFlng${param.charAt(0).toUpperCase()+param.slice(1)}Val`);
     if (el) el.textContent = val;
 }
@@ -1596,7 +1596,7 @@ function setTrackFxCompParam(trackIndex, param, val) {
     if (!trackLiveFxState[trackIndex]) return;
     trackLiveFxState[trackIndex].compressor[param] = val;
     const c = trackLiveFxState[trackIndex].compressor;
-    sendWebSocket({ cmd: 'setTrackCompressor', track: trackIndex, active: c.active, threshold: c.threshold, ratio: c.ratio });
+    sendWebSocketThrottled(`trkComp:${trackIndex}`, { cmd: 'setTrackCompressor', track: trackIndex, active: c.active, threshold: c.threshold, ratio: c.ratio });
     const el = document.getElementById(`trkComp${param.charAt(0).toUpperCase()+param.slice(1)}Val`);
     if (el) el.textContent = val;
 }
@@ -3956,6 +3956,11 @@ function setupFxSlider(sliderId, valueId, wsCmd, suffix, isInt) {
     slider.addEventListener('input', (e) => {
         const val = isInt ? parseInt(e.target.value) : parseFloat(e.target.value);
         if (valueEl) valueEl.textContent = val;
+        sendWebSocketThrottled(`fx:${wsCmd}`, { cmd: wsCmd, value: val });
+    });
+    slider.addEventListener('change', (e) => {
+        const val = isInt ? parseInt(e.target.value) : parseFloat(e.target.value);
+        if (valueEl) valueEl.textContent = val;
         sendWebSocket({ cmd: wsCmd, value: val });
     });
 }
@@ -4359,6 +4364,20 @@ function sendWebSocket(data) {
     return false;
 }
 
+const WS_FX_THROTTLE_MS = 30;
+const _wsThrottleTimers = new Map();
+
+function sendWebSocketThrottled(key, data, delay = WS_FX_THROTTLE_MS) {
+    const cacheKey = String(key || 'default');
+    const existing = _wsThrottleTimers.get(cacheKey);
+    if (existing) clearTimeout(existing);
+    const timerId = setTimeout(() => {
+        _wsThrottleTimers.delete(cacheKey);
+        sendWebSocket(data);
+    }, Math.max(0, delay));
+    _wsThrottleTimers.set(cacheKey, timerId);
+}
+
 // Check WebSocket connection status
 function isWebSocketReady() {
     return ws && ws.readyState === WebSocket.OPEN;
@@ -4366,6 +4385,7 @@ function isWebSocketReady() {
 
 // Export to window for keyboard-controls.js and midi-import.js
 window.sendWebSocket = sendWebSocket;
+window.sendWebSocketThrottled = sendWebSocketThrottled;
 window.isWebSocketReady = isWebSocketReady;
 
 // ============= KEYBOARD CONTROLS =============

@@ -1767,6 +1767,58 @@ String WebInterface::getIP() {
 // Procesar comandos JSON (compartido entre WebSocket y UDP)
 void WebInterface::processCommand(const JsonDocument& doc) {
   String cmd = doc["cmd"];
+
+  static unsigned long lastMasterFxCmdMs = 0;
+  static unsigned long lastTrackFxCmdMs = 0;
+  static unsigned long lastPadFxCmdMs = 0;
+  const unsigned long nowCmdMs = millis();
+
+  bool isMasterFxFast =
+    (cmd == "setFilter") ||
+    (cmd == "setFilterCutoff") ||
+    (cmd == "setFilterResonance") ||
+    (cmd == "setBitCrush") ||
+    (cmd == "setDistortion") ||
+    (cmd == "setSampleRate") ||
+    (cmd == "setDelayTime") ||
+    (cmd == "setDelayFeedback") ||
+    (cmd == "setDelayMix") ||
+    (cmd == "setPhaserRate") ||
+    (cmd == "setPhaserDepth") ||
+    (cmd == "setPhaserFeedback") ||
+    (cmd == "setFlangerRate") ||
+    (cmd == "setFlangerDepth") ||
+    (cmd == "setFlangerFeedback") ||
+    (cmd == "setFlangerMix") ||
+    (cmd == "setCompressorThreshold") ||
+    (cmd == "setCompressorRatio") ||
+    (cmd == "setCompressorAttack") ||
+    (cmd == "setCompressorRelease") ||
+    (cmd == "setCompressorMakeupGain");
+
+  bool isTrackFxFast =
+    (cmd == "setTrackFilter") ||
+    (cmd == "setTrackDistortion") ||
+    (cmd == "setTrackBitCrush") ||
+    (cmd == "setTrackEcho") ||
+    (cmd == "setTrackFlanger") ||
+    (cmd == "setTrackCompressor");
+
+  bool isPadFxFast =
+    (cmd == "setPadFilter") ||
+    (cmd == "setPadDistortion") ||
+    (cmd == "setPadBitCrush");
+
+  if (isMasterFxFast) {
+    if (nowCmdMs - lastMasterFxCmdMs < 10) return;
+    lastMasterFxCmdMs = nowCmdMs;
+  } else if (isTrackFxFast) {
+    if (nowCmdMs - lastTrackFxCmdMs < 10) return;
+    lastTrackFxCmdMs = nowCmdMs;
+  } else if (isPadFxFast) {
+    if (nowCmdMs - lastPadFxCmdMs < 10) return;
+    lastPadFxCmdMs = nowCmdMs;
+  }
   
   if (cmd == "trigger") {
     int pad = doc["pad"];
