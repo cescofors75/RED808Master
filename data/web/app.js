@@ -113,15 +113,15 @@ window.FILTER_TYPES = FILTER_TYPES;
 
 function getFilterDefaults(filterType) {
     const defaults = {
-        1: { cutoff: 1000, resonance: 1.0 },
-        2: { cutoff: 1000, resonance: 1.0 },
-        3: { cutoff: 1000, resonance: 2.0 },
-        4: { cutoff: 1000, resonance: 2.0 },
-        5: { cutoff: 1000, resonance: 1.0 },
-        6: { cutoff: 1000, resonance: 1.0, gain: 6.0 },
-        7: { cutoff: 300, resonance: 0.7, gain: 6.0 },
-        8: { cutoff: 6000, resonance: 0.7, gain: 6.0 },
-        9: { cutoff: 800, resonance: 10.0 }
+        1: { cutoff: 350, resonance: 6.0 },
+        2: { cutoff: 3500, resonance: 6.0 },
+        3: { cutoff: 1200, resonance: 8.0 },
+        4: { cutoff: 1200, resonance: 8.0 },
+        5: { cutoff: 1400, resonance: 1.5 },
+        6: { cutoff: 1500, resonance: 5.0, gain: 10.0 },
+        7: { cutoff: 220, resonance: 1.0, gain: 10.0 },
+        8: { cutoff: 5200, resonance: 1.0, gain: 10.0 },
+        9: { cutoff: 700, resonance: 14.0 }
     };
     return defaults[filterType] || null;
 }

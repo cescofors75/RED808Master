@@ -776,21 +776,16 @@ function createTrackFilterPanel() {
 
 function applyTrackFilterFromPanel(filterType) {
   if (selectedTrack !== null) {
-    // Map filter type index to actual filter shortcuts
-    const filterShortcuts = {
-      0: { type: 0, name: 'Clear Filter' },
-      1: { type: 1, cutoff: 1000, resonance: 1, name: 'Low Pass 1kHz' },
-      2: { type: 2, cutoff: 1000, resonance: 1, name: 'High Pass 1kHz' },
-      3: { type: 3, cutoff: 1000, resonance: 2, name: 'Band Pass 1kHz' },
-      4: { type: 4, cutoff: 1000, resonance: 2, name: 'Notch 1kHz' },
-      5: { type: 7, cutoff: 500, resonance: 1, gain: 6, name: 'Low Shelf +6dB' },
-      6: { type: 8, cutoff: 4000, resonance: 1, gain: 6, name: 'High Shelf +6dB' },
-      7: { type: 6, cutoff: 1000, resonance: 2, gain: 6, name: 'Peak 1kHz' },
-      8: { type: 5, cutoff: 1000, resonance: 1, name: 'All Pass 1kHz' },
-      9: { type: 9, cutoff: 1000, resonance: 10, name: 'Resonant 1kHz' }
-    };
-    
-    const filter = filterShortcuts[filterType];
+    const filter = { type: filterType };
+    if (filterType !== 0 && typeof window.getFilterDefaults === 'function') {
+      const defaults = window.getFilterDefaults(filterType);
+      if (defaults) {
+        if (defaults.cutoff !== undefined) filter.cutoff = defaults.cutoff;
+        if (defaults.resonance !== undefined) filter.resonance = defaults.resonance;
+        if (defaults.gain !== undefined) filter.gain = defaults.gain;
+      }
+    }
+
     if (filter) {
       applyTrackFilter(selectedTrack, filter);
       
@@ -801,7 +796,7 @@ function applyTrackFilterFromPanel(filterType) {
       
       // Sync: also apply filter to corresponding pad if sync enabled
       if (window.padSeqSyncEnabled && window.syncFilterToPad) {
-        window.syncFilterToPad(selectedTrack, filterType);
+        window.syncFilterToPad(selectedTrack, filter.type);
       }
     }
     // Force close panel with slight delay to ensure it closes

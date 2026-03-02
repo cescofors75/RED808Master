@@ -6261,6 +6261,46 @@ body.mono-mode .info-item {
     color: rgb(72, 77, 255);
 }
 
+.track-volume-card[data-track="8"] .track-volume-label { color: rgb(145, 30, 180); }
+.track-volume-card[data-track="8"] .track-volume-bar {
+    color: rgb(145, 30, 180);
+}
+
+.track-volume-card[data-track="9"] .track-volume-label { color: rgb(70, 240, 240); }
+.track-volume-card[data-track="9"] .track-volume-bar {
+    color: rgb(70, 240, 240);
+}
+
+.track-volume-card[data-track="10"] .track-volume-label { color: rgb(240, 50, 230); }
+.track-volume-card[data-track="10"] .track-volume-bar {
+    color: rgb(240, 50, 230);
+}
+
+.track-volume-card[data-track="11"] .track-volume-label { color: rgb(188, 246, 12); }
+.track-volume-card[data-track="11"] .track-volume-bar {
+    color: rgb(188, 246, 12);
+}
+
+.track-volume-card[data-track="12"] .track-volume-label { color: rgb(56, 206, 255); }
+.track-volume-card[data-track="12"] .track-volume-bar {
+    color: rgb(56, 206, 255);
+}
+
+.track-volume-card[data-track="13"] .track-volume-label { color: rgb(250, 190, 190); }
+.track-volume-card[data-track="13"] .track-volume-bar {
+    color: rgb(250, 190, 190);
+}
+
+.track-volume-card[data-track="14"] .track-volume-label { color: rgb(0, 128, 128); }
+.track-volume-card[data-track="14"] .track-volume-bar {
+    color: rgb(0, 128, 128);
+}
+
+.track-volume-card[data-track="15"] .track-volume-label { color: rgb(72, 77, 255); }
+.track-volume-card[data-track="15"] .track-volume-bar {
+    color: rgb(72, 77, 255);
+}
+
 /* Muted State - Gray bars with better visibility */
 .track-volume-card.muted .track-volume-bar {
     color: rgba(80, 80, 80, 0.4) !important;

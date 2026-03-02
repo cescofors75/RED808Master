@@ -14,6 +14,15 @@
 // Timeout para clientes UDP (30 segundos sin actividad)
 #define UDP_CLIENT_TIMEOUT 30000
 
+// Hardening de estabilidad WS bajo estrés
+static constexpr bool kWsVerboseRx = false;
+static constexpr size_t kWsMaxTextBytes = 24576;
+static constexpr size_t kWsMaxBinaryBytes = 256;
+static constexpr unsigned long kFastMasterCmdMinMs = 20;
+static constexpr unsigned long kFastTrackCmdMinMs = 20;
+static constexpr unsigned long kFastPadCmdMinMs = 20;
+static constexpr unsigned long kFastVolumeCmdMinMs = 15;
+
 extern SPIMaster spiMaster;
 extern Sequencer sequencer;
 extern KitManager kitManager;
@@ -307,8 +316,11 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     // Ahora conectar a red doméstica
     WiFi.begin(staSSID, staPassword);
     
+    // No bloquear demasiado el arranque del servidor web.
+    // AP ya está activo; limitamos la espera STA para que UI responda casi inmediato.
+    const unsigned long quickStaWaitMs = (staTimeoutMs > 1500UL) ? 1500UL : staTimeoutMs;
     unsigned long t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && (millis() - t0) < staTimeoutMs) {
+    while (WiFi.status() != WL_CONNECTED && (millis() - t0) < quickStaWaitMs) {
       delay(250);
       Serial.print(".");
     }
@@ -329,7 +341,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
                     apSsid, WiFi.softAPIP().toString().c_str(),
                     WiFi.localIP().toString().c_str());
     } else {
-      Serial.println("  [WiFi] ✗ STA falló — AP sigue activo");
+      Serial.printf("  [WiFi] ✗ STA pendiente/falló rápido (%lums) — AP sigue activo\n", quickStaWaitMs);
       // AP ya está corriendo, no hay que hacer nada más
     }
   }
@@ -383,6 +395,24 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     } else {
       request->send(LittleFS, "/web/index.html", "text/html");
     }
+  });
+
+  // Endpoint de salud/sistema para clientes que consultan estado al arrancar
+  server->on("/api/sysinfo", HTTP_GET, [this](AsyncWebServerRequest *request){
+    StaticJsonDocument<256> doc;
+    doc["ok"] = true;
+    doc["heap"] = ESP.getFreeHeap();
+    doc["minHeap"] = ESP.getMinFreeHeap();
+    doc["uptimeMs"] = millis();
+    doc["wsClients"] = ws ? ws->count() : 0;
+    doc["mode"] = (_staConnected && WiFi.status() == WL_CONNECTED) ? "AP+STA" : "AP";
+    doc["ip"] = (_staConnected && WiFi.status() == WL_CONNECTED)
+      ? WiFi.localIP().toString()
+      : WiFi.softAPIP().toString();
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
   });
   
   server->on("/index.html", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -1143,6 +1173,16 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
     Serial.printf("[WS] Client #%u disconnected (%u remaining)\n", client->id(), remaining > 0 ? remaining - 1 : 0);
   } else if (type == WS_EVT_DATA) {
     AwsFrameInfo *info = (AwsFrameInfo*)arg;
+
+    // Guard rails de payload para evitar OOM/fragmentación bajo cargas anómalas
+    if (info->opcode == WS_TEXT && info->len > kWsMaxTextBytes) {
+      Serial.printf("[WS] DROP text payload too large: %u bytes\n", (unsigned)info->len);
+      return;
+    }
+    if (info->opcode == WS_BINARY && info->len > kWsMaxBinaryBytes) {
+      Serial.printf("[WS] DROP binary payload too large: %u bytes\n", (unsigned)info->len);
+      return;
+    }
     
     // --- Frame reassembly for fragmented WebSocket messages ---
     // NOTE: static vars are per-task (single network task on ESP32), but we track
@@ -1159,6 +1199,10 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
     if (!(info->final && info->index == 0 && info->len == len)) {
       // Fragmented frame - reassemble chunks into complete message
       if (info->index == 0) {
+        if (info->opcode == WS_TEXT && info->len > kWsMaxTextBytes) {
+          Serial.printf("[WS] DROP fragmented text too large: %u bytes\n", (unsigned)info->len);
+          return;
+        }
         // If a different client already owns the buffer, discard it to avoid corruption
         if (_wsReassemblyBuf && _wsReassemblyClientId != client->id()) {
           Serial.printf("[WS] Reassembly conflict: client %u vs %u — discarding old buf\n",
@@ -1197,15 +1241,19 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
       }
     }
       
-    Serial.printf("[WS DATA] opcode=%u len=%u final=%u idx=%u total=%u\n",
-                  (unsigned)info->opcode, (unsigned)len,
-                  (unsigned)info->final, (unsigned)info->index, (unsigned)info->len);
+    if (kWsVerboseRx) {
+      Serial.printf("[WS DATA] opcode=%u len=%u final=%u idx=%u total=%u\n",
+                    (unsigned)info->opcode, (unsigned)len,
+                    (unsigned)info->final, (unsigned)info->index, (unsigned)info->len);
+    }
 
     // 1. MANEJO DE BINARIO (Baja latencia para Triggers)
     if (info->opcode == WS_BINARY) {
-      Serial.printf("[WS BIN] len=%d data:", len);
-      for (size_t i = 0; i < len && i < 8; i++) Serial.printf(" %02X", data[i]);
-      Serial.println();
+      if (kWsVerboseRx) {
+        Serial.printf("[WS BIN] len=%d data:", len);
+        for (size_t i = 0; i < len && i < 8; i++) Serial.printf(" %02X", data[i]);
+        Serial.println();
+      }
       // Protocolo: [0x90, PAD, VEL]
       if (len == 3 && data[0] == 0x90) {
          int pad = data[1];
@@ -1725,12 +1773,14 @@ void WebInterface::update() {
   if (now - lastWifiCheck > 30000) {
     lastWifiCheck = now;
     
-    if (_staConnected) {
+    if (WiFi.getMode() == WIFI_AP_STA) {
       // ── Modo STA: verificar conexión al router ──
       if (WiFi.status() != WL_CONNECTED) {
+        _staConnected = false;
         Serial.println("[WiFi] STA desconectado! Reconectando...");
         WiFi.reconnect();
       } else {
+        _staConnected = true;
         static int lastRSSI = 0;
         int rssi = WiFi.RSSI();
         if (abs(rssi - lastRSSI) > 5) {
@@ -1771,6 +1821,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   static unsigned long lastMasterFxCmdMs = 0;
   static unsigned long lastTrackFxCmdMs = 0;
   static unsigned long lastPadFxCmdMs = 0;
+  static unsigned long lastVolumeCmdMs = 0;
   const unsigned long nowCmdMs = millis();
 
   bool isMasterFxFast =
@@ -1809,15 +1860,25 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     (cmd == "setPadDistortion") ||
     (cmd == "setPadBitCrush");
 
+  bool isVolumeFast =
+    (cmd == "setSequencerVolume") ||
+    (cmd == "setLiveVolume") ||
+    (cmd == "setTrackVolume") ||
+    (cmd == "setVolume") ||
+    (cmd == "setLivePitch");
+
   if (isMasterFxFast) {
-    if (nowCmdMs - lastMasterFxCmdMs < 10) return;
+    if (nowCmdMs - lastMasterFxCmdMs < kFastMasterCmdMinMs) return;
     lastMasterFxCmdMs = nowCmdMs;
   } else if (isTrackFxFast) {
-    if (nowCmdMs - lastTrackFxCmdMs < 10) return;
+    if (nowCmdMs - lastTrackFxCmdMs < kFastTrackCmdMinMs) return;
     lastTrackFxCmdMs = nowCmdMs;
   } else if (isPadFxFast) {
-    if (nowCmdMs - lastPadFxCmdMs < 10) return;
+    if (nowCmdMs - lastPadFxCmdMs < kFastPadCmdMinMs) return;
     lastPadFxCmdMs = nowCmdMs;
+  } else if (isVolumeFast) {
+    if (nowCmdMs - lastVolumeCmdMs < kFastVolumeCmdMinMs) return;
+    lastVolumeCmdMs = nowCmdMs;
   }
   
   if (cmd == "trigger") {
