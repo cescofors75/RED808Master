@@ -103,12 +103,16 @@ public:
   void setStepCutoffLock(int track, int step, bool enabled, uint16_t cutoffHz);
   void setStepCutoffLock(int pattern, int track, int step, bool enabled, uint16_t cutoffHz);
   bool hasStepCutoffLock(int track, int step);
+  bool hasStepCutoffLock(int pattern, int track, int step);
   uint16_t getStepCutoffLock(int track, int step);
+  uint16_t getStepCutoffLock(int pattern, int track, int step);
 
   void setStepReverbSendLock(int track, int step, bool enabled, uint8_t sendLevel);
   void setStepReverbSendLock(int pattern, int track, int step, bool enabled, uint8_t sendLevel);
   bool hasStepReverbSendLock(int track, int step);
+  bool hasStepReverbSendLock(int pattern, int track, int step);
   uint8_t getStepReverbSendLock(int track, int step);
+  uint8_t getStepReverbSendLock(int pattern, int track, int step);
   
   // Bulk pattern writing (for reliable MIDI import)
   void setPatternBulk(int pattern, const bool stepsData[MAX_TRACKS][STEPS_PER_PATTERN], const uint8_t velsData[MAX_TRACKS][STEPS_PER_PATTERN]);

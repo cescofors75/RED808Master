@@ -15,7 +15,6 @@
 #define UDP_CLIENT_TIMEOUT 30000
 
 // Hardening de estabilidad WS bajo estrés
-static constexpr bool kWsVerboseRx = false;
 static constexpr size_t kWsMaxTextBytes = 24576;
 static constexpr size_t kWsMaxBinaryBytes = 256;
 static constexpr unsigned long kFastMasterCmdMinMs = 20;
@@ -25,6 +24,19 @@ static constexpr unsigned long kFastVolumeCmdMinMs = 15;
 
 extern SPIMaster spiMaster;
 extern Sequencer sequencer;
+extern void dsqUploadPattern(int pattern);  // upload one pattern to Daisy sequencer
+
+// Helper: lee todos los param locks de un step del Sequencer y los envía a Daisy
+static void dsqSyncParamLock(int pat, int track, int step) {
+    uint16_t ch = sequencer.getStepCutoffLock(pat, track, step);
+    bool ce = (ch != 0 && ch != 1000);  // 1000 = valor default "sin lock"
+    uint8_t rv = sequencer.getStepReverbSendLock(pat, track, step);
+    bool re = (rv != 0);
+    uint8_t vl = sequencer.getStepVolumeLock(pat, track, step);
+    bool ve = (vl != 0);
+    spiMaster.dsqSetParamLock((uint8_t)pat, (uint8_t)track, (uint8_t)step,
+        ce, ch, re, rv, ve, vl);
+}
 extern KitManager kitManager;
 extern SampleManager sampleManager;
 extern LFOEngine lfoEngine;
@@ -35,6 +47,14 @@ extern void setTrackSynthEngine(int track, int8_t engine);
 extern void setAllTrackSynthEngines(int8_t engine);
 static constexpr bool kStrictProtocolBoundary = true;
 static String gDaisyPadFiles[MAX_PADS];
+
+// ── SPI log broadcast bridge ───────────────────────────────────────────────
+// g_wsSpiLog points to the AsyncWebSocket instance once begin() creates it.
+// spiLogDispatch is registered with SPIMaster as a plain-function callback.
+static AsyncWebSocket* g_wsSpiLog = nullptr;
+static void spiLogDispatch(const char* json) {
+    if (g_wsSpiLog) g_wsSpiLog->textAll(json);
+}
 
 static void setDaisyPadFile(int padIndex, const String& fileName) {
   if (padIndex < 0 || padIndex >= MAX_PADS) return;
@@ -89,6 +109,25 @@ static bool readWavInfo(File& file, uint32_t& rate, uint16_t& channels, uint16_t
   rate = header[24] | (header[25] << 8) | (header[26] << 16) | (header[27] << 24);
   bits = header[34] | (header[35] << 8);
   return true;
+}
+
+static void sendWebAsset(AsyncWebServerRequest *request,
+                         const char* routePath,
+                         const char* contentType,
+                         const char* cacheControl = "no-cache") {
+  String fsPath = "/web";
+  fsPath += routePath;
+
+  String gzPath = fsPath + ".gz";
+  if (LittleFS.exists(gzPath)) {
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, gzPath, contentType);
+    response->addHeader("Content-Encoding", "gzip");
+    response->addHeader("Cache-Control", cacheControl);
+    request->send(response);
+    return;
+  }
+
+  request->send(LittleFS, fsPath, contentType);
 }
 
 static void populateStateDocument(DynamicJsonDocument& doc) {
@@ -230,12 +269,10 @@ static void rebuildSampleCountCache() {
     }
     cachedSampleCounts[i] = count;
   }
-  Serial.println("[SampleCount] Cache rebuilt");
 }
 
 static void sendSampleCounts(AsyncWebSocketClient* client) {
   if (!client || !isClientReady(client)) {
-    Serial.println("[sendSampleCounts] Client not ready");
     return;
   }
   
@@ -280,20 +317,20 @@ WebInterface::~WebInterface() {
 bool WebInterface::begin(const char* apSsid, const char* apPassword,
                          const char* staSSID, const char* staPassword,
                          unsigned long staTimeoutMs) {
-  Serial.println("  Configurando WiFi...");
   _staConnected = false;
   
   // Desactivar ahorro de energía WiFi
   WiFi.setSleep(false);
+  WiFi.persistent(false);          // no guarda credenciales en NVS (evita flash corrupto)
+  WiFi.setAutoReconnect(true);
   WiFi.mode(WIFI_OFF);
-  delay(50);
+  delay(100);
   
   // Potencia TX máxima
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
   
   // ── Intentar modo STA (red doméstica) si se proporcionó SSID ──
   if (staSSID && strlen(staSSID) > 0) {
-    Serial.printf("  [WiFi] Intentando AP+STA → %s ...\n", staSSID);
     WiFi.mode(WIFI_AP_STA);
     
     // Configurar AP primero (siempre disponible)
@@ -311,20 +348,17 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     conf.ap.beacon_interval = 100;
     esp_wifi_set_config(WIFI_IF_AP, &conf);
     
-    Serial.printf("  [WiFi] ✓ AP activo → %s (IP: %s)\n", apSsid, WiFi.softAPIP().toString().c_str());
     
     // Ahora conectar a red doméstica
     WiFi.begin(staSSID, staPassword);
     
     // No bloquear demasiado el arranque del servidor web.
-    // AP ya está activo; limitamos la espera STA para que UI responda casi inmediato.
-    const unsigned long quickStaWaitMs = (staTimeoutMs > 1500UL) ? 1500UL : staTimeoutMs;
+    // AP ya está activo; usamos el timeout completo pasado por el usuario (mínimo 8s).
+    const unsigned long quickStaWaitMs = (staTimeoutMs < 8000UL) ? 8000UL : staTimeoutMs;
     unsigned long t0 = millis();
     while (WiFi.status() != WL_CONNECTED && (millis() - t0) < quickStaWaitMs) {
       delay(250);
-      Serial.print(".");
     }
-    Serial.println();
     
     if (WiFi.status() == WL_CONNECTED) {
       _staConnected = true;
@@ -333,22 +367,13 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
       // Reconfigure AP to match STA channel (avoids channel conflicts in AP+STA mode)
       uint8_t staChannel = WiFi.channel();
       WiFi.softAP(apSsid, apPassword, staChannel, 0, 4);
-      Serial.printf("  [WiFi] ✓ STA conectado! IP: %s (ch:%d)\n", WiFi.localIP().toString().c_str(), staChannel);
-      Serial.printf("  [WiFi]   Gateway: %s  RSSI: %d dBm\n",
-                    WiFi.gatewayIP().toString().c_str(), WiFi.RSSI());
-      Serial.printf("  [WiFi]   AP reconfigured to channel %d to match STA\n", staChannel);
-      Serial.printf("  [WiFi]   Modo AP+STA: Surface→%s:%s  PC→%s\n",
-                    apSsid, WiFi.softAPIP().toString().c_str(),
-                    WiFi.localIP().toString().c_str());
     } else {
-      Serial.printf("  [WiFi] ✗ STA pendiente/falló rápido (%lums) — AP sigue activo\n", quickStaWaitMs);
       // AP ya está corriendo, no hay que hacer nada más
     }
   }
   
   // ── Fallback: modo AP solo (sin SSID doméstico configurado) ──
   if (!_staConnected && !(staSSID && strlen(staSSID) > 0)) {
-    Serial.printf("  [WiFi] Creando AP: %s\n", apSsid);
     WiFi.mode(WIFI_AP);
     delay(50);
     
@@ -370,12 +395,15 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     
     WiFi.setSleep(false);
     
-    Serial.printf("  [WiFi] ✓ AP activo → %s\n", WiFi.softAPIP().toString().c_str());
   }
   
   // Crear servidor web
   server = new AsyncWebServer(80);
   ws = new AsyncWebSocket("/ws");
+
+  // SPI log desactivado — causaba agotamiento de heap
+  // g_wsSpiLog = ws;
+  // spiMaster.setSpiLogCallback(spiLogDispatch);
   
   // WebSocket handler
   ws->onEvent([this](AsyncWebSocket *server, AsyncWebSocketClient *client, 
@@ -397,23 +425,6 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     }
   });
 
-  // Endpoint de salud/sistema para clientes que consultan estado al arrancar
-  server->on("/api/sysinfo", HTTP_GET, [this](AsyncWebServerRequest *request){
-    StaticJsonDocument<256> doc;
-    doc["ok"] = true;
-    doc["heap"] = ESP.getFreeHeap();
-    doc["minHeap"] = ESP.getMinFreeHeap();
-    doc["uptimeMs"] = millis();
-    doc["wsClients"] = ws ? ws->count() : 0;
-    doc["mode"] = (_staConnected && WiFi.status() == WL_CONNECTED) ? "AP+STA" : "AP";
-    doc["ip"] = (_staConnected && WiFi.status() == WL_CONNECTED)
-      ? WiFi.localIP().toString()
-      : WiFi.softAPIP().toString();
-
-    String output;
-    serializeJson(doc, output);
-    request->send(200, "application/json", output);
-  });
   
   server->on("/index.html", HTTP_GET, [](AsyncWebServerRequest *request){
     if (LittleFS.exists("/web/index.html.gz")) {
@@ -502,6 +513,14 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
       request->send(LittleFS, "/web/waveform-visualizer.js", "application/javascript");
     }
   });
+
+  server->on("/synth-editor.js", HTTP_GET, [](AsyncWebServerRequest *request){
+    sendWebAsset(request, "/synth-editor.js", "application/javascript");
+  });
+
+  server->on("/export-pattern.js", HTTP_GET, [](AsyncWebServerRequest *request){
+    sendWebAsset(request, "/export-pattern.js", "application/javascript");
+  });
   
   // Patchbay page
   server->on("/patchbay", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -542,6 +561,10 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     request->redirect("/multiview.html");
   });
 
+  server->on("/multiview.html", HTTP_GET, [](AsyncWebServerRequest *request){
+    sendWebAsset(request, "/multiview.html", "text/html");
+  });
+
   server->on("/multiview.css", HTTP_GET, [](AsyncWebServerRequest *request){
     if (LittleFS.exists("/web/multiview.css.gz")) {
       AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/multiview.css.gz", "text/css");
@@ -575,6 +598,10 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
       request->send(LittleFS, "/web/admin.html", "text/html");
     }
   });
+
+  server->on("/admin.js", HTTP_GET, [](AsyncWebServerRequest *request){
+    sendWebAsset(request, "/admin.js", "application/javascript", "max-age=600");
+  });
   
   // Fallback para otros archivos estáticos (favicon, etc)
   server->serveStatic("/", LittleFS, "/web/")
@@ -584,7 +611,6 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   server->on("/api/trigger", HTTP_POST, [](AsyncWebServerRequest *request){
     if (request->hasParam("pad", true)) {
       int pad = request->getParam("pad", true)->value().toInt();
-      Serial.printf("[API] /api/trigger POST pad=%d\n", pad);
       triggerPadWithLED(pad, 127);  // Enciende LED RGB
       request->send(200, "text/plain", "OK");
     } else {
@@ -595,7 +621,6 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   server->on("/api/trigger", HTTP_GET, [](AsyncWebServerRequest *request){
     if (request->hasParam("pad")) {
       int pad = request->getParam("pad")->value().toInt();
-      Serial.printf("[API] /api/trigger GET pad=%d\n", pad);
       triggerPadWithLED(pad, 127);
       request->send(200, "text/plain", "OK");
     } else {
@@ -616,6 +641,8 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     if (request->hasParam("index", true)) {
       int pattern = request->getParam("index", true)->value().toInt();
       sequencer.selectPattern(pattern);
+      dsqUploadPattern(pattern);
+      spiMaster.dsqSelectPattern((uint8_t)pattern);
       request->send(200, "text/plain", "OK");
     }
   });
@@ -623,8 +650,8 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   server->on("/api/sequencer", HTTP_POST, [](AsyncWebServerRequest *request){
     if (request->hasParam("action", true)) {
       String action = request->getParam("action", true)->value();
-      if (action == "start") sequencer.start();
-      else if (action == "stop") sequencer.stop();
+      if (action == "start") { sequencer.start(); dsqUploadPattern(sequencer.getCurrentPattern()); spiMaster.dsqControl(1); }
+      else if (action == "stop") { sequencer.stop(); spiMaster.dsqControl(0); }
       request->send(200, "text/plain", "OK");
     }
   });
@@ -723,14 +750,20 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     doc["samplesLoaded"] = sampleManager.getLoadedSamplesCount();
     doc["memoryUsed"] = sampleManager.getTotalMemoryUsed();
 
-    // Daisy realtime telemetry
-    doc["daisyConnected"] = spiMaster.isConnected();
+    // Daisy realtime telemetry — usar ping reciente O estado de conexión guardado
+    doc["daisyConnected"] = spiMaster.isConnected() || lastPingOk;
     doc["daisyPingOk"] = lastPingOk;
     doc["daisyRttMs"] = lastPingMsValue;
     doc["daisyVoices"] = spiMaster.getActiveVoices();
     doc["daisyCpu"] = spiMaster.getCpuLoad();
     doc["daisyMasterPeak"] = spiMaster.getMasterPeak();
     doc["daisyKit"] = String(spiMaster.getCurrentKitName());
+    // Diagnostics
+    StatusResponse daisyStat = {};
+    spiMaster.getStatusSnapshot(daisyStat);
+    doc["daisyPadsLoaded"]  = daisyStat.totalPadsLoaded;
+    doc["daisyPadsMask"]    = daisyStat.padsLoadedMask;
+    doc["daisySpiErrCnt"]   = (int)daisyStat.spiErrCnt;
 
     float peaks[16];
     spiMaster.getTrackPeaks(peaks, 16);
@@ -828,6 +861,55 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     }
   );
   
+  // ── GET /api/buttons — devuelve configuración guardada ─────────────────
+  server->on("/api/buttons", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (LittleFS.exists("/buttons.json")) {
+      AsyncWebServerResponse *resp = request->beginResponse(
+          LittleFS, "/buttons.json", "application/json");
+      resp->addHeader("Cache-Control", "no-cache");
+      request->send(resp);
+    } else {
+      // Devolver config por defecto si no hay archivo guardado
+      request->send(200, "application/json",
+        "[{\"funcId\":1,\"colorOff\":16711680,\"colorOn\":65280,\"label\":\"PLAY/PAUSE\"},"
+        "{\"funcId\":7,\"colorOff\":16711680,\"colorOn\":34816,\"label\":\"PREV+PLAY\"},"
+        "{\"funcId\":6,\"colorOff\":16711680,\"colorOn\":34816,\"label\":\"NEXT+PLAY\"},"
+        "{\"funcId\":2,\"colorOff\":16711680,\"colorOn\":16711680,\"label\":\"STOP\"}]");
+    }
+  });
+
+  // ── POST /api/buttons — guarda y aplica nueva configuración ────────────
+  server->on("/api/buttons", HTTP_POST,
+    [](AsyncWebServerRequest *request) {},
+    NULL,
+    [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      String body = String((char*)data, len);
+      // Validar JSON básico
+      StaticJsonDocument<1024> doc;
+      if (deserializeJson(doc, body)) {
+        request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+      }
+      // Extraer array — acepta tanto [{...}] como {"buttons":[{...}]}
+      JsonArray arr = doc.is<JsonArray>() ? doc.as<JsonArray>() : doc["buttons"].as<JsonArray>();
+      if (arr.isNull()) {
+        request->send(400, "application/json", "{\"error\":\"Missing buttons array\"}");
+        return;
+      }
+      // Guardar SOLO el array plano en LittleFS
+      String arrStr;
+      serializeJson(arr, arrStr);
+      File f = LittleFS.open("/buttons.json", "w");
+      if (f) { f.print(arrStr); f.close(); }
+      // Aplicar en tiempo real vía callback (pasa el array plano)
+      if (_btnConfigCb) _btnConfigCb(arrStr);
+      // Broadcast a todos los clientes web
+      String bcast = "{\"type\":\"btnConfig\",\"buttons\":" + arrStr + "}";
+      ws->textAll(bcast);
+      request->send(200, "application/json", "{\"success\":true}");
+    }
+  );
+
   // Endpoint para obtener forma de onda de un sample cargado (para visualizador)
   server->on("/api/waveform", HTTP_GET, [](AsyncWebServerRequest *request){
     // Mode 1: waveform from loaded pad (?pad=N)
@@ -1129,14 +1211,10 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   });
   
   server->begin();
-  Serial.println("✓ RED808 Web Server iniciado");
   
   // Iniciar servidor UDP
   if (udp.begin(UDP_PORT)) {
-    Serial.printf("✓ UDP Server listening on port %d\n", UDP_PORT);
-    Serial.printf("  Send JSON commands to %s:%d\n", WiFi.localIP().toString().c_str(), UDP_PORT);
   } else {
-    Serial.println("⚠ Failed to start UDP server");
   }
   
   initialized = true;
@@ -1148,12 +1226,10 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
   if (type == WS_EVT_CONNECT) {
     // ⚠️ LÍMITE DE 3 CLIENTES para estabilidad
     if (ws->count() > 3) {
-      Serial.printf("[WS] MAX CLIENTS reached, rejecting #%u\n", client->id());
       client->close(1008, "Max clients reached");
       return;
     }
     
-    Serial.printf("[WS] Client #%u connected (%u total)\n", client->id(), ws->count());
     
     StaticJsonDocument<512> basicState;
     basicState["type"] = "connected";
@@ -1170,17 +1246,14 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
     }
   } else if (type == WS_EVT_DISCONNECT) {
     unsigned int remaining = ws->count();
-    Serial.printf("[WS] Client #%u disconnected (%u remaining)\n", client->id(), remaining > 0 ? remaining - 1 : 0);
   } else if (type == WS_EVT_DATA) {
     AwsFrameInfo *info = (AwsFrameInfo*)arg;
 
     // Guard rails de payload para evitar OOM/fragmentación bajo cargas anómalas
     if (info->opcode == WS_TEXT && info->len > kWsMaxTextBytes) {
-      Serial.printf("[WS] DROP text payload too large: %u bytes\n", (unsigned)info->len);
       return;
     }
     if (info->opcode == WS_BINARY && info->len > kWsMaxBinaryBytes) {
-      Serial.printf("[WS] DROP binary payload too large: %u bytes\n", (unsigned)info->len);
       return;
     }
     
@@ -1200,26 +1273,20 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
       // Fragmented frame - reassemble chunks into complete message
       if (info->index == 0) {
         if (info->opcode == WS_TEXT && info->len > kWsMaxTextBytes) {
-          Serial.printf("[WS] DROP fragmented text too large: %u bytes\n", (unsigned)info->len);
           return;
         }
         // If a different client already owns the buffer, discard it to avoid corruption
         if (_wsReassemblyBuf && _wsReassemblyClientId != client->id()) {
-          Serial.printf("[WS] Reassembly conflict: client %u vs %u — discarding old buf\n",
-                        _wsReassemblyClientId, client->id());
           free(_wsReassemblyBuf);
           _wsReassemblyBuf = nullptr;
         } else if (_wsReassemblyBuf) {
           free(_wsReassemblyBuf); _wsReassemblyBuf = nullptr;
         }
         if (ESP.getFreeHeap() < (uint32_t)(info->len + 4096)) {
-          Serial.printf("[WS] HEAP too low for reassembly: need %u, free %d\n",
-                        info->len, ESP.getFreeHeap());
           return;
         }
         _wsReassemblyBuf = (uint8_t*)malloc(info->len + 2); // +2 for null terminator safety
         if (!_wsReassemblyBuf) {
-          Serial.printf("[WS] ALLOC FAIL reassembly: %u bytes\n", info->len);
           return;
         }
         _wsReassemblySize = info->len;
@@ -1241,19 +1308,8 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
       }
     }
       
-    if (kWsVerboseRx) {
-      Serial.printf("[WS DATA] opcode=%u len=%u final=%u idx=%u total=%u\n",
-                    (unsigned)info->opcode, (unsigned)len,
-                    (unsigned)info->final, (unsigned)info->index, (unsigned)info->len);
-    }
-
     // 1. MANEJO DE BINARIO (Baja latencia para Triggers)
     if (info->opcode == WS_BINARY) {
-      if (kWsVerboseRx) {
-        Serial.printf("[WS BIN] len=%d data:", len);
-        for (size_t i = 0; i < len && i < 8; i++) Serial.printf(" %02X", data[i]);
-        Serial.println();
-      }
       // Protocolo: [0x90, PAD, VEL]
       if (len == 3 && data[0] == 0x90) {
          int pad = data[1];
@@ -1265,7 +1321,6 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
     else if (info->opcode == WS_TEXT) {
       // Reject if heap critically low — prevent crash during JSON processing
       if (ESP.getFreeHeap() < 15000) {
-        Serial.printf("[WS] CRITICAL: Heap=%d, dropping message\n", ESP.getFreeHeap());
         if (_wsFreeAfter && _wsReassemblyBuf) { free(_wsReassemblyBuf); _wsReassemblyBuf = nullptr; }
         return;
       }
@@ -1278,7 +1333,6 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
         // Non-fragmented message: copy to safe buffer
         safeData = (char*)malloc(len + 1);
         if (!safeData) {
-          Serial.println("[WS] ALLOC FAIL safe buffer");
           return;
         }
         memcpy(safeData, data, len);
@@ -1291,7 +1345,6 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
         // Check for bulk pattern command (needs larger JSON doc)
         if (len > 400 && strstr((char*)data, "\"setBulk\"") != nullptr) {
           if (ESP.getFreeHeap() < 35000) {
-            Serial.printf("[WS] setBulk: low heap %d, aborted\n", ESP.getFreeHeap());
             StaticJsonDocument<64> errDoc;
             errDoc["type"] = "error"; errDoc["msg"] = "low_heap";
             String errStr; serializeJson(errDoc, errStr);
@@ -1343,7 +1396,6 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
               }
             }
           } else {
-            Serial.printf("[WS] setBulk parse error: %s (len=%d)\n", bulkErr.c_str(), len);
           }
           // Cleanup reassembly buffer before early return
           if (_wsFreeAfter && _wsReassemblyBuf) {
@@ -1369,7 +1421,6 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             int pattern = sequencer.getCurrentPattern();
             // 6 data structures × 16 tracks × 16 steps — needs ~13-15KB ArduinoJson pool
             if (ESP.getFreeHeap() < 35000) {
-              Serial.printf("[getPattern] Low heap %d, skipping\n", ESP.getFreeHeap());
               StaticJsonDocument<64> err; err["type"] = "error"; err["msg"] = "low_heap";
               String errStr; serializeJson(err, errStr);
               if (isClientReady(client)) client->text(errStr);
@@ -1472,13 +1523,11 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
           }
           else if (cmd == "init") {
             // Cliente solicita inicialización completa
-            Serial.printf("[init] Client %u | Heap: %d\n", client->id(), ESP.getFreeHeap());
             
             // Only send state if we have enough heap
             if (ESP.getFreeHeap() > 30000 && isClientReady(client)) {
               sendSequencerStateToClient(client);
             } else {
-              Serial.println("[init] Low heap, sending minimal state");
               // Send minimal state
               StaticJsonDocument<256> mini;
               mini["type"] = "state";
@@ -1503,40 +1552,41 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
           }
           else if (cmd == "getSampleCounts") {
             // Nuevo comando para obtener conteos de samples
-            Serial.println("[getSampleCounts] Request received");
             sendSampleCounts(client);
           }
           else if (cmd == "getSamples") {
             // Obtener lista de samples de una familia desde LittleFS
             const char* family = doc["family"];
             int padIndex = doc["pad"];
-            
-            Serial.printf("[getSamples] Family: %s, Pad: %d\n", family, padIndex);
-            
-            // Verificar que LittleFS está montado
-            if (!LittleFS.begin(false)) {
-              Serial.println("[getSamples] ERROR: LittleFS not mounted!");
-              if (safeFreeNeeded) free(safeData);
-              if (_wsFreeAfter && _wsReassemblyBuf) { free(_wsReassemblyBuf); _wsReassemblyBuf = nullptr; }
-              return;
-            }
-            
+
             DynamicJsonDocument responseDoc(4096);  // Heap-allocated, flexible size
             responseDoc["type"] = "sampleList";
             responseDoc["family"] = family;
             responseDoc["pad"] = padIndex;
-            
+
+            // LittleFS should already be mounted at startup; begin(false) just
+            // returns true if already active. If it truly fails, send empty list
+            // so the UI shows the modal (not a silent no-op).
+            if (!family || !LittleFS.begin(false)) {
+              responseDoc.createNestedArray("samples");
+              String emptyOut;
+              serializeJson(responseDoc, emptyOut);
+              if (isClientReady(client)) client->text(emptyOut);
+              else ws->textAll(emptyOut);
+              if (safeFreeNeeded) free(safeData);
+              if (_wsFreeAfter && _wsReassemblyBuf) { free(_wsReassemblyBuf); _wsReassemblyBuf = nullptr; }
+              return;
+            }
+
             String path = String("/") + String(family);
-            Serial.printf("[getSamples] Opening: %s\n", path.c_str());
-            
+
             File dir = LittleFS.open(path, "r");
-            
+
             if (dir && dir.isDirectory()) {
-              Serial.println("[getSamples] Directory OK, listing files:");
               JsonArray samples = responseDoc.createNestedArray("samples");
               File file = dir.openNextFile();
               int count = 0;
-              
+
               while (file) {
                 if (!file.isDirectory()) {
                   String filename = file.name();
@@ -1544,7 +1594,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
                   if (lastSlash >= 0) {
                     filename = filename.substring(lastSlash + 1);
                   }
-                  
+
                   if (isSupportedSampleFile(filename)) {
                     JsonObject sampleObj = samples.createNestedObject();
                     sampleObj["name"] = filename;
@@ -1570,8 +1620,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
                       sampleObj["bits"] = 16;
                     }
                     count++;
-                    Serial.printf("  [%d] %s (%d KB)\n", count, filename.c_str(), file.size() / 1024);
-                    
+
                     // Yield cada 3 samples para evitar watchdog
                     if (count % 3 == 0) {
                       yield();
@@ -1582,11 +1631,10 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
                 file = dir.openNextFile();
               }
               dir.close();
-              Serial.printf("[getSamples] Total: %d samples\n", count);
             } else {
-              Serial.printf("[getSamples] ERROR: Cannot open %s\n", path.c_str());
+              responseDoc.createNestedArray("samples");  // folder not found → empty list
             }
-            
+
             String output;
             serializeJson(responseDoc, output);
             if (isClientReady(client)) {
@@ -1622,7 +1670,6 @@ void WebInterface::broadcastSequencerState() {
   
   // Protect against low heap — state doc + string need ~12KB total
   if (ESP.getFreeHeap() < 30000) {
-    Serial.println("[WS] Low heap, skipping broadcast");
     return;
   }
   
@@ -1639,7 +1686,6 @@ void WebInterface::sendSequencerStateToClient(AsyncWebSocketClient* client) {
   
   // Protect against low heap — state doc needs ~6KB
   if (ESP.getFreeHeap() < 30000) {
-    Serial.println("[WS] Low heap, skipping state send");
     return;
   }
   
@@ -1760,6 +1806,16 @@ void WebInterface::update() {
     ws->cleanupClients(3);  // Match max client limit
     lastWsCleanup = now;
   }
+
+  // ── Heap monitor: log cada 10s para diagnosticar fugas ──
+  static unsigned long lastHeapLog = 0;
+  static uint32_t minHeapSeen = 0xFFFFFFFF;
+  if (now - lastHeapLog > 10000) {
+    lastHeapLog = now;
+    uint32_t h = ESP.getFreeHeap();
+    uint32_t hMin = ESP.getMinFreeHeap();
+    if (h < minHeapSeen) minHeapSeen = h;
+  }
   
   // Limpiar clientes UDP inactivos cada 30 segundos
   static unsigned long lastCleanup = 0;
@@ -1777,22 +1833,18 @@ void WebInterface::update() {
       // ── Modo STA: verificar conexión al router ──
       if (WiFi.status() != WL_CONNECTED) {
         _staConnected = false;
-        Serial.println("[WiFi] STA desconectado! Reconectando...");
         WiFi.reconnect();
       } else {
         _staConnected = true;
         static int lastRSSI = 0;
         int rssi = WiFi.RSSI();
         if (abs(rssi - lastRSSI) > 5) {
-          Serial.printf("[WiFi] STA OK | IP: %s | RSSI: %d dBm\n",
-                        WiFi.localIP().toString().c_str(), rssi);
           lastRSSI = rssi;
         }
       }
     } else {
       // ── Modo AP: verificar que siga activo ──
       if (WiFi.getMode() != WIFI_AP) {
-        Serial.println("[WiFi] AP mode lost! Restarting...");
         WiFi.mode(WIFI_AP);
         WiFi.softAP("RED808", "red808esp32", 1, 0, 4);
         WiFi.setSleep(false);
@@ -1800,7 +1852,6 @@ void WebInterface::update() {
       int stations = WiFi.softAPgetStationNum();
       static int lastStationCount = 0;
       if (stations != lastStationCount) {
-        Serial.printf("[WiFi] AP Stations: %d\n", stations);
         lastStationCount = stations;
       }
     }
@@ -1816,6 +1867,11 @@ String WebInterface::getIP() {
 
 // Procesar comandos JSON (compartido entre WebSocket y UDP)
 void WebInterface::processCommand(const JsonDocument& doc) {
+  // ── Heap guard: si queda poca memoria, descartamos el comando ──
+  if (ESP.getFreeHeap() < 20000) {
+    return;
+  }
+
   String cmd = doc["cmd"];
 
   static unsigned long lastMasterFxCmdMs = 0;
@@ -1903,12 +1959,19 @@ void WebInterface::processCommand(const JsonDocument& doc) {
         int savedPattern = sequencer.getCurrentPattern();
         sequencer.selectPattern(pattern);
         sequencer.setStep(track, step, active);
+        spiMaster.dsqSetStep((uint8_t)pattern, (uint8_t)track, (uint8_t)step,
+            active ? 1 : 0, 100, 1, 100);
         sequencer.selectPattern(savedPattern);
         yield(); // Prevent watchdog reset during bulk import
       }
     } else {
       sequencer.setStep(track, step, active);
       sequencer.setStepNoteLen(track, step, noteLen);
+      spiMaster.dsqSetStep((uint8_t)sequencer.getCurrentPattern(), (uint8_t)track, (uint8_t)step,
+          active ? 1 : 0,
+          sequencer.getStepVelocity(sequencer.getCurrentPattern(), track, step),
+          noteLen,
+          sequencer.getStepProbability(sequencer.getCurrentPattern(), track, step));
       // Only broadcast if not in silent/bulk mode
       if (!silent) {
         StaticJsonDocument<160> resp;
@@ -1925,6 +1988,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "start") {
     sequencer.start();
+    dsqUploadPattern(sequencer.getCurrentPattern());
+    spiMaster.dsqControl(1);
     StaticJsonDocument<96> resp;
     resp["type"] = "playState";
     resp["playing"] = true;
@@ -1933,6 +1998,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "stop") {
     sequencer.stop();
+    spiMaster.dsqControl(0);
     StaticJsonDocument<96> resp;
     resp["type"] = "playState";
     resp["playing"] = false;
@@ -1943,7 +2009,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int pattern = doc.containsKey("pattern") ? doc["pattern"].as<int>() : sequencer.getCurrentPattern();
     sequencer.clearPattern(pattern);
     yield();
-    Serial.printf("[WS] Pattern %d cleared\n", pattern);
     StaticJsonDocument<96> resp;
     resp["type"] = "patternCleared";
     resp["pattern"] = pattern;
@@ -1971,6 +2036,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int count = doc["count"];
     if (count == 16 || count == 32 || count == 64) {
       sequencer.setPatternLength(count);
+      spiMaster.dsqSetLength((uint8_t)count);
       StaticJsonDocument<96> resp;
       resp["type"] = "stepCount";
       resp["count"] = count;
@@ -1981,6 +2047,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "selectPattern") {
     int pattern = doc["index"];
     sequencer.selectPattern(pattern);
+    dsqUploadPattern(pattern);
+    spiMaster.dsqSelectPattern((uint8_t)pattern);
     
     // Only broadcast state if heap is comfortably above the combined allocation spike
     // (broadcastSequencerState ~8-13KB) + (patternDoc ~14KB) = ~22-27KB peak
@@ -1997,7 +2065,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     }
     
     if (ESP.getFreeHeap() < 30000) {
-      Serial.printf("[selectPattern] Heap too low (%d), skipping pattern data\n", ESP.getFreeHeap());
       return;
     }
     yield();
@@ -2080,32 +2147,38 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     if (ws && ws->count() > 0) ws->textAll(patternOutput);
   }
   else if (cmd == "loadSample") {
-    const char* family = doc["family"];
+    const char* family   = doc["family"];
     const char* filename = doc["filename"];
     int padIndex = doc["pad"];
     if (padIndex < 0 || padIndex >= 16) return;
     if (!family || !filename) return;
 
     yield();
-    SdFileInfoResponse info = {};
-    spiMaster.sdGetFileInfo(family, filename, info);
 
-    bool ok = spiMaster.sdLoadSample(padIndex, family, filename);
+    // Build LittleFS path: /<family>/<filename>
+    // We transfer the audio data directly from ESP32 LittleFS → Daisy RAM via SPI.
+    // This does NOT touch the Daisy QSPI flash, so the original boot sample is
+    // preserved and reloads on reboot ("sin machacar el antiguo").
+    String fullPath = String("/") + String(family) + "/" + String(filename);
+    bool ok = sampleManager.loadSample(fullPath.c_str(), padIndex);
+
     if (ok) {
-      setDaisyPadFile(padIndex, String(filename));
+      // Apply trim markers if the user dragged the waveform start/end
+      float trimStart = doc.containsKey("trimStart") ? (float)doc["trimStart"] : 0.0f;
+      float trimEnd   = doc.containsKey("trimEnd")   ? (float)doc["trimEnd"]   : 1.0f;
+      if (trimStart > 0.001f || trimEnd < 0.999f) {
+        sampleManager.trimSample(padIndex, trimStart, trimEnd);
+      }
+
+      uint32_t sampleLen = sampleManager.getSampleLength(padIndex);
 
       StaticJsonDocument<256> responseDoc;
-      responseDoc["type"] = "sampleLoaded";
-      responseDoc["pad"] = padIndex;
+      responseDoc["type"]     = "sampleLoaded";
+      responseDoc["pad"]      = padIndex;
       responseDoc["filename"] = filename;
-      responseDoc["size"] = info.sizeBytes;
-      responseDoc["format"] = detectSampleFormat(filename);
-
-      if (info.sampleRate > 0 && info.bitsPerSample > 0) {
-        char quality[24];
-        snprintf(quality, sizeof(quality), "%uHz • %u-bit", (unsigned int)info.sampleRate, (unsigned int)info.bitsPerSample);
-        responseDoc["quality"] = quality;
-      }
+      responseDoc["size"]     = sampleLen * 2;           // bytes
+      responseDoc["format"]   = detectSampleFormat(filename);
+      responseDoc["quality"]  = "LittleFS";
 
       String output;
       serializeJson(responseDoc, output);
@@ -2158,12 +2231,10 @@ void WebInterface::processCommand(const JsonDocument& doc) {
         file = dir.openNextFile();
       }
       dir.close();
-      Serial.printf("[getXtraSamples] Found %d samples in /xtra\n", count);
     } else {
       // Create /xtra if it doesn't exist
       LittleFS.mkdir("/xtra");
       responseDoc.createNestedArray("samples");
-      Serial.println("[getXtraSamples] /xtra folder created (empty)");
     }
     
     String output;
@@ -2175,23 +2246,33 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     const char* filename = doc["filename"];
     int padIndex = doc["pad"];
     if (padIndex < 16 || padIndex >= 24) return;
-    
+
     String fullPath = String("/xtra/") + String(filename);
     yield();
-    
+
+    // Notificar al cliente que empieza la transferencia SPI a la Daisy
+    {
+      StaticJsonDocument<128> tDoc;
+      tDoc["type"] = "xtraTransferring";
+      tDoc["pad"]  = padIndex;
+      String tOut; serializeJson(tDoc, tOut);
+      if (ws) ws->textAll(tOut);
+    }
+
     if (sampleManager.loadSample(fullPath.c_str(), padIndex)) {
+      // Transferencia completada (ya incluye delay post-CMD_SAMPLE_END)
       StaticJsonDocument<256> responseDoc;
-      responseDoc["type"] = "sampleLoaded";
-      responseDoc["pad"] = padIndex;
+      responseDoc["type"]     = "xtraReady";
+      responseDoc["pad"]      = padIndex;
       responseDoc["filename"] = filename;
-      responseDoc["size"] = sampleManager.getSampleLength(padIndex) * 2;
-      
-      String output;
-      serializeJson(responseDoc, output);
+      responseDoc["size"]     = sampleManager.getSampleLength(padIndex) * 2;
+      String output; serializeJson(responseDoc, output);
       if (ws) ws->textAll(output);
-      Serial.printf("[loadXtraSample] Loaded %s -> pad %d\n", fullPath.c_str(), padIndex);
-    } else {
-      Serial.printf("[loadXtraSample] FAILED: %s -> pad %d\n", fullPath.c_str(), padIndex);
+
+      // También enviamos sampleLoaded para compatibilidad con waveform cache etc.
+      responseDoc["type"] = "sampleLoaded";
+      output = ""; serializeJson(responseDoc, output);
+      if (ws) ws->textAll(output);
     }
   }
   else if (cmd == "mute") {
@@ -2200,6 +2281,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     yield();
     bool muted = doc["value"];
     sequencer.muteTrack(track, muted);
+    spiMaster.dsqSetMute((uint8_t)track, muted);
     StaticJsonDocument<128> muteDoc;
     muteDoc["type"] = "trackMuted";
     muteDoc["track"] = track;
@@ -2684,6 +2766,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     bool mute = doc["value"];
     if (track >= 0 && track < 16) {
       spiMaster.setTrackMute(track, mute);
+      spiMaster.dsqSetMute((uint8_t)track, mute);
       StaticJsonDocument<128> resp;
       resp["type"] = "trackFxSet";
       resp["track"] = track;
@@ -2997,8 +3080,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       float filter = doc.containsKey("filter") ? (float)doc["filter"] : 4000.0f;
       float crackle = doc.containsKey("crackle") ? (float)doc["crackle"] : 0.25f;
       spiMaster.setScratchParams(track, value, rate, depth, filter, crackle);
-      Serial.printf("[WS] Scratch %s -> Track %d (rate:%.1f depth:%.2f filter:%.0f crackle:%.2f)\n",
-                    value ? "ON" : "OFF", track, rate, depth, filter, crackle);
     }
   }
   // ============= TURNTABLISM Command (configurable) =============
@@ -3014,8 +3095,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       float transformRate = doc.containsKey("transformRate") ? (float)doc["transformRate"] : 11.0f;
       float vinylNoise = doc.containsKey("vinylNoise") ? (float)doc["vinylNoise"] : 0.35f;
       spiMaster.setTurntablismParams(track, value, autoMode, mode, brakeSpeed, backspinSpeed, transformRate, vinylNoise);
-      Serial.printf("[WS] Turntablism %s -> Track %d (auto:%d mode:%d brake:%d backspin:%d tRate:%.1f noise:%.2f)\n",
-                    value ? "ON" : "OFF", track, autoMode, mode, brakeSpeed, backspinSpeed, transformRate, vinylNoise);
     }
   }
   // ============= PER-TRACK LIVE FX (SLAVE Controller) =============
@@ -3187,7 +3266,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "stopAllSounds") {
     spiMaster.stopAll();
-    Serial.println("[WS] KILL ALL - All sounds stopped");
     StaticJsonDocument<64> resp;
     resp["type"] = "allStopped";
     String out; serializeJson(resp, out);
@@ -3206,7 +3284,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "setTrackFilter") {
     int track = doc["track"];
     if (track < 0 || track >= 16) {
-      Serial.printf("[WS] Invalid track %d (must be 0-15)\n", track);
       return;
     }
     int filterType = doc.containsKey("type") ? doc["type"].as<int>() : doc["filterType"].as<int>();
@@ -3233,7 +3310,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "clearTrackFilter") {
     int track = doc["track"];
     if (track < 0 || track >= 16) {
-      Serial.printf("[WS] Invalid track %d (must be 0-15)\n", track);
       return;
     }
     spiMaster.clearTrackFilter(track);
@@ -3252,7 +3328,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "setPadFilter") {
     int pad = doc["pad"];
     if (pad < 0 || pad >= 24) {
-      Serial.printf("[WS] Invalid pad %d (must be 0-23)\n", pad);
       return;
     }
     int filterType = doc.containsKey("type") ? doc["type"].as<int>() : doc["filterType"].as<int>();
@@ -3276,7 +3351,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "clearPadFilter") {
     int pad = doc["pad"];
     if (pad < 0 || pad >= 24) {
-      Serial.printf("[WS] Invalid pad %d (must be 0-23)\n", pad);
       return;
     }
     spiMaster.clearPadFilter(pad);
@@ -3317,7 +3391,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int step = doc["step"];
     int velocity = doc["velocity"];
     if (track < 0 || track >= 16 || step < 0 || step >= 16) {
-      Serial.printf("[WS] Invalid track %d or step %d\n", track, step);
       return;
     }
     
@@ -3329,11 +3402,20 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       int pattern = doc["pattern"].as<int>();
       if (pattern >= 0 && pattern < MAX_PATTERNS) {
         sequencer.setStepVelocity(pattern, track, step, velocity);
+        spiMaster.dsqSetStep((uint8_t)pattern, (uint8_t)track, (uint8_t)step,
+            sequencer.getStep(pattern, track, step) ? 1 : 0, (uint8_t)velocity,
+            sequencer.getStepNoteLen(pattern, track, step),
+            sequencer.getStepProbability(pattern, track, step));
         yield(); // Prevent watchdog reset during bulk import
       }
       return;
     } else {
+      int curPat = sequencer.getCurrentPattern();
       sequencer.setStepVelocity(track, step, velocity);
+      spiMaster.dsqSetStep((uint8_t)curPat, (uint8_t)track, (uint8_t)step,
+          sequencer.getStep(curPat, track, step) ? 1 : 0, (uint8_t)velocity,
+          sequencer.getStepNoteLen(curPat, track, step),
+          sequencer.getStepProbability(curPat, track, step));
       yield();
     }
     
@@ -3378,9 +3460,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       int pattern = doc["pattern"].as<int>();
       if (pattern >= 0 && pattern < MAX_PATTERNS) {
         sequencer.setStepVolumeLock(pattern, track, step, enabled, volume);
+        dsqSyncParamLock(pattern, track, step);
       }
     } else {
+      int curPat = sequencer.getCurrentPattern();
       sequencer.setStepVolumeLock(track, step, enabled, volume);
+      dsqSyncParamLock(curPat, track, step);
     }
 
     StaticJsonDocument<160> responseDoc;
@@ -3403,9 +3488,20 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       int pattern = doc["pattern"].as<int>();
       if (pattern >= 0 && pattern < MAX_PATTERNS) {
         sequencer.setStepProbability(pattern, track, step, probability);
+        spiMaster.dsqSetStep((uint8_t)pattern, (uint8_t)track, (uint8_t)step,
+            sequencer.getStep(pattern, track, step) ? 1 : 0,
+            sequencer.getStepVelocity(pattern, track, step),
+            sequencer.getStepNoteLen(pattern, track, step),
+            (uint8_t)constrain(probability, 0, 100));
       }
     } else {
+      int curPat = sequencer.getCurrentPattern();
       sequencer.setStepProbability(track, step, probability);
+      spiMaster.dsqSetStep((uint8_t)curPat, (uint8_t)track, (uint8_t)step,
+          sequencer.getStep(curPat, track, step) ? 1 : 0,
+          sequencer.getStepVelocity(curPat, track, step),
+          sequencer.getStepNoteLen(curPat, track, step),
+          (uint8_t)constrain(probability, 0, 100));
     }
 
     StaticJsonDocument<160> responseDoc;
@@ -3428,9 +3524,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       int pattern = doc["pattern"].as<int>();
       if (pattern >= 0 && pattern < MAX_PATTERNS) {
         sequencer.setStepCutoffLock(pattern, track, step, enabled, (uint16_t)constrain(cutoff, 20, 20000));
+        dsqSyncParamLock(pattern, track, step);
       }
     } else {
+      int curPat = sequencer.getCurrentPattern();
       sequencer.setStepCutoffLock(track, step, enabled, (uint16_t)constrain(cutoff, 20, 20000));
+      dsqSyncParamLock(curPat, track, step);
     }
 
     StaticJsonDocument<160> responseDoc;
@@ -3454,9 +3553,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       int pattern = doc["pattern"].as<int>();
       if (pattern >= 0 && pattern < MAX_PATTERNS) {
         sequencer.setStepReverbSendLock(pattern, track, step, enabled, (uint8_t)constrain(level, 0, 100));
+        dsqSyncParamLock(pattern, track, step);
       }
     } else {
+      int curPat = sequencer.getCurrentPattern();
       sequencer.setStepReverbSendLock(track, step, enabled, (uint8_t)constrain(level, 0, 100));
+      dsqSyncParamLock(curPat, track, step);
     }
 
     StaticJsonDocument<160> responseDoc;
@@ -3584,7 +3686,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       udp.write((uint8_t*)json.c_str(), json.length());
       udp.endPacket();
       
-      Serial.printf("► Pattern %d sent to SLAVE %s\n", patternNum + 1, udp.remoteIP().toString().c_str());
     }
   }
   // ============= NEW: Track Volume Commands =============
@@ -3592,7 +3693,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int track = doc["track"];
     int volume = constrain((int)doc["volume"], 0, 150);
     if (track < 0 || track >= 16) {
-      Serial.printf("[WS] Invalid track %d (must be 0-15)\n", track);
       return;
     }
     
@@ -3641,12 +3741,17 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "setTrackSynthEngine") {
     int track = doc["track"];
     int engine = doc["engine"];
-    if (track < 0 || track >= 16 || engine < -1 || engine > 3) {
-      Serial.printf("[WS] Invalid setTrackSynthEngine track=%d engine=%d\n", track, engine);
+    if (track < 0 || track >= 16 || engine < -1 || engine > 6) {
       return;
     }
 
+    // Si el pad estaba en 303 y cambia a otro motor, detener la nota
+    if (gTrackSynthEngine[track] == 3 && engine != 3) {
+      spiMaster.synth303NoteOff();
+    }
+
     setTrackSynthEngine(track, (int8_t)engine);
+    spiMaster.dsqSetTrackEngine((uint8_t)track, (int8_t)engine);
 
     StaticJsonDocument<128> responseDoc;
     responseDoc["type"] = "trackSynthEngineSet";
@@ -3658,12 +3763,22 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "applyKitToAllPads") {
     int engine = doc["engine"];
-    if (engine < -1 || engine > 3) {
-      Serial.printf("[WS] Invalid applyKitToAllPads engine=%d\n", engine);
+    if (engine < -1 || engine > 6) {
       return;
     }
 
+    // Si algún track estaba en 303 y cambia a otro motor, detener la nota
+    if (engine != 3) {
+      for (int i = 0; i < 16; i++) {
+        if (gTrackSynthEngine[i] == 3) {
+          spiMaster.synth303NoteOff();
+          break;
+        }
+      }
+    }
+
     setAllTrackSynthEngines((int8_t)engine);
+    for (int i = 0; i < 16; i++) spiMaster.dsqSetTrackEngine((uint8_t)i, (int8_t)engine);
 
     StaticJsonDocument<256> responseDoc;
     responseDoc["type"] = "trackSynthEngines";
@@ -3680,7 +3795,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     bool enabled = doc["enabled"];
     if (midiController) {
       midiController->setScanEnabled(enabled);
-      Serial.printf("[MIDI] Scan %s\n", enabled ? "ENABLED" : "DISABLED");
       // Broadcast state to all clients
       StaticJsonDocument<128> responseDoc;
       responseDoc["type"] = "midiScan";
@@ -3730,7 +3844,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       String output;
       serializeJson(resp, output);
       if (ws) ws->textAll(output);
-      Serial.printf("[SD] Load kit '%s' → %s\n", kit, ok ? "sent" : "FAIL");
     }
   }
   else if (cmd == "sdUnloadKit") {
@@ -3838,7 +3951,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     bool on = doc["active"];
     if (pad >= 0 && pad < 24) {
       lfoEngine.setActive(pad, on);
-      Serial.printf("[LFO] Pad %d %s\n", pad, on ? "ON" : "OFF");
     }
   }
   else if (cmd == "lfoSetWave") {
@@ -3943,6 +4055,14 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     spiMaster.synthParam(engine, instrument, paramId, value);
   }
 
+  // {"cmd":"setWtNote","track":0,"note":60}
+  else if (cmd == "setWtNote") {
+    int track = doc["track"] | 0;
+    int note  = doc["note"]  | 60;
+    if (track >= 0 && track < 16)
+      spiMaster.synthParam(4, (uint8_t)track, 8, (float)note);
+  }
+
   // {"cmd":"synth303NoteOn","note":48,"accent":false,"slide":false}
   else if (cmd == "synth303NoteOn") {
     uint8_t note   = doc["note"]   | 36;
@@ -3997,8 +4117,6 @@ void WebInterface::updateUdpClient(IPAddress ip, uint16_t port) {
     client.lastSeen = millis();
     client.packetCount = 1;
     udpClients[sKey] = client;
-    Serial.printf("[UDP] New client: %s:%d (total: %d)\n",
-                  key, port, udpClients.size());
   }
 }
 
@@ -4030,7 +4148,6 @@ void WebInterface::handleUdp() {
   if (freeHeap < 20000) {
     char drain[64];
     while (udp.available()) udp.read(drain, sizeof(drain));
-    Serial.printf("[UDP] SKIP: heap critical (%d)\n", freeHeap);
     return;
   }
 
@@ -4089,7 +4206,6 @@ void WebInterface::handleUdp() {
 
 void WebInterface::setMIDIController(MIDIController* controller) {
   midiController = controller;
-  Serial.println("[WebInterface] MIDI Controller reference set");
 }
 
 void WebInterface::broadcastMIDIMessage(const MIDIMessage& msg) {
@@ -4154,8 +4270,6 @@ void WebInterface::broadcastMIDIDeviceStatus(bool connected, const MIDIDeviceInf
   serializeJson(doc, output);
   ws->textAll(output);
   
-  Serial.printf("[WebInterface] MIDI device status broadcast: %s\n", 
-                connected ? "connected" : "disconnected");
 }
 
 // ========================================
@@ -4180,20 +4294,11 @@ void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename,
     uploadError = false;
     uploadErrorMsg = "";
     
-    Serial.println("\n╔════════════════════════════════════════════════╗");
-    Serial.println("║         📤 UPLOAD REQUEST RECEIVED            ║");
-    Serial.println("╚════════════════════════════════════════════════╝");
-    Serial.printf("[Upload] Filename: %s\n", filename.c_str());
-    Serial.printf("[Upload] Checking for 'pad' parameter...\n");
     
     // Buscar el parámetro 'pad' en la query string (GET params)
     if (!request->hasParam("pad", false)) {
-      Serial.println("[Upload] ERROR: Missing 'pad' parameter in query string");
-      Serial.printf("[Upload] Request params count: %d\n", request->params());
       for (int i = 0; i < request->params(); i++) {
         AsyncWebParameter* p = request->getParam(i);
-        Serial.printf("[Upload] Param[%d]: %s = %s (isPost=%d, isFile=%d)\n", 
-                     i, p->name().c_str(), p->value().c_str(), p->isPost(), p->isFile());
       }
       uploadError = true;
       uploadErrorMsg = "Missing pad parameter";
@@ -4202,10 +4307,8 @@ void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename,
     }
     
     uploadPad = request->getParam("pad", false)->value().toInt();
-    Serial.printf("[Upload] ✓ Pad parameter found: %d\n", uploadPad);
     
     if (uploadPad < 0 || uploadPad >= MAX_SAMPLES) {
-      Serial.printf("[Upload] ERROR: Invalid pad number: %d\n", uploadPad);
       uploadError = true;
       uploadErrorMsg = "Invalid pad number";
       broadcastUploadComplete(uploadPad, false, uploadErrorMsg);
@@ -4214,7 +4317,6 @@ void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename,
     
     // Validar extensión
     if (!filename.endsWith(".wav") && !filename.endsWith(".WAV")) {
-      Serial.printf("[Upload] ERROR: Invalid file type: %s\n", filename.c_str());
       uploadError = true;
       uploadErrorMsg = "Only WAV files are supported";
       broadcastUploadComplete(uploadPad, false, uploadErrorMsg);
@@ -4236,16 +4338,10 @@ void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename,
     // Crear path completo
     String filePath = dirPath + "/" + filename;
     
-    Serial.println("\n╔═══════════════════════════════════════════════╗");
-    Serial.printf("║  📤 UPLOAD INICIADO: %s\n", filename.c_str());
-    Serial.println("╚═══════════════════════════════════════════════╝");
-    Serial.printf("[Upload] Pad: %d (%s)\n", uploadPad, familyName.c_str());
-    Serial.printf("[Upload] File: %s\n", filePath.c_str());
     
     // Abrir archivo para escritura
     uploadFile = LittleFS.open(filePath, "w");
     if (!uploadFile) {
-      Serial.println("[Upload] ERROR: Failed to create file");
       uploadError = true;
       uploadErrorMsg = "Failed to create file on flash";
       broadcastUploadComplete(uploadPad, false, uploadErrorMsg);
@@ -4253,11 +4349,9 @@ void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename,
     }
     
     uploadSize = request->contentLength();
-    Serial.printf("[Upload] Expected size: %d bytes\n", uploadSize);
     
     // Validar tamaño (max 2MB para seguridad)
     if (uploadSize > 2 * 1024 * 1024) {
-      Serial.println("[Upload] ERROR: File too large (max 2MB)");
       uploadFile.close();
       uploadError = true;
       uploadErrorMsg = "File too large (max 2MB)";
@@ -4278,7 +4372,6 @@ void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename,
   if (uploadFile && len) {
     size_t written = uploadFile.write(data, len);
     if (written != len) {
-      Serial.printf("[Upload] ERROR: Write failed (%d/%d bytes)\n", written, len);
       uploadFile.close();
       uploadError = true;
       uploadErrorMsg = "Write error";
@@ -4295,7 +4388,6 @@ void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename,
     int percent = (uploadReceived * 100) / uploadSize;
     static int lastPercent = -1;
     if (percent != lastPercent && percent % 10 == 0) {
-      Serial.printf("[Upload] Progress: %d%% (%d/%d bytes)\n", percent, uploadReceived, uploadSize);
       broadcastUploadProgress(uploadPad, percent);
       lastPercent = percent;
     }
@@ -4306,7 +4398,6 @@ void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename,
     if (uploadFile) {
       uploadFile.close();
       
-      Serial.printf("[Upload] ✓ File written: %d bytes\n", uploadReceived);
       
       // Validar formato WAV
       const char* allFamilies[] = {"BD", "SD", "CH", "OH", "CP", "RS", "CL", "CY",
@@ -4322,7 +4413,6 @@ void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename,
       if (!validateWavFile(checkFile, sampleRate, channels, bitsPerSample)) {
         checkFile.close();
         LittleFS.remove(filePath);
-        Serial.println("[Upload] ERROR: Invalid WAV format");
         request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid WAV format\"}");
         broadcastUploadComplete(uploadPad, false, "Invalid WAV format");
         uploadPad = -1;
@@ -4336,16 +4426,11 @@ void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename,
       
       checkFile.close();
       
-      Serial.printf("[Upload] ✓ Valid WAV: %dHz, %dch, %dbit\n", sampleRate, channels, bitsPerSample);
       
       // Cargar sample en el pad
       bool loaded = sampleManager.loadSample(filePath.c_str(), uploadPad);
       
       if (loaded) {
-        Serial.printf("[Upload] ✓ Sample loaded to pad %d\n", uploadPad);
-        Serial.println("╔═══════════════════════════════════════════════╗");
-        Serial.println("║       ✅ UPLOAD COMPLETADO CON ÉXITO         ║");
-        Serial.println("╚═══════════════════════════════════════════════╝\n");
         
         // Enviar respuesta HTTP exitosa
         request->send(200, "application/json", "{\"success\":true,\"message\":\"Sample uploaded successfully\"}");
@@ -4355,7 +4440,6 @@ void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename,
         // Broadcast state update
         broadcastSequencerState();
       } else {
-        Serial.println("[Upload] ERROR: Failed to load sample");
         LittleFS.remove(filePath);
         
         // Enviar respuesta HTTP de error
@@ -4398,17 +4482,14 @@ bool WebInterface::validateWavFile(File& file, uint32_t& sampleRate, uint16_t& c
   
   // Validar parámetros
   if (sampleRate != 44100 && sampleRate != 48000) {
-    Serial.printf("[Validate] Invalid sample rate: %d (expected 44100 or 48000)\n", sampleRate);
     return false;
   }
   
   if (channels < 1 || channels > 2) {
-    Serial.printf("[Validate] Invalid channels: %d (expected 1 or 2)\n", channels);
     return false;
   }
   
   if (bitsPerSample != 16) {
-    Serial.printf("[Validate] Invalid bit depth: %d (expected 16)\n", bitsPerSample);
     return false;
   }
   

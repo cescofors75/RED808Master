@@ -1,0 +1,516 @@
+Processing esp32-s3-devkitc-1 (platform: espressif32; board: esp32-s3-devkitc-1; framework: arduino)
+--------------------------------------------------------------------------------
+Verbose mode can be enabled via `-v, --verbose` option
+[prepare_data_gz] omitido (solo act·a en uploadfs/buildfs)
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/esp32-s3-devkitc-1.html
+PLATFORM: Espressif 32 (6.12.0) > Espressif ESP32-S3-DevKitC-1-N8 (8 MB QD, No PSRAM)
+HARDWARE: ESP32S3 240MHz, 320KB RAM, 16MB Flash
+DEBUG: Current (esp-builtin) On-board (esp-builtin) External (cmsis-dap, esp-bridge, esp-prog, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa)
+PACKAGES: 
+ - framework-arduinoespressif32 @ 3.20017.241212+sha.dcc1105b 
+ - tool-esptoolpy @ 2.40900.250804 (4.9.0) 
+ - tool-mkfatfs @ 2.0.1 
+ - tool-mklittlefs @ 1.203.210628 (2.3) 
+ - tool-mkspiffs @ 2.230.0 (2.30) 
+ - toolchain-riscv32-esp @ 8.4.0+2021r2-patch5 
+ - toolchain-xtensa-esp32s3 @ 8.4.0+2021r2-patch5
+LDF: Library Dependency Finder -> https://bit.ly/configure-pio-ldf
+LDF Modes: Finder ~ chain, Compatibility ~ soft
+Found 37 compatible libraries
+Scanning dependencies...
+Dependency Graph
+|-- Adafruit NeoPixel @ 1.15.3
+|-- ESPAsyncWebServer-esphome @ 3.4.0
+|-- ArduinoJson @ 6.21.5
+|-- SPI @ 2.0.0
+|-- LittleFS @ 2.0.0
+|-- FS @ 2.0.0
+|-- Preferences @ 2.0.0
+|-- WiFi @ 2.0.0
+Building in release mode
+Compiling .pio\build\esp32-s3-devkitc-1\src\KitManager.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\src\LFOEngine.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\src\MIDIController.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\src\SPIMaster.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\src\SampleManager.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\src\Sequencer.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\src\WebInterface.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\src\main.cpp.o
+Building .pio\build\esp32-s3-devkitc-1\bootloader.bin
+Generating partitions .pio\build\esp32-s3-devkitc-1\partitions.bin
+esptool.py v4.9.0
+Creating esp32s3 image...
+Merged 1 ELF section
+Successfully created esp32s3 image.
+Compiling .pio\build\esp32-s3-devkitc-1\libc68\Adafruit NeoPixel\Adafruit_NeoPixel.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\libc68\Adafruit NeoPixel\Adafruit_Neopixel_RP2.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\libc68\Adafruit NeoPixel\esp.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\libc68\Adafruit NeoPixel\esp8266.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\libc68\Adafruit NeoPixel\kendyte_k210.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\libc68\Adafruit NeoPixel\psoc6.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\libf74\AsyncTCP-esphome\AsyncTCP.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\libfc5\FS\FS.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\libfc5\FS\vfs_api.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\lib5c9\WiFi\WiFi.cpp.o
+Archiving .pio\build\esp32-s3-devkitc-1\libc68\libAdafruit NeoPixel.a
+Compiling .pio\build\esp32-s3-devkitc-1\lib5c9\WiFi\WiFiAP.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\lib5c9\WiFi\WiFiClient.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\lib5c9\WiFi\WiFiGeneric.cpp.o
+Archiving .pio\build\esp32-s3-devkitc-1\libf74\libAsyncTCP-esphome.a
+Compiling .pio\build\esp32-s3-devkitc-1\lib5c9\WiFi\WiFiMulti.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\lib5c9\WiFi\WiFiSTA.cpp.o
+Archiving .pio\build\esp32-s3-devkitc-1\libfc5\libFS.a
+Compiling .pio\build\esp32-s3-devkitc-1\lib5c9\WiFi\WiFiScan.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\lib5c9\WiFi\WiFiServer.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\lib5c9\WiFi\WiFiUdp.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\lib5e3\ESPAsyncWebServer-esphome\AsyncEventSource.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\lib5e3\ESPAsyncWebServer-esphome\AsyncWebSocket.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\lib5e3\ESPAsyncWebServer-esphome\WebAuthentication.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\lib5e3\ESPAsyncWebServer-esphome\WebHandlers.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\lib5e3\ESPAsyncWebServer-esphome\WebRequest.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\lib5e3\ESPAsyncWebServer-esphome\WebResponses.cpp.o
+Archiving .pio\build\esp32-s3-devkitc-1\lib5c9\libWiFi.a
+Compiling .pio\build\esp32-s3-devkitc-1\lib5e3\ESPAsyncWebServer-esphome\WebServer.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\libb8e\SPI\SPI.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\libb38\LittleFS\LittleFS.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\lib97b\Preferences\Preferences.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\Esp.cpp.o
+Archiving .pio\build\esp32-s3-devkitc-1\libb8e\libSPI.a
+Archiving .pio\build\esp32-s3-devkitc-1\lib5e3\libESPAsyncWebServer-esphome.a
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\FirmwareMSC.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\FunctionalInterrupt.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\HWCDC.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\HardwareSerial.cpp.o
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.h:18,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/FirmwareMSC.h:17,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/FirmwareMSC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:510: warning: "CONFIG_LWIP_TCPIP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCPIP_RECVMBOX_SIZE 32
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.h:18,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/FirmwareMSC.h:17,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/FirmwareMSC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:533: warning: "CONFIG_LWIP_TCP_SND_BUF_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_SND_BUF_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.h:18,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/FirmwareMSC.h:17,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/FirmwareMSC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:534: warning: "CONFIG_LWIP_TCP_WND_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_WND_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.h:18,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/FirmwareMSC.h:17,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/FirmwareMSC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:535: warning: "CONFIG_LWIP_TCP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.h:18,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/FirmwareMSC.h:17,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/FirmwareMSC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:542: warning: "CONFIG_LWIP_UDP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_UDP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.h:16,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/HWCDC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:510: warning: "CONFIG_LWIP_TCPIP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCPIP_RECVMBOX_SIZE 32
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.h:16,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/HWCDC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:533: warning: "CONFIG_LWIP_TCP_SND_BUF_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_SND_BUF_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.h:16,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/HWCDC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:534: warning: "CONFIG_LWIP_TCP_WND_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_WND_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.h:16,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/HWCDC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:535: warning: "CONFIG_LWIP_TCP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.h:16,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/HWCDC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:542: warning: "CONFIG_LWIP_UDP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_UDP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+Archiving .pio\build\esp32-s3-devkitc-1\libb38\libLittleFS.a
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\IPAddress.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\IPv6Address.cpp.o
+Archiving .pio\build\esp32-s3-devkitc-1\lib97b\libPreferences.a
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\MD5Builder.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\Print.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\Stream.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\StreamString.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\Tone.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\USB.cpp.o
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.h:16,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:510: warning: "CONFIG_LWIP_TCPIP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCPIP_RECVMBOX_SIZE 32
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.h:16,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:533: warning: "CONFIG_LWIP_TCP_SND_BUF_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_SND_BUF_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.h:16,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:534: warning: "CONFIG_LWIP_TCP_WND_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_WND_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.h:16,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:535: warning: "CONFIG_LWIP_TCP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.h:16,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:542: warning: "CONFIG_LWIP_UDP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_UDP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\USBCDC.cpp.o
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.h:16,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBCDC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:510: warning: "CONFIG_LWIP_TCPIP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCPIP_RECVMBOX_SIZE 32
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.h:16,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBCDC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:533: warning: "CONFIG_LWIP_TCP_SND_BUF_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_SND_BUF_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.h:16,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBCDC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:534: warning: "CONFIG_LWIP_TCP_WND_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_WND_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.h:16,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBCDC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:535: warning: "CONFIG_LWIP_TCP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USB.h:16,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBCDC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:542: warning: "CONFIG_LWIP_UDP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_UDP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\USBMSC.cpp.o
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.h:18,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:510: warning: "CONFIG_LWIP_TCPIP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCPIP_RECVMBOX_SIZE 32
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.h:18,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:533: warning: "CONFIG_LWIP_TCP_SND_BUF_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_SND_BUF_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.h:18,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:534: warning: "CONFIG_LWIP_TCP_WND_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_WND_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.h:18,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:535: warning: "CONFIG_LWIP_TCP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.h:18,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.cpp:14:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:542: warning: "CONFIG_LWIP_UDP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_UDP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\WMath.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\WString.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\base64.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\cbuf.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-adc.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-bt.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-cpu.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-dac.c.o
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-cpu.c:15:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:510: warning: "CONFIG_LWIP_TCPIP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCPIP_RECVMBOX_SIZE 32
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-cpu.c:15:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:533: warning: "CONFIG_LWIP_TCP_SND_BUF_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_SND_BUF_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-cpu.c:15:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:534: warning: "CONFIG_LWIP_TCP_WND_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_WND_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-cpu.c:15:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:535: warning: "CONFIG_LWIP_TCP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-cpu.c:15:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:542: warning: "CONFIG_LWIP_UDP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_UDP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-gpio.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-i2c-slave.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-i2c.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-ledc.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-matrix.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-misc.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-psram.c.o
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-misc.c:15:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:510: warning: "CONFIG_LWIP_TCPIP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCPIP_RECVMBOX_SIZE 32
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-misc.c:15:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:533: warning: "CONFIG_LWIP_TCP_SND_BUF_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_SND_BUF_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-misc.c:15:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:534: warning: "CONFIG_LWIP_TCP_WND_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_WND_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-misc.c:15:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:535: warning: "CONFIG_LWIP_TCP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-misc.c:15:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:542: warning: "CONFIG_LWIP_UDP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_UDP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-rgb-led.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-rmt.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-sigmadelta.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-spi.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-time.c.o
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-spi.h:22,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-spi.c:15:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:510: warning: "CONFIG_LWIP_TCPIP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCPIP_RECVMBOX_SIZE 32
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-spi.h:22,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-spi.c:15:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:533: warning: "CONFIG_LWIP_TCP_SND_BUF_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_SND_BUF_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-spi.h:22,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-spi.c:15:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:534: warning: "CONFIG_LWIP_TCP_WND_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_WND_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-spi.h:22,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-spi.c:15:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:535: warning: "CONFIG_LWIP_TCP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-spi.h:22,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-spi.c:15:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:542: warning: "CONFIG_LWIP_UDP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_UDP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-timer.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-tinyusb.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-touch.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\esp32-hal-uart.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\firmware_msc_fat.c.o
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-tinyusb.c:2:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:510: warning: "CONFIG_LWIP_TCPIP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCPIP_RECVMBOX_SIZE 32
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-tinyusb.c:2:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:533: warning: "CONFIG_LWIP_TCP_SND_BUF_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_SND_BUF_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-tinyusb.c:2:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:534: warning: "CONFIG_LWIP_TCP_WND_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_WND_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-tinyusb.c:2:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:535: warning: "CONFIG_LWIP_TCP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-tinyusb.c:2:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:542: warning: "CONFIG_LWIP_UDP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_UDP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\libb64\cdecode.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\libb64\cencode.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\main.cpp.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\stdlib_noniso.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\wiring_pulse.c.o
+Compiling .pio\build\esp32-s3-devkitc-1\FrameworkArduino\wiring_shift.c.o
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/freertos/include/esp_additions/freertos/FreeRTOSConfig.h:10,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/freertos/include/freertos/FreeRTOS.h:57,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/main.cpp:1:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:510: warning: "CONFIG_LWIP_TCPIP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCPIP_RECVMBOX_SIZE 32
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/freertos/include/esp_additions/freertos/FreeRTOSConfig.h:10,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/freertos/include/freertos/FreeRTOS.h:57,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/main.cpp:1:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:533: warning: "CONFIG_LWIP_TCP_SND_BUF_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_SND_BUF_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/freertos/include/esp_additions/freertos/FreeRTOSConfig.h:10,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/freertos/include/freertos/FreeRTOS.h:57,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/main.cpp:1:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:534: warning: "CONFIG_LWIP_TCP_WND_DEFAULT" redefined
+ #define CONFIG_LWIP_TCP_WND_DEFAULT 5760
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/freertos/include/esp_additions/freertos/FreeRTOSConfig.h:10,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/freertos/include/freertos/FreeRTOS.h:57,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/main.cpp:1:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:535: warning: "CONFIG_LWIP_TCP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_TCP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+In file included from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/freertos/include/esp_additions/freertos/FreeRTOSConfig.h:10,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/freertos/include/freertos/FreeRTOS.h:57,
+                 from C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/cores/esp32/main.cpp:1:
+C:/Users/cesco/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/qio_opi/include/sdkconfig.h:542: warning: "CONFIG_LWIP_UDP_RECVMBOX_SIZE" redefined
+ #define CONFIG_LWIP_UDP_RECVMBOX_SIZE 6
+ 
+<command-line>: note: this is the location of the previous definition
+Archiving .pio\build\esp32-s3-devkitc-1\libFrameworkArduino.a
+Linking .pio\build\esp32-s3-devkitc-1\firmware.elf
+Retrieving maximum program size .pio\build\esp32-s3-devkitc-1\firmware.elf
+Checking size .pio\build\esp32-s3-devkitc-1\firmware.elf
+Advanced Memory Usage is available via "PlatformIO Home > Project Inspect"
+RAM:   [==        ]  18.1% (used 59204 bytes from 327680 bytes)
+Flash: [==        ]  23.9% (used 1000601 bytes from 4194304 bytes)
+Building .pio\build\esp32-s3-devkitc-1\firmware.bin
+esptool.py v4.9.0
+Creating esp32s3 image...
+Merged 2 ELF sections
+Successfully created esp32s3 image.
+Configuring upload protocol...
+AVAILABLE: cmsis-dap, esp-bridge, esp-builtin, esp-prog, espota, esptool, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa
+CURRENT: upload_protocol = esptool
+Looking for upload port...
+Using manually specified: COM16
+Uploading .pio\build\esp32-s3-devkitc-1\firmware.bin
+esptool.py v4.9.0
+Serial port COM16
+Connecting...
+Chip is ESP32-S3 (QFN56) (revision v0.2)
+Features: WiFi, BLE, Embedded PSRAM 8MB (AP_3v3)
+Crystal is 40MHz
+USB mode: USB-Serial/JTAG
+MAC: 3c:dc:75:6b:ec:68
+Uploading stub...
+Running stub...
+Stub running...
+Changing baud rate to 921600
+Changed.
+Configuring flash size...
+Flash will be erased from 0x00000000 to 0x00003fff...
+Flash will be erased from 0x00008000 to 0x00008fff...
+Flash will be erased from 0x0000e000 to 0x0000ffff...
+Flash will be erased from 0x00010000 to 0x00104fff...
+SHA digest in image updated
+Compressed 15104 bytes to 10429...
+Writing at 0x00000000... (100 %)
+Wrote 15104 bytes (10429 compressed) at 0x00000000 in 0.3 seconds (effective 416.0 kbit/s)...
+Hash of data verified.
+Compressed 3072 bytes to 137...
+Writing at 0x00008000... (100 %)
+Wrote 3072 bytes (137 compressed) at 0x00008000 in 0.1 seconds (effective 491.5 kbit/s)...
+Hash of data verified.
+Compressed 8192 bytes to 47...
+Writing at 0x0000e000... (100 %)
+Wrote 8192 bytes (47 compressed) at 0x0000e000 in 0.1 seconds (effective 674.2 kbit/s)...
+Hash of data verified.
+Compressed 1000960 bytes to 633181...
+Writing at 0x00010000... (2 %)
+Writing at 0x0001b1de... (5 %)
+Writing at 0x00027395... (7 %)
+Writing at 0x0002f8fd... (10 %)
+Writing at 0x0004006f... (12 %)
+Writing at 0x00046169... (15 %)
+Writing at 0x0004c939... (17 %)
+Writing at 0x00052d3c... (20 %)
+Writing at 0x00059f79... (23 %)
+Writing at 0x000603b0... (25 %)
+Writing at 0x0006617a... (28 %)
+Writing at 0x0006c4a5... (30 %)
+Writing at 0x000723b4... (33 %)
+Writing at 0x00077983... (35 %)
+Writing at 0x0007cfd2... (38 %)
+Writing at 0x00082358... (41 %)
+Writing at 0x000873c1... (43 %)
+Writing at 0x0008c24c... (46 %)
+Writing at 0x000911a9... (48 %)
+Writing at 0x00095fe3... (51 %)
+Writing at 0x0009b46f... (53 %)
+Writing at 0x000a00e7... (56 %)
+Writing at 0x000a51ed... (58 %)
+Writing at 0x000aa4cc... (61 %)
+Writing at 0x000b01e0... (64 %)
+Writing at 0x000b4faf... (66 %)
+Writing at 0x000b9f95... (69 %)
+Writing at 0x000bf00f... (71 %)
+Writing at 0x000c4431... (74 %)
+Writing at 0x000c9764... (76 %)
+Writing at 0x000cedd3... (79 %)
+Writing at 0x000d49a7... (82 %)
+Writing at 0x000da053... (84 %)
+Writing at 0x000df671... (87 %)
+Writing at 0x000e7aa7... (89 %)
+Writing at 0x000f0478... (92 %)
+Writing at 0x000f5627... (94 %)
+Writing at 0x000fb01d... (97 %)
+Writing at 0x001007a8... (100 %)
+Wrote 1000960 bytes (633181 compressed) at 0x00010000 in 9.7 seconds (effective 825.5 kbit/s)...
+Hash of data verified.
+
+Leaving...
+Hard resetting via RTS pin...
+========================= [SUCCESS] Took 62.58 seconds =========================

@@ -118,11 +118,29 @@
           <tr><td>Last PING RTT</td><td id="ds-rtt">--</td></tr>
           <tr><td>Samples loaded</td><td id="ds-samples">--</td></tr>
           <tr><td>Active voices</td><td id="ds-voices">--</td></tr>
+          <tr><td>Pads cargados</td><td id="ds-pads">--</td></tr>
+          <tr><td>Errores SPI</td><td id="ds-errcnt">--</td></tr>
           <tr><td>Slave uptime</td><td id="ds-uptime">--</td></tr>
         </table>
         <div id="daisy-hint" class="daisy-hint">
           ⏳ Esperando Daisy Seed… — D10←GPIO5 · D9→GPIO6 · D8←GPIO4 · D7←GPIO7 · GND
         </div>
+      </div>
+    </div>
+
+    <!-- ── SPI LOG ── -->
+    <div class="adm-card full-width" id="card-spi-log">
+      <div class="adm-card-head">
+        <span class="adm-card-title">🔌 SPI LOG</span>
+        <div class="log-controls">
+          <label class="log-pause-label"><input type="checkbox" id="spiErrOnlyChk"> Solo errores</label>
+          <button class="adm-hdr-btn" onclick="spiLogClear()">🗑</button>
+          <label class="log-pause-label"><input type="checkbox" id="spiLogPauseChk"> Pausar</label>
+          <span id="spi-pkt-count" class="adm-count">0 pkts</span>
+        </div>
+      </div>
+      <div class="adm-card-body log-body">
+        <pre id="spiLog"></pre>
       </div>
     </div>
 

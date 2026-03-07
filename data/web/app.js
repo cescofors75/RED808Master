@@ -54,7 +54,7 @@ let trackFilterState = new Array(16).fill(0); // 0 = FILTER_NONE
 let padSynthEngine = new Array(16).fill(-1);
 // TB-303 note map per live pad (chromatic scale C3-D5)
 const PAD_303_NOTES = [48,50,52,53,55,57,59,60,62,64,65,67,69,71,72,74];
-const SYNTH_ENGINE_LABELS = ['808','909','505','303'];
+const SYNTH_ENGINE_LABELS = ['808','909','505','303','WTOSC'];
 
 // Per-track live FX state (Echo, Flanger, Compressor)
 let trackLiveFxState = new Array(16).fill(null).map(() => ({
@@ -335,6 +335,16 @@ function handleWebSocketMessage(data) {
                 SampleWaveform.clearCache(data.pad);
             }
             break;
+
+        case 'xtraTransferring':
+            // Muestra spinner en el XTRA pad mientras se transfiere a la Daisy
+            _setXtraPadTransferState(data.pad, true);
+            break;
+
+        case 'xtraReady':
+            // Sample completamente cargado en la Daisy — quitar spinner
+            _setXtraPadTransferState(data.pad, false);
+            break;
         case 'trackFilterSet':
             if (data.success) {
                 const trackName = padNames[data.track] || `Track ${data.track + 1}`;
@@ -558,11 +568,256 @@ function handleWebSocketMessage(data) {
         case 'lfoResetAck':
             lfoHandleReset();
             break;
+
+        // ═══ Botones físicos (PhysControlButtons ESP32) ═══
+        case 'physButton':
+            handlePhysButton(data);
+            break;
+
+        // ═══ Configuración de botones físicos ═══
+        case 'btnConfig':
+            handleBtnConfigUpdate(data);
+            break;
     }
     
     // Call keyboard controls handler if function exists
     if (typeof window.handleKeyboardWebSocketMessage === 'function') {
         window.handleKeyboardWebSocketMessage(data);
+    }
+}
+
+// ============= BOTONES FÍSICOS (PhysControlButtons) =============
+/**
+ * Maneja eventos de los 4 botones táctiles físicos de la ESP32.
+ * Mensajes que envía la ESP32:
+ *   { type:"physButton", action:"multiview",   active:bool }
+ *   { type:"physButton", action:"nextPattern",  pattern:N  }
+ *   { type:"physButton", action:"prevPattern",  pattern:N  }
+ * (PLAY/PAUSE afecta directo al secuenciador; la UI se actualiza
+ *  vía el broadcastSequencerState que ya llega como "state" normal)
+ */
+function handlePhysButton(data) {
+    switch (data.action) {
+        case 'multiview': {
+            const active = !!data.active;
+            if (active) {
+                // Abrir multiview en nueva pestaña (o navegar si estamos en main)
+                if (window.location.pathname.endsWith('multiview.html')) {
+                    // Ya estamos en multiview — ignorar
+                } else {
+                    window.open('/multiview.html', '_blank');
+                }
+            } else {
+                // Si estamos en multiview, volver a la página principal
+                if (window.location.pathname.endsWith('multiview.html')) {
+                    window.location.href = '/';
+                }
+            }
+            // Toast informativo
+            if (window.showToast) {
+                window.showToast(
+                    active ? '🖥️ Multiview activado' : '🖥️ Multiview desactivado',
+                    window.TOAST_TYPES?.INFO, 1800
+                );
+            }
+            break;
+        }
+        case 'nextPattern':
+        case 'prevPattern': {
+            // Actualizar índice de patrón en la UI sin pedir todo el estado
+            const idx = data.pattern;
+            if (idx !== undefined) {
+                currentPatternIndex = idx;
+                const PNAMES = (typeof PATTERN_NAMES !== 'undefined' && PATTERN_NAMES.length > idx)
+                    ? PATTERN_NAMES[idx] : `PATTERN ${idx + 1}`;
+                const nameEl = document.getElementById('currentPatternName');
+                if (nameEl) nameEl.textContent = PNAMES;
+                const circularEl = document.getElementById('circularPatternName');
+                if (circularEl) circularEl.textContent = PNAMES;
+                // Toast con número de patrón
+                if (window.showToast) {
+                    const dir = data.action === 'nextPattern' ? '▶ Siguiente' : '◀ Anterior';
+                    window.showToast(`${dir}: ${PNAMES}`, window.TOAST_TYPES?.INFO, 1200);
+                }
+            }
+            break;
+        }
+        case 'triggerPad': {
+            // Flash visual del pad cuando se dispara desde botón físico
+            if (data.pad !== undefined) triggerPad(data.pad);
+            break;
+        }
+    }
+}
+
+// ============= BUTTONS CONFIG =============
+const BTN_ACTIONS = [
+    { id:0,  cat:'—',         label:'NINGUNA'              },
+    { id:1,  cat:'Transporte',label:'PLAY / PAUSE',         colorOn:'#00ff00' },
+    { id:2,  cat:'Transporte',label:'STOP',                 colorOn:'#ff4444' },
+    { id:3,  cat:'Transporte',label:'SIGUIENTE PATRÓN',     colorOn:'#ff5500' },
+    { id:4,  cat:'Transporte',label:'ANTERIOR PATRÓN',      colorOn:'#ff5500' },
+    { id:5,  cat:'Transporte',label:'TAP TEMPO',            colorOn:'#ffdd00' },
+    { id:6,  cat:'Transporte',label:'SIGUIENTE + PLAY',     colorOn:'#00ff88' },
+    { id:7,  cat:'Transporte',label:'ANTERIOR + PLAY',      colorOn:'#00ff88' },
+    { id:8,  cat:'Navegación',label:'MULTIVIEW ON/OFF',     colorOn:'#00ffff' },
+    { id:10, cat:'Volumen',   label:'MASTER VOL +5%',       colorOn:'#00ff00' },
+    { id:11, cat:'Volumen',   label:'MASTER VOL -5%',       colorOn:'#ff0000' },
+    { id:12, cat:'Volumen',   label:'LIVE VOL +5%',         colorOn:'#00ff00' },
+    { id:13, cat:'Volumen',   label:'LIVE VOL -5%',         colorOn:'#ff0000' },
+    { id:20, cat:'Tempo',     label:'TEMPO +1 BPM',         colorOn:'#ffdd00' },
+    { id:21, cat:'Tempo',     label:'TEMPO -1 BPM',         colorOn:'#ffdd00' },
+    { id:22, cat:'Tempo',     label:'TEMPO +5 BPM',         colorOn:'#ffff00' },
+    { id:23, cat:'Tempo',     label:'TEMPO -5 BPM',         colorOn:'#ffff00' },
+    { id:30, cat:'FX Master', label:'DELAY ON/OFF',         colorOn:'#00ccff' },
+    { id:31, cat:'FX Master', label:'REVERB ON/OFF',        colorOn:'#8844ff' },
+    { id:32, cat:'FX Master', label:'CHORUS ON/OFF',        colorOn:'#ff88cc' },
+    { id:33, cat:'FX Master', label:'PHASER ON/OFF',        colorOn:'#ff4499' },
+    { id:34, cat:'FX Master', label:'FLANGER ON/OFF',       colorOn:'#cc00ff' },
+    { id:35, cat:'FX Master', label:'COMPRESOR ON/OFF',     colorOn:'#ffcc00' },
+    { id:36, cat:'FX Master', label:'TREMOLO ON/OFF',       colorOn:'#ff8800' },
+    { id:37, cat:'FX Master', label:'LIMITADOR ON/OFF',     colorOn:'#ff2200' },
+    { id:38, cat:'FX Master', label:'DISTORSIÓN ON/OFF',    colorOn:'#ff6600' },
+    { id:40, cat:'Filtro',    label:'CICLAR TIPO FILTRO',   colorOn:'#00ffaa' },
+    { id:41, cat:'Filtro',    label:'CUTOFF +',             colorOn:'#00ff88' },
+    { id:42, cat:'Filtro',    label:'CUTOFF -',             colorOn:'#ff0044' },
+    { id:43, cat:'Filtro',    label:'RESONANCIA +',         colorOn:'#00ff88' },
+    { id:44, cat:'Filtro',    label:'RESONANCIA -',         colorOn:'#ff0044' },
+    { id:50, cat:'Mute',      label:'MUTEAR TODO',          colorOn:'#ff2222' },
+    { id:51, cat:'Mute',      label:'DESMUTEAR TODO',       colorOn:'#22ff22' },
+    { id:60, cat:'Patrón',    label:'LONGITUD 16/32/64',    colorOn:'#aa00ff' },
+    { id:61, cat:'Patrón',    label:'IR A PATRÓN 1',        colorOn:'#00ffff' },
+    { id:62, cat:'Patrón',    label:'IR A PATRÓN 2',        colorOn:'#00ffcc' },
+    { id:63, cat:'Patrón',    label:'IR A PATRÓN 3',        colorOn:'#00ccff' },
+    { id:64, cat:'Patrón',    label:'IR A PATRÓN 4',        colorOn:'#0088ff' },
+    { id:65, cat:'Patrón',    label:'IR A PATRÓN 5',        colorOn:'#4400ff' },
+    { id:66, cat:'Patrón',    label:'IR A PATRÓN 6',        colorOn:'#8800ff' },
+    { id:67, cat:'Patrón',    label:'IR A PATRÓN 7',        colorOn:'#cc00ff' },
+    { id:68, cat:'Patrón',    label:'IR A PATRÓN 8',        colorOn:'#ff00ff' },
+    // Live Pads
+    { id:70, cat:'Live Pads', label:'LIVE PAD 1',           colorOn:'#00ff44' },
+    { id:71, cat:'Live Pads', label:'LIVE PAD 2',           colorOn:'#00ff44' },
+    { id:72, cat:'Live Pads', label:'LIVE PAD 3',           colorOn:'#00ff44' },
+    { id:73, cat:'Live Pads', label:'LIVE PAD 4',           colorOn:'#00ff44' },
+    { id:74, cat:'Live Pads', label:'LIVE PAD 5',           colorOn:'#00ff44' },
+    { id:75, cat:'Live Pads', label:'LIVE PAD 6',           colorOn:'#00ff44' },
+    { id:76, cat:'Live Pads', label:'LIVE PAD 7',           colorOn:'#00ff44' },
+    { id:77, cat:'Live Pads', label:'LIVE PAD 8',           colorOn:'#00ff44' },
+    { id:78, cat:'Live Pads', label:'LIVE PAD 9',           colorOn:'#00ff44' },
+    { id:79, cat:'Live Pads', label:'LIVE PAD 10',          colorOn:'#00ff44' },
+    { id:80, cat:'Live Pads', label:'LIVE PAD 11',          colorOn:'#00ff44' },
+    { id:81, cat:'Live Pads', label:'LIVE PAD 12',          colorOn:'#00ff44' },
+    { id:82, cat:'Live Pads', label:'LIVE PAD 13',          colorOn:'#00ff44' },
+    { id:83, cat:'Live Pads', label:'LIVE PAD 14',          colorOn:'#00ff44' },
+    { id:84, cat:'Live Pads', label:'LIVE PAD 15',          colorOn:'#00ff44' },
+    { id:85, cat:'Live Pads', label:'LIVE PAD 16',          colorOn:'#00ff44' },
+    // XTRA Pads
+    { id:90, cat:'XTRA Pads', label:'XTRA PAD 1',           colorOn:'#ff6600' },
+    { id:91, cat:'XTRA Pads', label:'XTRA PAD 2',           colorOn:'#ff6600' },
+    { id:92, cat:'XTRA Pads', label:'XTRA PAD 3',           colorOn:'#ff6600' },
+    { id:93, cat:'XTRA Pads', label:'XTRA PAD 4',           colorOn:'#ff6600' },
+    { id:94, cat:'XTRA Pads', label:'XTRA PAD 5',           colorOn:'#ff6600' },
+    { id:95, cat:'XTRA Pads', label:'XTRA PAD 6',           colorOn:'#ff6600' },
+    { id:96, cat:'XTRA Pads', label:'XTRA PAD 7',           colorOn:'#ff6600' },
+    { id:97, cat:'XTRA Pads', label:'XTRA PAD 8',           colorOn:'#ff6600' },
+];
+
+/** Construye el <select> de funciones agrupadas por categoría */
+function _buildFuncSelect(btnIdx, selectedId) {
+    const cats = {};
+    BTN_ACTIONS.forEach(a => {
+        if (!cats[a.cat]) cats[a.cat] = [];
+        cats[a.cat].push(a);
+    });
+    let html = `<select class="btncfg-func-select" id="btnfunc-${btnIdx}">`;    Object.keys(cats).forEach(cat => {
+        html += cat === '—' ? '' : `<optgroup label="${cat}">`;
+        cats[cat].forEach(a => {
+            html += `<option value="${a.id}"${a.id===selectedId?' selected':''}>${a.label}</option>`;
+        });
+        html += cat === '—' ? '' : `</optgroup>`;
+    });
+    html += `</select>`;
+    return html;
+}
+
+/** Convierte color uint32 (0xRRGGBB) a hex string '#rrggbb' */
+function _numToHex(n) {
+    return '#' + ('000000' + (n >>> 0).toString(16)).slice(-6);
+}
+
+/** Convierte '#rrggbb' a uint32 */
+function _hexToNum(h) {
+    return parseInt(h.replace('#',''), 16);
+}
+
+/** Renderiza las 4 tarjetas en #btnCfgGrid */
+function renderButtonsTab(buttons) {
+    const grid = document.getElementById('btnCfgGrid');
+    if (!grid) return;
+    const BTN_NAMES = ['BTN 0', 'BTN 1', 'BTN 2', 'BTN 3'];
+    let html = '';
+    for (let i = 0; i < 4; i++) {
+        const cfg      = (buttons && buttons[i]) ? buttons[i] : { funcId:0, label:`BTN ${i}` };
+        const funcId   = cfg.funcId !== undefined ? cfg.funcId : 0;
+        const labelVal = cfg.label || BTN_NAMES[i];
+        html += `
+        <div class="btncfg-card" id="btncfg-card-${i}">
+            <div class="btncfg-card-header">
+                <span class="btncfg-num">${i}</span>
+                <strong>BOTÓN ${i}</strong>
+            </div>
+            <label class="btncfg-label-row">
+                <span>Etiqueta</span>
+                <input type="text" class="btncfg-label-input" id="btnlabel-${i}" maxlength="19" value="${labelVal}">
+            </label>
+            <label class="btncfg-label-row">
+                <span>Función</span>
+                ${_buildFuncSelect(i, funcId)}
+            </label>
+        </div>`;
+    }
+    grid.innerHTML = html;
+}
+
+/** Carga configuración desde /api/buttons y renderiza */
+async function loadButtonsConfig() {
+    try {
+        const resp = await fetch('/api/buttons');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        renderButtonsTab(data.buttons || data);
+    } catch(e) {
+        console.warn('buttons config load error:', e);
+        renderButtonsTab(null); // render con defaults
+    }
+}
+
+/** Envía configuración actual al ESP32 */
+async function saveButtonsConfig() {
+    const buttons = [];
+    for (let i = 0; i < 4; i++) {
+        const funcId = parseInt(document.getElementById(`btnfunc-${i}`).value);
+        const label  = document.getElementById(`btnlabel-${i}`).value.trim();
+        buttons.push({ funcId, label });
+    }
+    try {
+        const resp = await fetch('/api/buttons', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ buttons })
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        if (window.showToast) window.showToast('✅ Botones guardados', window.TOAST_TYPES?.SUCCESS, 2000);
+    } catch(e) {
+        console.error('save buttons error:', e);
+        if (window.showToast) window.showToast('❌ Error al guardar', window.TOAST_TYPES?.ERROR, 2500);
+    }
+}
+
+/** Maneja actualización de config de botones via WebSocket */
+function handleBtnConfigUpdate(data) {
+    if (data.buttons && document.getElementById('btnCfgGrid')?.innerHTML) {
+        renderButtonsTab(data.buttons);
     }
 }
 
@@ -967,6 +1222,7 @@ function createPads() {
             <button class="synth-btn" data-pad="${i}" data-engine="1" title="TR-909 synth engine">909</button>
             <button class="synth-btn" data-pad="${i}" data-engine="2" title="TR-505 synth engine">505</button>
             <button class="synth-btn" data-pad="${i}" data-engine="3" title="TB-303 bass synth">303</button>
+            <button class="synth-btn" data-pad="${i}" data-engine="4" title="Wavetable OSC">WT</button>
         `;
         synthStrip.querySelectorAll('.synth-btn').forEach(btn => {
             const stopEvt = (e) => { e.stopPropagation(); };
@@ -1601,6 +1857,14 @@ function setTrackFxCompParam(trackIndex, param, val) {
     if (el) el.textContent = val;
 }
 
+// ── Toggle wrappers: leen el estado en tiempo real → fix bug botón ON→OFF ──
+// El problema: onclick bakeado guarda !false = true, nunca puede deshabilitar
+function toggleTrkFxReverse(t)  { setTrackFxReverse(t, !(trackFxEffects[t] || {}).reverse); }
+function toggleTrkFxStutter(t)  { setTrackFxStutterToggle(t, !(trackFxEffects[t] || {}).stutter); }
+function toggleTrkFxEcho(t)     { const s = trackLiveFxState[t] || {}; setTrackFxEchoActive(t, !((s.echo || {}).active)); }
+function toggleTrkFxFlanger(t)  { const s = trackLiveFxState[t] || {}; setTrackFxFlangerActive(t, !((s.flanger || {}).active)); }
+function toggleTrkFxComp(t)     { const s = trackLiveFxState[t] || {}; setTrackFxCompActive(t, !((s.compressor || {}).active)); }
+
 // ── Step filter/fx dot indicators ────────────────────────────────────────────
 function updateTrackStepDots(track) {
     const filterType = trackFilterState[track] || 0;
@@ -1776,161 +2040,288 @@ function saveSeqFxToShared() {
 window.saveSeqFxToShared = saveSeqFxToShared;
 
 // Track FX functions (same concept but for sequencer tracks)
+/* ================================================================
+ * TRACK FX MODAL — diseño sidebar + panel (reemplaza versión anterior)
+ * ================================================================ */
+let _trkFxModal = null;  // { trackIndex, fxKey }
+
+const TRK_FX_DEFS = [
+    { key:'dist',  icon:'🎸', label:'DISTORTION' },
+    { key:'crush', icon:'📼', label:'BIT CRUSH'  },
+    { key:'rev',   icon:'⏪', label:'REVERSE'    },
+    { key:'pitch', icon:'🎵', label:'PITCH'      },
+    { key:'stut',  icon:'🔁', label:'STUTTER'    },
+    { key:'echo',  icon:'🔊', label:'ECHO/DELAY' },
+    { key:'flng',  icon:'🌀', label:'FLANGER'    },
+    { key:'comp',  icon:'🗜️', label:'COMPRESSOR' },
+];
+
+function _trkFxIsActive(t, key) {
+    const cfx   = trackFxState[t]   || {};
+    const ceff  = trackFxEffects[t] || {};
+    const live  = trackLiveFxState[t] || {};
+    switch(key){
+        case 'dist':  return (cfx.distortion||0) > 0;
+        case 'crush': return (cfx.bitcrush||16) < 16;
+        case 'rev':   return !!ceff.reverse;
+        case 'pitch': return ceff.pitch !== undefined && Math.abs(ceff.pitch-1.0)>0.01;
+        case 'stut':  return !!ceff.stutter;
+        case 'echo':  return !!(live.echo   && live.echo.active);
+        case 'flng':  return !!(live.flanger && live.flanger.active);
+        case 'comp':  return !!(live.compressor && live.compressor.active);
+    }
+    return false;
+}
+
 function showTrackFxPopup(trackIndex) {
     closePadFxPopup();
+    _trkFxModal = { trackIndex, fxKey: 'dist' };
+
     const backdrop = document.createElement('div');
     backdrop.id = 'padFxBackdrop';
     backdrop.className = 'loop-popup-backdrop';
     backdrop.addEventListener('click', closePadFxPopup);
 
-    const cfx   = trackFxState[trackIndex] || {};
-    const ceff  = trackFxEffects[trackIndex] || {};
-    const clive = trackLiveFxState[trackIndex] || {};
-    const dist   = cfx.distortion || 0;
-    const dmode  = cfx.distMode || 0;
-    const bits   = cfx.bitcrush || 16;
-    const rev    = !!ceff.reverse;
-    const pitch  = ceff.pitch !== undefined ? ceff.pitch : 1.0;
-    const stut   = !!ceff.stutter;
-    const stutMs = ceff.stutterMs || 100;
-    const echo   = clive.echo   || { active: false, time: 100, feedback: 40, mix: 50 };
-    const flng   = clive.flanger|| { active: false, rate: 50, depth: 50, feedback: 30 };
-    const comp   = clive.compressor || { active: false, threshold: -20, ratio: 4 };
-
-    const trackName = padNames[trackIndex] || `Track ${trackIndex + 1}`;
     const popup = document.createElement('div');
     popup.id = 'padFxModal';
-    popup.className = 'pad-fx-modal';
+    popup.className = 'trkfx-modal pad-fx-modal';
+
+    const trackName = padNames[trackIndex] || `Track ${trackIndex+1}`;
     popup.innerHTML = `
-        <div class="loop-popup-header">
-            <span class="loop-popup-title">🎚️ TRACK FX: ${trackName}</span>
-            <button class="loop-popup-close" onclick="closePadFxPopup()">&times;</button>
+        <div class="trkfx-header">
+            <span class="trkfx-title">🎚️ TRACK FX — <em>${trackName}</em></span>
+            <button class="trkfx-close" onclick="closePadFxPopup()">✕</button>
         </div>
-        <div class="pad-fx-content">
-            <div class="pad-fx-section">
-                <h4>🎸 DISTORTION</h4>
-                <div class="pad-fx-modes">
-                    ${DISTORTION_MODES.map(m => `
-                        <button class="loop-type-btn pad-fx-mode-btn ${m.id === dmode ? 'active' : ''}"
-                                data-mode="${m.id}" onclick="setTrackFxDistMode(${trackIndex}, ${m.id})">
-                            <span class="loop-type-icon">${m.icon}</span>
-                            <span class="loop-type-name">${m.name}</span>
-                        </button>`).join('')}
-                </div>
-                <div class="pad-fx-slider-row">
-                    <label>Drive <span id="padFxDriveVal">${dist}</span>%</label>
-                    <input type="range" id="padFxDrive" min="0" max="100" value="${dist}"
-                           oninput="setTrackFxDrive(${trackIndex}, this.value)" class="fx-slider">
-                </div>
+        <div class="trkfx-body">
+            <nav class="trkfx-nav" id="trkfxNav">
+                ${TRK_FX_DEFS.map(f => `
+                <button class="trkfx-nav-btn${f.key==='dist'?' trkfx-nav-active':''}"
+                        data-fxkey="${f.key}"
+                        onclick="_trkFxSelectFx(${trackIndex},'${f.key}')">
+                    <span class="trkfx-nav-icon">${f.icon}</span>
+                    <span class="trkfx-nav-label">${f.label}</span>
+                    <span class="trkfx-nav-dot ${_trkFxIsActive(trackIndex,f.key)?'trkfx-dot-on':''}" id="trkfxDot_${f.key}"></span>
+                </button>`).join('')}
+                <button class="trkfx-clear-btn" onclick="clearTrackFxAll(${trackIndex})">🚫 CLEAR</button>
+            </nav>
+            <div class="trkfx-panel" id="trkfxPanel">
+                ${_trkFxPanelHTML(trackIndex,'dist')}
             </div>
-            <div class="pad-fx-section">
-                <h4>📼 BIT CRUSH</h4>
-                <div class="pad-fx-slider-row">
-                    <label>Bits <span id="padFxBitsVal">${bits}</span></label>
-                    <input type="range" id="padFxBits" min="4" max="16" value="${bits}"
-                           oninput="setTrackFxBits(${trackIndex}, this.value)" class="fx-slider">
-                </div>
-            </div>
-            <div class="pad-fx-section">
-                <h4>⏪ REVERSE</h4>
-                <button class="fx-toggle-btn ${rev ? 'fx-on' : ''}" id="trkRevBtn"
-                        onclick="setTrackFxReverse(${trackIndex}, !${rev})">
-                    ${rev ? '⏪ ON' : '▶️ OFF'}
-                </button>
-            </div>
-            <div class="pad-fx-section">
-                <h4>🎵 PITCH SHIFT</h4>
-                <div class="pad-fx-slider-row">
-                    <label>Pitch <span id="trkFxPitchVal">${pitch.toFixed(2)}</span>×</label>
-                    <input type="range" id="trkFxPitch" min="25" max="200" value="${Math.round(pitch*100)}"
-                           oninput="setTrackFxPitch(${trackIndex}, this.value/100)" class="fx-slider">
-                </div>
-                <div class="pad-fx-modes" style="grid-template-columns:repeat(4,1fr);margin-top:6px">
-                    ${[0.25,0.5,0.75,1.0,1.25,1.5,2.0].map(v=>`
-                        <button class="pitch-preset-btn ${Math.abs(pitch-v)<0.01?'active':''}"
-                                onclick="setTrackFxPitch(${trackIndex},${v})">${v}×</button>`).join('')}
-                </div>
-            </div>
-            <div class="pad-fx-section">
-                <h4>🔁 STUTTER</h4>
-                <button class="fx-toggle-btn ${stut ? 'fx-on' : ''}" id="trkStutBtn"
-                        onclick="setTrackFxStutterToggle(${trackIndex}, !${stut})">
-                    ${stut ? '🔁 ON' : '🔁 OFF'}
-                </button>
-                <div class="pad-fx-slider-row" style="margin-top:8px">
-                    <label>Interval <span id="trkFxStutVal">${stutMs}</span>ms</label>
-                    <input type="range" id="trkFxStutMs" min="20" max="500" value="${stutMs}"
-                           oninput="setTrackFxStutterMs(${trackIndex}, this.value)" class="fx-slider">
-                </div>
-            </div>
-            <div class="pad-fx-section">
-                <h4>🔊 ECHO / DELAY</h4>
-                <button class="fx-toggle-btn ${echo.active ? 'fx-on' : ''}" id="trkEchoBtn"
-                        onclick="setTrackFxEchoActive(${trackIndex}, !${echo.active})">
-                    ${echo.active ? '🔊 ON' : '🔊 OFF'}
-                </button>
-                <div class="pad-fx-slider-row" style="margin-top:8px">
-                    <label>Time <span id="trkEchoTimeVal">${echo.time}</span>ms</label>
-                    <input type="range" id="trkEchoTime" min="10" max="200" value="${echo.time}"
-                           oninput="setTrackFxEchoParam(${trackIndex},'time',+this.value)" class="fx-slider">
-                </div>
-                <div class="pad-fx-slider-row">
-                    <label>Feedback <span id="trkEchoFbVal">${echo.feedback}</span>%</label>
-                    <input type="range" id="trkEchoFb" min="0" max="95" value="${echo.feedback}"
-                           oninput="setTrackFxEchoParam(${trackIndex},'feedback',+this.value)" class="fx-slider">
-                </div>
-                <div class="pad-fx-slider-row">
-                    <label>Mix <span id="trkEchoMixVal">${echo.mix}</span>%</label>
-                    <input type="range" id="trkEchoMix" min="0" max="100" value="${echo.mix}"
-                           oninput="setTrackFxEchoParam(${trackIndex},'mix',+this.value)" class="fx-slider">
-                </div>
-            </div>
-            <div class="pad-fx-section">
-                <h4>🌀 FLANGER</h4>
-                <button class="fx-toggle-btn ${flng.active ? 'fx-on' : ''}" id="trkFlngBtn"
-                        onclick="setTrackFxFlangerActive(${trackIndex}, !${flng.active})">
-                    ${flng.active ? '🌀 ON' : '🌀 OFF'}
-                </button>
-                <div class="pad-fx-slider-row" style="margin-top:8px">
-                    <label>Rate <span id="trkFlngRateVal">${flng.rate}</span>%</label>
-                    <input type="range" id="trkFlngRate" min="1" max="100" value="${flng.rate}"
-                           oninput="setTrackFxFlangerParam(${trackIndex},'rate',+this.value)" class="fx-slider">
-                </div>
-                <div class="pad-fx-slider-row">
-                    <label>Depth <span id="trkFlngDepthVal">${flng.depth}</span>%</label>
-                    <input type="range" id="trkFlngDepth" min="0" max="100" value="${flng.depth}"
-                           oninput="setTrackFxFlangerParam(${trackIndex},'depth',+this.value)" class="fx-slider">
-                </div>
-                <div class="pad-fx-slider-row">
-                    <label>Feedback <span id="trkFlngFbVal">${flng.feedback}</span>%</label>
-                    <input type="range" id="trkFlngFb" min="-90" max="90" value="${flng.feedback}"
-                           oninput="setTrackFxFlangerParam(${trackIndex},'feedback',+this.value)" class="fx-slider">
-                </div>
-            </div>
-            <div class="pad-fx-section">
-                <h4>🗜️ COMPRESSOR</h4>
-                <button class="fx-toggle-btn ${comp.active ? 'fx-on' : ''}" id="trkCompBtn"
-                        onclick="setTrackFxCompActive(${trackIndex}, !${comp.active})">
-                    ${comp.active ? '🗜️ ON' : '🗜️ OFF'}
-                </button>
-                <div class="pad-fx-slider-row" style="margin-top:8px">
-                    <label>Threshold <span id="trkCompThVal">${comp.threshold}</span>dB</label>
-                    <input type="range" id="trkCompTh" min="-60" max="0" value="${comp.threshold}"
-                           oninput="setTrackFxCompParam(${trackIndex},'threshold',+this.value)" class="fx-slider">
-                </div>
-                <div class="pad-fx-slider-row">
-                    <label>Ratio <span id="trkCompRatioVal">${comp.ratio}</span>:1</label>
-                    <input type="range" id="trkCompRatio" min="1" max="20" value="${comp.ratio}"
-                           oninput="setTrackFxCompParam(${trackIndex},'ratio',+this.value)" class="fx-slider">
-                </div>
-            </div>
-            <button class="pad-fx-clear-btn" onclick="clearTrackFxAll(${trackIndex})">🚫 CLEAR ALL FX</button>
-        </div>
-    `;
+        </div>`;
+
     document.body.appendChild(backdrop);
     document.body.appendChild(popup);
     requestAnimationFrame(() => { backdrop.classList.add('visible'); popup.classList.add('visible'); });
 }
+
+function _trkFxSelectFx(t, key) {
+    if (!_trkFxModal) return;
+    _trkFxModal.fxKey = key;
+    document.querySelectorAll('.trkfx-nav-btn').forEach(b => {
+        b.classList.toggle('trkfx-nav-active', b.dataset.fxkey === key);
+    });
+    const panel = document.getElementById('trkfxPanel');
+    if (panel) panel.innerHTML = _trkFxPanelHTML(t, key);
+}
+window._trkFxSelectFx = _trkFxSelectFx;
+
+function _trkFxPanelHTML(t, key) {
+    const cfx  = trackFxState[t]   || {};
+    const ceff = trackFxEffects[t] || {};
+    const live = trackLiveFxState[t] || {};
+    const on   = _trkFxIsActive(t, key);
+
+    switch(key) {
+        case 'dist': {
+            const dist  = cfx.distortion || 0;
+            const dmode = cfx.distMode   || 0;
+            return `<div class="trkfx-panel-inner">
+                <div class="trkfx-panel-top">
+                    <span class="trkfx-fx-title">🎸 DISTORTION</span>
+                </div>
+                <div class="trkfx-param-group">
+                    <label>MODO</label>
+                    <div class="trkfx-mode-row">
+                    ${(DISTORTION_MODES||[]).map(m=>`
+                        <button class="trkfx-mode-btn${m.id===dmode?' trkfx-mode-on':''}"
+                                onclick="setTrackFxDistMode(${t},${m.id})">${m.icon}<br><small>${m.name}</small></button>`).join('')}
+                    </div>
+                </div>
+                <div class="trkfx-param-group">
+                    <label>DRIVE <span id="trkfx_distVal">${dist}</span>%</label>
+                    <input type="range" class="trkfx-slider trkfx-slider-dist" id="padFxDrive"
+                           min="0" max="100" value="${dist}"
+                           oninput="document.getElementById('trkfx_distVal').textContent=this.value;setTrackFxDrive(${t},this.value)">
+                </div>
+            </div>`;
+        }
+        case 'crush': {
+            const bits = cfx.bitcrush || 16;
+            return `<div class="trkfx-panel-inner">
+                <div class="trkfx-panel-top">
+                    <span class="trkfx-fx-title">📼 BIT CRUSH</span>
+                </div>
+                <div class="trkfx-param-group">
+                    <label>BITS <span id="trkfx_bitsVal">${bits}</span> bit</label>
+                    <input type="range" class="trkfx-slider trkfx-slider-lofi" id="padFxBits"
+                           min="4" max="16" value="${bits}"
+                           oninput="document.getElementById('trkfx_bitsVal').textContent=this.value;setTrackFxBits(${t},this.value)">
+                </div>
+                <div class="trkfx-hint">${bits===16?'Limpio (sin crush)':bits<=6?'Lo-fi agresivo ⚡':bits<=10?'Lo-fi moderado':'Ligero'}</div>
+            </div>`;
+        }
+        case 'rev': {
+            const rev = !!ceff.reverse;
+            return `<div class="trkfx-panel-inner">
+                <div class="trkfx-panel-top">
+                    <span class="trkfx-fx-title">⏪ REVERSE</span>
+                </div>
+                <button class="trkfx-big-toggle ${rev?'trkfx-big-on':''}" id="trkfx_revBtn"
+                        onclick="toggleTrkFxReverse(${t});_trkFxRefreshDot(${t},'rev')">
+                    ${rev?'⏪ ACTIVADO — ON':'▶️ DESACTIVADO — OFF'}
+                </button>
+                <div class="trkfx-hint">Invierte la reproducción del sample.</div>
+            </div>`;
+        }
+        case 'pitch': {
+            const pitch = ceff.pitch !== undefined ? ceff.pitch : 1.0;
+            return `<div class="trkfx-panel-inner">
+                <div class="trkfx-panel-top">
+                    <span class="trkfx-fx-title">🎵 PITCH SHIFT</span>
+                </div>
+                <div class="trkfx-param-group">
+                    <label>PITCH <span id="trkfx_pitchVal">${pitch.toFixed(2)}</span>×</label>
+                    <input type="range" class="trkfx-slider" id="trkFxPitch"
+                           min="25" max="200" value="${Math.round(pitch*100)}"
+                           oninput="const v=this.value/100;document.getElementById('trkfx_pitchVal').textContent=v.toFixed(2);setTrackFxPitch(${t},v)">
+                </div>
+                <div class="trkfx-presets">
+                    ${[0.25,0.5,0.75,1.0,1.25,1.5,2.0].map(v=>`
+                    <button class="trkfx-preset${Math.abs(pitch-v)<0.01?' trkfx-preset-on':''}"
+                            onclick="setTrackFxPitch(${t},${v});_trkFxSelectFx(${t},'pitch')">${v}×</button>`).join('')}
+                </div>
+            </div>`;
+        }
+        case 'stut': {
+            const stut   = !!ceff.stutter;
+            const stutMs = ceff.stutterMs || 100;
+            return `<div class="trkfx-panel-inner">
+                <div class="trkfx-panel-top">
+                    <span class="trkfx-fx-title">🔁 STUTTER</span>
+                </div>
+                <button class="trkfx-big-toggle ${stut?'trkfx-big-on':''}" id="trkfx_stutBtn"
+                        onclick="toggleTrkFxStutter(${t});_trkFxRefreshDot(${t},'stut')">
+                    ${stut?'🔁 ACTIVADO — ON':'🔁 DESACTIVADO — OFF'}
+                </button>
+                <div class="trkfx-param-group" style="margin-top:14px">
+                    <label>INTERVALO <span id="trkfx_stutVal">${stutMs}</span>ms</label>
+                    <input type="range" class="trkfx-slider" id="trkFxStutMs"
+                           min="20" max="500" value="${stutMs}"
+                           oninput="document.getElementById('trkfx_stutVal').textContent=this.value;setTrackFxStutterMs(${t},+this.value)">
+                </div>
+            </div>`;
+        }
+        case 'echo': {
+            const e = live.echo || { active:false, time:100, feedback:40, mix:50 };
+            return `<div class="trkfx-panel-inner">
+                <div class="trkfx-panel-top">
+                    <span class="trkfx-fx-title">🔊 ECHO / DELAY</span>
+                </div>
+                <button class="trkfx-big-toggle ${e.active?'trkfx-big-on':''}" id="trkfx_echoBtn"
+                        onclick="toggleTrkFxEcho(${t});_trkFxRefreshDot(${t},'echo')">
+                    ${e.active?'🔊 ACTIVADO — ON':'🔊 DESACTIVADO — OFF'}
+                </button>
+                <div class="trkfx-param-group">
+                    <label>TIEMPO <span id="trkfx_echoTime">${e.time}</span>ms</label>
+                    <input type="range" class="trkfx-slider trkfx-slider-echo" id="trkEchoTime"
+                           min="10" max="2000" value="${e.time}"
+                           oninput="document.getElementById('trkfx_echoTime').textContent=this.value;setTrackFxEchoParam(${t},'time',+this.value)">
+                </div>
+                <div class="trkfx-param-group">
+                    <label>FEEDBACK <span id="trkfx_echoFb">${e.feedback}</span>%</label>
+                    <input type="range" class="trkfx-slider trkfx-slider-echo" id="trkEchoFb"
+                           min="0" max="95" value="${e.feedback}"
+                           oninput="document.getElementById('trkfx_echoFb').textContent=this.value;setTrackFxEchoParam(${t},'feedback',+this.value)">
+                </div>
+                <div class="trkfx-param-group">
+                    <label>MIX <span id="trkfx_echoMix">${e.mix}</span>%</label>
+                    <input type="range" class="trkfx-slider trkfx-slider-echo" id="trkEchoMix"
+                           min="0" max="100" value="${e.mix}"
+                           oninput="document.getElementById('trkfx_echoMix').textContent=this.value;setTrackFxEchoParam(${t},'mix',+this.value)">
+                </div>
+            </div>`;
+        }
+        case 'flng': {
+            const f = live.flanger || { active:false, rate:50, depth:50, feedback:30 };
+            return `<div class="trkfx-panel-inner">
+                <div class="trkfx-panel-top">
+                    <span class="trkfx-fx-title">🌀 FLANGER</span>
+                </div>
+                <button class="trkfx-big-toggle ${f.active?'trkfx-big-on':''}" id="trkfx_flngBtn"
+                        onclick="toggleTrkFxFlanger(${t});_trkFxRefreshDot(${t},'flng')">
+                    ${f.active?'🌀 ACTIVADO — ON':'🌀 DESACTIVADO — OFF'}
+                </button>
+                <div class="trkfx-param-group">
+                    <label>RATE (LFO) <span id="trkfx_flngRate">${f.rate}</span>%</label>
+                    <input type="range" class="trkfx-slider trkfx-slider-flanger" id="trkFlngRate"
+                           min="1" max="100" value="${f.rate}"
+                           oninput="document.getElementById('trkfx_flngRate').textContent=this.value;setTrackFxFlangerParam(${t},'rate',+this.value)">
+                </div>
+                <div class="trkfx-param-group">
+                    <label>PROFUNDIDAD <span id="trkfx_flngDepth">${f.depth}</span>%</label>
+                    <input type="range" class="trkfx-slider trkfx-slider-flanger" id="trkFlngDepth"
+                           min="0" max="100" value="${f.depth}"
+                           oninput="document.getElementById('trkfx_flngDepth').textContent=this.value;setTrackFxFlangerParam(${t},'depth',+this.value)">
+                </div>
+                <div class="trkfx-param-group">
+                    <label>FEEDBACK <span id="trkfx_flngFb">${f.feedback}</span>%</label>
+                    <input type="range" class="trkfx-slider trkfx-slider-flanger" id="trkFlngFb"
+                           min="-90" max="90" value="${f.feedback}"
+                           oninput="document.getElementById('trkfx_flngFb').textContent=this.value;setTrackFxFlangerParam(${t},'feedback',+this.value)">
+                </div>
+            </div>`;
+        }
+        case 'comp': {
+            const c = live.compressor || { active:false, threshold:-20, ratio:4 };
+            return `<div class="trkfx-panel-inner">
+                <div class="trkfx-panel-top">
+                    <span class="trkfx-fx-title">🗜️ COMPRESSOR</span>
+                </div>
+                <button class="trkfx-big-toggle ${c.active?'trkfx-big-on':''}" id="trkfx_compBtn"
+                        onclick="toggleTrkFxComp(${t});_trkFxRefreshDot(${t},'comp')">
+                    ${c.active?'🗜️ ACTIVADO — ON':'🗜️ DESACTIVADO — OFF'}
+                </button>
+                <div class="trkfx-param-group">
+                    <label>UMBRAL <span id="trkfx_compTh">${c.threshold}</span>dB</label>
+                    <input type="range" class="trkfx-slider trkfx-slider-compressor" id="trkCompTh"
+                           min="-60" max="0" value="${c.threshold}"
+                           oninput="document.getElementById('trkfx_compTh').textContent=this.value;setTrackFxCompParam(${t},'threshold',+this.value)">
+                </div>
+                <div class="trkfx-param-group">
+                    <label>RATIO <span id="trkfx_compRatio">${c.ratio}</span>:1</label>
+                    <input type="range" class="trkfx-slider trkfx-slider-compressor" id="trkCompRatio"
+                           min="1" max="20" value="${c.ratio}"
+                           oninput="document.getElementById('trkfx_compRatio').textContent=this.value;setTrackFxCompParam(${t},'ratio',+this.value)">
+                </div>
+            </div>`;
+        }
+    }
+    return '<div class="trkfx-panel-inner"><p style="color:#666">Selecciona un FX</p></div>';
+}
+window._trkFxPanelHTML = _trkFxPanelHTML;
+
+/* Actualiza el dot de estado en la nav y el botón big-toggle */
+function _trkFxRefreshDot(t, key) {
+    const dot = document.getElementById('trkfxDot_' + key);
+    if (dot) dot.className = 'trkfx-nav-dot ' + (_trkFxIsActive(t,key) ? 'trkfx-dot-on' : '');
+    /* Refrescar el panel actual para que el big-toggle cambie de color */
+    setTimeout(() => {
+        const panel = document.getElementById('trkfxPanel');
+        if (panel && _trkFxModal && _trkFxModal.fxKey === key)
+            panel.innerHTML = _trkFxPanelHTML(t, key);
+    }, 30);
+}
+window._trkFxRefreshDot = _trkFxRefreshDot;
 
 function setTrackFxDistMode(trackIndex, mode) {
     if (!trackFxState[trackIndex]) trackFxState[trackIndex] = {};
@@ -2341,10 +2732,18 @@ function refreshGlobalKitButtons() {
 
 function setSynthEngineExact(padIndex, engine, notifyBackend = true, refreshGlobal = true) {
     if (padIndex < 0 || padIndex >= 16) return;
-    const normalizedEngine = (typeof engine === 'number' && engine >= 0 && engine <= 3) ? engine : -1;
+    const normalizedEngine = (typeof engine === 'number' && engine >= 0 && engine <= 4) ? engine : -1;
     if (padSynthEngine[padIndex] === normalizedEngine) {
         if (refreshGlobal) refreshGlobalKitButtons();
         return;
+    }
+
+    // BUG FIX: si el pad estaba en modo 303, enviar NoteOff antes de cambiar
+    // para evitar que el acid bass quede en bucle infinito.
+    if (padSynthEngine[padIndex] === 3 && normalizedEngine !== 3) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ cmd: 'synth303NoteOff' }));
+        }
     }
 
     padSynthEngine[padIndex] = normalizedEngine;
@@ -2382,7 +2781,14 @@ function setSynthEngine(padIndex, engine) {
 }
 
 function applyGlobalKitToAllPads(engine) {
-    const normalizedEngine = (typeof engine === 'number' && engine >= 0 && engine <= 3) ? engine : -1;
+    const normalizedEngine = (typeof engine === 'number' && engine >= 0 && engine <= 4) ? engine : -1;
+    // BUG FIX: si algún pad estaba en 303, parar la nota antes de cambiar kit
+    const any303Active = padSynthEngine.some(e => e === 3);
+    if (any303Active && normalizedEngine !== 3) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ cmd: 'synth303NoteOff' }));
+        }
+    }
     sendWebSocket({ cmd: 'applyKitToAllPads', engine: normalizedEngine });
     for (let pad = 0; pad < 16; pad++) {
         setSynthEngineExact(pad, normalizedEngine, false, false);
@@ -4643,24 +5049,58 @@ function switchTab(tabId) {
     
     // Guardar preferencia
     localStorage.setItem('currentTab', tabId);
+
+    // Hooks de carga por tab
+    if (tabId === 'buttons') loadButtonsConfig();
 }
 
 // Sample Selector Functions
 function showSampleSelector(padIndex, family) {
+    // Cerrar modal anterior si ya hay uno abierto
+    const existing = document.querySelector('.sample-modal');
+    if (existing) existing.remove();
+
     sampleSelectorContext = { padIndex, family };
-    // Solicitar lista de samples bajo demanda
+
+    // Feedback visual inmediato en el botón — muestra spinner mientras espera WS
+    const loadingBtn = document.querySelector(`.pad-select-btn[data-pad="${padIndex}"]`);
+    if (loadingBtn) {
+        loadingBtn._origHTML = loadingBtn.innerHTML;
+        loadingBtn.innerHTML = '⏳';
+        loadingBtn.disabled = true;
+        sampleSelectorContext.loadingBtn = loadingBtn;
+    }
+
     sendWebSocket({
         cmd: 'getSamples',
         family: family,
         pad: padIndex
     });
+
+    // Safety timeout: restaura botón a los 3s si no llega respuesta
+    setTimeout(() => {
+        if (sampleSelectorContext && sampleSelectorContext.loadingBtn) {
+            const b = sampleSelectorContext.loadingBtn;
+            if (b._origHTML) b.innerHTML = b._origHTML;
+            b.disabled = false;
+            delete sampleSelectorContext.loadingBtn;
+        }
+    }, 3000);
 }
 
 function displaySampleList(data) {
     const padIndex = data.pad;
     const family = data.family;
     const samples = data.samples;
-    
+
+    // Restaurar botón de loading en cualquier camino de retorno
+    if (sampleSelectorContext && sampleSelectorContext.loadingBtn) {
+        const b = sampleSelectorContext.loadingBtn;
+        if (b._origHTML) b.innerHTML = b._origHTML;
+        b.disabled = false;
+        delete sampleSelectorContext.loadingBtn;
+    }
+
     if (!samples || samples.length === 0) {
         if (sampleSelectorContext && sampleSelectorContext.family === family) {
             alert(`No samples found for ${family}`);
@@ -6652,9 +7092,8 @@ function showXtraPadPicker() {
                     item.querySelector('button').addEventListener('click', (e) => {
                         e.stopPropagation();
                         sendWebSocket({ cmd: 'loadXtraSample', filename: sample.name, pad: freeSlot });
-                        createXtraPad(freeSlot, sample.name.replace(/\.wav$/i, ''));
+                        createXtraPad(freeSlot, sample.name.replace(/\.wav$/i, ''), true); // showLoading=true
                         modal.remove();
-                        if (window.showToast) window.showToast(`✅ ${sample.name} → XTRA ${freeSlot - 15}`, window.TOAST_TYPES?.SUCCESS, 2000);
                     });
                     listEl.appendChild(item);
                 });
@@ -6701,11 +7140,10 @@ function showXtraPadPicker() {
                 .then(r => r.json())
                 .then(data => {
                     if (data.success) {
-                        if (window.showToast) window.showToast(`✅ ${file.name} → XTRA ${slot - 15}`, window.TOAST_TYPES?.SUCCESS, 2000);
-                        setTimeout(() => {
-                            createXtraPad(slot, file.name.replace(/\.wav$/i, ''));
-                            modal.remove();
-                        }, 300);
+                        // Para upload, el pad se crea aquí en estado loading
+                        // xtraReady llegará cuando la Daisy confirme (vía sampleLoaded/xtraReady WS)
+                        createXtraPad(slot, file.name.replace(/\.wav$/i, ''), true);
+                        modal.remove();
                     } else {
                         if (window.showToast) window.showToast(`❌ ${data.message || 'Error'}`, window.TOAST_TYPES?.ERROR, 3000);
                         uploadMsg.textContent = 'Click para subir WAV';
@@ -6736,7 +7174,7 @@ function showXtraPadPicker() {
     document.body.appendChild(modal);
 }
 
-function createXtraPad(padIndex, label) {
+function createXtraPad(padIndex, label, showLoading = false) {
     const grid = document.getElementById('padsXtraGrid');
     if (!grid) return;
 
@@ -6744,12 +7182,13 @@ function createXtraPad(padIndex, label) {
     const displayName = label || `XTRA ${padIndex - 15}`;
 
     const padEl = document.createElement('div');
-    padEl.className = 'pad-xtra';
+    padEl.className = 'pad-xtra' + (showLoading ? ' xtra-loading' : '');
     padEl.dataset.xtraId = id;
     padEl.dataset.padIndex = padIndex;
     padEl.innerHTML = `
         <div class="pad-xtra-name">${displayName}</div>
         <div class="pad-xtra-sample" title="Slot ${padIndex - 15}">XTRA ${padIndex - 15}</div>
+        ${showLoading ? '<div class="xtra-transfer-overlay"><span class="xtra-transfer-spinner"></span><span>Cargando a Daisy...</span></div>' : ''}
         <div class="pad-xtra-controls">
             <button class="pad-xtra-btn xtra-loop" title="Loop">🔁</button>
             <button class="pad-xtra-btn xtra-filter" title="Filter">F</button>
@@ -7572,7 +8011,7 @@ function lfoUpdateCard(pad) {
         wrap.className = 'lfo-scope-wrap';
         wrap.id = `lfoScopeWrap${i}`;
         wrap.style.display = 'none';
-        wrap.innerHTML = `<span class="lfo-scope-label">${names[i]}</span><canvas class="lfo-scope-canvas" id="lfoScope${i}" width="180" height="60"></canvas>`;
+        wrap.innerHTML = `<span class="lfo-scope-label">${names[i]}</span><canvas class="lfo-scope-canvas" id="lfoScope${i}" width="300" height="90"></canvas>`;
         container.appendChild(wrap);
     }
 })();

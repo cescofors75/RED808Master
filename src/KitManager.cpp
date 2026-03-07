@@ -18,19 +18,16 @@ KitManager::~KitManager() {
 }
 
 bool KitManager::begin() {
-  Serial.println("Initializing Kit Manager...");
   
   // Scan for available kits
   int count = scanKits();
   
   if (count > 0) {
-    Serial.printf("Found %d kits\n", count);
     
     // Load first kit by default
     loadKit(0);
     return true;
   } else {
-    Serial.println("No kits found!");
     return false;
   }
 }
@@ -53,7 +50,6 @@ int KitManager::scanKits() {
   for (int i = 0; i < 16 && kit.sampleCount < MAX_SAMPLES_PER_KIT; i++) {
     File dir = LittleFS.open(folders[i]);
     if (!dir || !dir.isDirectory()) {
-      Serial.printf("  ⚠️  Carpeta %s no encontrada\n", folders[i]);
       continue;
     }
     
@@ -74,7 +70,6 @@ int KitManager::scanKits() {
         strncpy(kit.samples[kit.sampleCount].filename, fullPath, 63);
         kit.sampleCount++;
         
-        Serial.printf("  ✓ Track %02d: %s\n", i, fullPath);
         found = true;
       }
       
@@ -82,15 +77,12 @@ int KitManager::scanKits() {
     }
     
     if (!found) {
-      Serial.printf("  ⚠️  Track %02d (%s): sin samples\n", i, folders[i]);
     }
   }
   
   if (kit.sampleCount > 0) {
     kitCount = 1;
-    Serial.printf("\n✓ Kit '%s' con %d tracks cargados\n", kit.name, kit.sampleCount);
   } else {
-    Serial.println("❌ No se encontraron samples");
   }
   
   return kitCount;
@@ -98,14 +90,12 @@ int KitManager::scanKits() {
 
 bool KitManager::loadKit(int kitIndex) {
   if (kitIndex < 0 || kitIndex >= kitCount) {
-    Serial.printf("Error: Kit %d no existe\n", kitIndex);
     return false;
   }
   
   currentKit = kitIndex;
   Kit& kit = kits[kitIndex];
   
-  Serial.printf("\n========== CARGANDO KIT %d: %s ==========\n", kitIndex, kit.name);
   
   // Unload current samples
   sampleManager.unloadAll();
@@ -116,17 +106,13 @@ bool KitManager::loadKit(int kitIndex) {
     int padIndex = kit.samples[i].padIndex;
     const char* filename = kit.samples[i].filename;
     
-    Serial.printf("  Pad %d -> %s\n", padIndex, filename);
     
     if (sampleManager.loadSample(filename, padIndex)) {
       loaded++;
-      Serial.printf("    OK\n");
     } else {
-      Serial.printf("    ERROR cargando sample!\n");
     }
   }
   
-  Serial.printf("========== KIT CARGADO: %d/%d samples ==========\n\n", loaded, kit.sampleCount);
   
   return loaded > 0;
 }
@@ -143,17 +129,8 @@ void KitManager::printKitInfo(int kitIndex) {
   
   Kit& kit = kits[kitIndex];
   
-  Serial.println("========================================");
-  Serial.printf("Kit %d: %s\n", kitIndex, kit.name);
-  Serial.println("----------------------------------------");
-  Serial.printf("Samples: %d\n", kit.sampleCount);
-  Serial.println("----------------------------------------");
   
   for (int i = 0; i < kit.sampleCount; i++) {
-    Serial.printf("  Pad %2d: %s\n", 
-                  kit.samples[i].padIndex, 
-                  kit.samples[i].filename);
   }
   
-  Serial.println("========================================");
 }

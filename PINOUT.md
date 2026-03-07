@@ -19,13 +19,13 @@
 | Bit Clock | 42 | PCM5102A | BCK | Clock señal |
 | Word Select | 41 | PCM5102A | LRCK (LCK) | Left/Right channel |
 | Data Out | 2 | PCM5102A | DIN | Audio data |
-| **SPI Display (ST7789)** |
-| Chip Select | 10 | ST7789 | CS | SPI select |
-| Data/Command | 11 | ST7789 | DC | D/C control |
-| Reset | 12 | ST7789 | RST | Hardware reset |
-| MOSI | 13 | ST7789 | SDA | SPI data |
-| Clock | 14 | ST7789 | SCL | SPI clock |
-| Backlight | 15 | ST7789 | BL | PWM backlight |
+| **Botones Físicos con LED RGB (WS2812B)** |
+| BTN PLAY/PAUSE | 10 | Táctil+LED RGB | Terminal | Pull-up interno |
+| BTN MULTIVIEW | 11 | Táctil+LED RGB | Terminal | Pull-up interno |
+| BTN NEXT PATTERN | 12 | Táctil+LED RGB | Terminal | Pull-up interno |
+| BTN PREV PATTERN | 13 | Táctil+LED RGB | Terminal | Pull-up interno |
+| LED DATA (WS2812B) | 14 | LED RGB x4 | DIN cadena | Dato NeoPixel |
+| (libre) | 15 | — | — | Disponible |
 | **Botons Navegació** |
 | Button Up | 16 | Botón | Terminal | Pull-up intern |
 | Button Down | 17 | Botón | Terminal | Pull-up intern |
@@ -89,25 +89,31 @@ ROUT  ───→  Amplificador Right
 
 ---
 
-### 2️⃣ Display ST7789 240x240 (SPI)
+### 2️⃣ Botones Físicos con LED RGB WS2812B
 
 ```
-ESP32-S3           ST7789
-========           =======
-GPIO 10    ───→    CS (Chip Select)
-GPIO 11    ───→    DC (Data/Command)
-GPIO 12    ───→    RST (Reset)
-GPIO 13    ───→    SDA / MOSI (Data)
-GPIO 14    ───→    SCL / SCLK (Clock)
-GPIO 15    ───→    BL (Backlight) - Opcional PWM
-3.3V       ───→    VCC
-GND        ───→    GND
+ESP32-S3           Botón+LED
+========           =========
+GPIO 10    ────    BTN PLAY/PAUSE  (switch → GND, INPUT_PULLUP)
+GPIO 11    ────    BTN MULTIVIEW   (switch → GND, INPUT_PULLUP)
+GPIO 12    ────    BTN NEXT PAT    (switch → GND, INPUT_PULLUP)
+GPIO 13    ────    BTN PREV PAT    (switch → GND, INPUT_PULLUP)
+GPIO 14    ───→    DIN (datos WS2812B — cadena de 4 LEDs)
+3.3V       ───→    VCC botones / VDD LEDs
+GND        ───→    GND común
 ```
 
-**Notas:**
-- SPI Frequency: 40 MHz
-- Backlight: PWM para ajustar brillo (0-255)
-- Si tu módulo tiene backlight fijo, conecta BL a 3.3V directamente
+**Comportamiento LED por defecto:**
+- 🔴 Rojo — parado / inactivo (todos al arrancar)
+- 🟢 Verde — PLAY/PAUSE cuando está reproduciendo
+- 🩵 Cian — MULTIVIEW cuando está activo
+- 🟠 Naranja — destello breve al pulsar NEXT o PREV
+
+**Tipo de LED:** WS2812B (NeoPixel) — 4 píxeles en cadena.
+Brillo predeterminado: 80/255 (≈31%) para no deslumbrar.
+
+**Tipo de botón:** táctil normalmente abierto (NO).
+Un terminal al GPIO, el otro a GND. El firmware usa INPUT_PULLUP.
 
 ---
 

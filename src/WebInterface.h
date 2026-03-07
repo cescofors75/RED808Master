@@ -14,6 +14,7 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <map>
+#include <functional>
 #include "MIDIController.h"
 
 #define UDP_PORT 8888  // Puerto para recibir comandos UDP
@@ -57,6 +58,9 @@ public:
   // Generic text broadcast (for event bridge)
   void broadcastRaw(const char* json);
   
+  // Callback: llamado cuando se recibe POST /api/buttons con la config JSON
+  void setBtnConfigCallback(std::function<void(const String&)> cb) { _btnConfigCb = cb; }
+  
   String getIP();
   
 private:
@@ -75,6 +79,9 @@ private:
   
   // MIDI Controller reference
   MIDIController* midiController;
+  
+  // Callback para config de botones físicos
+  std::function<void(const String&)> _btnConfigCb;
   
   // Tracking de clientes UDP
   std::map<String, UdpClient> udpClients;

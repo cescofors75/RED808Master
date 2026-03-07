@@ -173,9 +173,12 @@ typedef struct __attribute__((packed)) {
 
 // ═══════════════════════════════════════════════════════
 // COMMANDS: PER-PAD LFO (0x80 - 0x8F)
-//   Each pad has its own LFO synced to BPM.
-//   LFOs live in ESP32 — they modulate existing params
-//   and send the result via SPI to the Daisy.
+//   NOTA ARQUITECTURAL: Estos command codes son INTERNOS del ESP32.
+//   NUNCA se envían por SPI a la Daisy Seed.
+//   Los LFOs se computan en LFOEngine.cpp; su resultado se aplica
+//   modulando parámetros existentes (ej: pitch → CMD_TRACK_PITCH 0x61,
+//   pan → CMD_TRACK_PAN 0x60, vol → CMD_TRACK_VOLUME 0x10).
+//   Estos defines SOLO existen para la UI y el serializador de preset.
 // ═══════════════════════════════════════════════════════
 #define CMD_PAD_LFO_ACTIVE    0x80  // [pad, on/off]
 #define CMD_PAD_LFO_WAVE      0x81  // [pad, waveform] 0=sin 1=tri 2=sq 3=saw 4=s&h
@@ -237,6 +240,9 @@ typedef struct __attribute__((packed)) {
 #define SYNTH_ENGINE_909   1
 #define SYNTH_ENGINE_505   2
 #define SYNTH_ENGINE_303   3
+#define SYNTH_ENGINE_WTOSC 4  // Wavetable Oscillator
+#define SYNTH_ENGINE_SH101 5  // I1: Roland SH-101 monosynth
+#define SYNTH_ENGINE_FM2OP 6  // I2: 2-operator FM Yamaha-style
 
 // TR-808 instrument IDs (engine=0)
 #define SYNTH_808_KICK     0
@@ -311,6 +317,78 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
     uint8_t  engineMask;  // bit0=808, bit1=909, bit2=505, bit3=303  (default 0x0F)
 } SynthActivePayload;
+
+// ═══════════════════════════════════════════════════════
+// COMMANDS: DAISY SEQUENCER (0xD0 - 0xDF)
+// ═══════════════════════════════════════════════════════
+#define CMD_DSQ_UPLOAD_TRACK    0xD0  // Upload full track steps for one pattern
+#define CMD_DSQ_SET_STEP        0xD1  // Set/update a single step
+#define CMD_DSQ_CONTROL         0xD2  // 0=stop, 1=play, 2=reset
+#define CMD_DSQ_SELECT_PATTERN  0xD3  // Select active pattern (0-7)
+#define CMD_DSQ_SET_LENGTH      0xD4  // Set pattern length (16/32/64)
+#define CMD_DSQ_SET_MUTE        0xD5  // Mute/unmute a track
+#define CMD_DSQ_GET_POS         0xD6  // Query current step/pattern (→ response)
+#define CMD_DSQ_SET_SWING       0xD7  // Set swing amount (0-100)
+#define CMD_DSQ_SET_PARAM_LOCK  0xD8  // Set per-step parameter locks
+#define CMD_DSQ_SET_TRACK_ENGINE 0xD9  // [track(1), engine(1)]  -1=sampler 0=808 1=909 2=505 3=303
+#define CMD_DSQ_SET_TRACK_SWING  0xDA  // E4: [track(1), swing 0-100(1)] per-track swing override
+#define CMD_DSQ_SET_HUMANIZE     0xDB  // E2: [timingMs(1), velocityAmt(1)] humanization
+
+// ─── DSQ Step packet (4 bytes) – used in upload track ───
+#define DSQ_PATTERNS    8
+#define DSQ_TRACKS     16
+#define DSQ_MAX_STEPS  64
+
+typedef struct __attribute__((packed)) {
+    uint8_t  active;       // 1 = step is active
+    uint8_t  velocity;     // 1-127 (0 = use track default)
+    uint8_t  noteLenDiv;   // note length divisor: 0=full step, 2=1/2, 4=1/4…
+    uint8_t  probability;  // 0-100 (100 = always fire)
+} DsqStepPkt;
+
+// CMD_DSQ_UPLOAD_TRACK (0xD0)  payload: 4 + stepCount×4 bytes (max 260)
+typedef struct __attribute__((packed)) {
+    uint8_t   pattern;     // 0-7
+    uint8_t   track;       // 0-15
+    uint8_t   stepCount;   // 16/32/64
+    uint8_t   reserved;
+    DsqStepPkt steps[DSQ_MAX_STEPS];  // only first stepCount entries are sent
+} DsqUploadTrackPayload;
+
+// CMD_DSQ_SET_STEP (0xD1)  8 bytes
+typedef struct __attribute__((packed)) {
+    uint8_t  pattern;
+    uint8_t  track;
+    uint8_t  step;
+    uint8_t  active;
+    uint8_t  velocity;
+    uint8_t  noteLenDiv;
+    uint8_t  probability;
+    uint8_t  reserved;
+} DsqSetStepPayload;
+
+// CMD_DSQ_SET_PARAM_LOCK (0xD8)  12 bytes
+typedef struct __attribute__((packed)) {
+    uint8_t  pattern;
+    uint8_t  track;
+    uint8_t  step;
+    uint8_t  cutoffEn;      // 1 = apply per-step cutoff
+    uint8_t  cutoffHi;      // cutoff Hz high byte
+    uint8_t  cutoffLo;      // cutoff Hz low byte
+    uint8_t  reverbEn;      // 1 = apply per-step reverb send
+    uint8_t  reverbSend;    // reverb send 0-100
+    uint8_t  volEn;         // 1 = apply per-step volume
+    uint8_t  volume;        // volume 0-127
+    uint8_t  reserved[2];
+} DsqSetParamLockPayload;
+
+// CMD_DSQ_GET_POS response (4 bytes)
+typedef struct __attribute__((packed)) {
+    uint8_t  currentStep;    // 0-63
+    uint8_t  currentPattern; // 0-7
+    uint8_t  playing;        // 1 = running
+    uint8_t  reserved;
+} DsqPosResponse;
 
 // ═══════════════════════════════════════════════════════
 // COMMANDS: STATUS / QUERY (0xE0 - 0xEF)
@@ -763,7 +841,8 @@ typedef struct __attribute__((packed)) {
     uint8_t  sdPresent;          // byte 8: SD card present (0/1)
     uint8_t  xtraPadsMask;       // byte 9: bitmask pads 16-23 (XTRA)
     uint8_t  evtCount;           // byte 10: pending notification events
-    uint8_t  reserved1[3];       // bytes 11-13
+    uint16_t spiErrCnt;          // bytes 11-12: Daisy-side CRC/parse error count
+    uint8_t  reserved1;          // byte 13
     char     currentKitName[32]; // bytes 14-45: null-terminated kit name
     uint8_t  totalPadsLoaded;    // byte 46: total pads loaded count
     uint32_t totalBytesUsed;     // bytes 47-50: total bytes in SDRAM

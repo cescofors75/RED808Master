@@ -1,0 +1,368 @@
+Processing esp32-s3-devkitc-1 (platform: espressif32; board: esp32-s3-devkitc-1; framework: arduino)
+--------------------------------------------------------------------------------
+Verbose mode can be enabled via `-v, --verbose` option
+[prepare_data_gz] data_gz listo. Generados 19 .gz, eliminados 19 assets web sin comprimir
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/esp32-s3-devkitc-1.html
+PLATFORM: Espressif 32 (6.12.0) > Espressif ESP32-S3-DevKitC-1-N8 (8 MB QD, No PSRAM)
+HARDWARE: ESP32S3 240MHz, 320KB RAM, 16MB Flash
+DEBUG: Current (esp-builtin) On-board (esp-builtin) External (cmsis-dap, esp-bridge, esp-prog, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa)
+PACKAGES: 
+ - framework-arduinoespressif32 @ 3.20017.241212+sha.dcc1105b 
+ - tool-esptoolpy @ 2.40900.250804 (4.9.0) 
+ - tool-mkfatfs @ 2.0.1 
+ - tool-mklittlefs @ 1.203.210628 (2.3) 
+ - tool-mkspiffs @ 2.230.0 (2.30) 
+ - toolchain-riscv32-esp @ 8.4.0+2021r2-patch5 
+ - toolchain-xtensa-esp32s3 @ 8.4.0+2021r2-patch5
+LDF: Library Dependency Finder -> https://bit.ly/configure-pio-ldf
+LDF Modes: Finder ~ chain, Compatibility ~ soft
+Found 37 compatible libraries
+Scanning dependencies...
+Dependency Graph
+|-- Adafruit NeoPixel @ 1.15.3
+|-- ESPAsyncWebServer-esphome @ 3.4.0
+|-- ArduinoJson @ 6.21.5
+|-- SPI @ 2.0.0
+|-- LittleFS @ 2.0.0
+|-- FS @ 2.0.0
+|-- Preferences @ 2.0.0
+|-- WiFi @ 2.0.0
+Building in release mode
+Building FS image from 'data_gz' directory to .pio\build\esp32-s3-devkitc-1\littlefs.bin
+/BD/BD0000.WAV
+/BD/BD0025.WAV
+/BD/BD1000.WAV
+/BD/BD1025.WAV
+/BD/BD2500.WAV
+/BD/BD2525.WAV
+/BD/BD5000.WAV
+/BD/BD5025.WAV
+/BD/BD7500.WAV
+/BD/BD7525.WAV
+/CB/CB.WAV
+/CH/CH.WAV
+/CL/CL.WAV
+/CP/CP.WAV
+/CY/CY0000.WAV
+/CY/CY0025.WAV
+/CY/CY0050.WAV
+/CY/CY7500.WAV
+/HC/HC00.WAV
+/HC/HC10.WAV
+/HC/HC25.WAV
+/HC/HC50.WAV
+/HC/HC75.WAV
+/HT/HT00.WAV
+/HT/HT50.WAV
+/HT/HT75.WAV
+/LC/LC00.WAV
+/LC/LC10.WAV
+/LC/LC25.WAV
+/LC/LC50.WAV
+/LC/LC75.WAV
+/LT/LT10.WAV
+/LT/LT25.WAV
+/LT/LT50.WAV
+/MA/MA.WAV
+/MC/MC00.WAV
+/MC/MC10.WAV
+/MC/MC25.WAV
+/MC/MC50.WAV
+/MC/MC75.WAV
+/MT/MT00.WAV
+/MT/MT50.WAV
+/MT/MT75.WAV
+/OH/OH00.WAV
+/OH/OH25.WAV
+/OH/OH50.WAV
+/RED 808 KARZ/808 BD 3-1.wav
+/RED 808 KARZ/808 CL.wav
+/RED 808 KARZ/808 COW.wav
+/RED 808 KARZ/808 CP.wav
+/RED 808 KARZ/808 CY 3-1.wav
+/RED 808 KARZ/808 HC 1.wav
+/RED 808 KARZ/808 HC 2.wav
+/RED 808 KARZ/808 HC 3.wav
+/RED 808 KARZ/808 HH.wav
+/RED 808 KARZ/808 HT 3.wav
+/RED 808 KARZ/808 MA.wav
+/RED 808 KARZ/808 MC 3.wav
+/RED 808 KARZ/808 OH 1.wav
+/RED 808 KARZ/808 RS.wav
+/RED 808 KARZ/808 SD 1-5.wav
+/RED 808 KARZ/808 SD 2-4.wav
+/RS/RS.WAV
+/SD/SD0010.WAV
+/SD/SD0050.WAV
+/SD/SD0075.WAV
+/SD/SD2525.WAV
+/SD/SD5000.WAV
+/SD/SD7525.WAV
+/web/admin.css.gz
+/web/admin.html.gz
+/web/admin.js.gz
+/web/app.js.gz
+/web/chat-agent.js.gz
+/web/export-pattern.js.gz
+/web/favicon.ico
+/web/index.html.gz
+/web/keyboard-controls.js.gz
+/web/keyboard-styles.css.gz
+/web/midi-import.js.gz
+/web/multiview.css.gz
+/web/multiview.html.gz
+/web/multiview.js.gz
+/web/patchbay.css.gz
+/web/patchbay.html.gz
+/web/patchbay.js.gz
+/web/style.css.gz
+/web/synth-editor.js.gz
+/web/waveform-visualizer.js.gz
+/xtra/Alesis-Fusion-Bass-C3.wav
+/xtra/dre-yeah.wav
+/xtra/fast114bpm.wav
+/xtra/ragefx.wav
+Looking for upload port...
+Using manually specified: COM16
+Uploading .pio\build\esp32-s3-devkitc-1\littlefs.bin
+esptool.py v4.9.0
+Serial port COM16
+Connecting...
+Chip is ESP32-S3 (QFN56) (revision v0.2)
+Features: WiFi, BLE, Embedded PSRAM 8MB (AP_3v3)
+Crystal is 40MHz
+USB mode: USB-Serial/JTAG
+MAC: 3c:dc:75:6b:ec:68
+Uploading stub...
+Running stub...
+Stub running...
+Changing baud rate to 921600
+Changed.
+Configuring flash size...
+Flash will be erased from 0x00410000 to 0x00f0ffff...
+Compressed 11534336 bytes to 3579796...
+Writing at 0x00410000... (0 %)
+Writing at 0x0041c2cb... (0 %)
+Writing at 0x00426284... (1 %)
+Writing at 0x0042d956... (1 %)
+Writing at 0x0043cf19... (2 %)
+Writing at 0x00441501... (2 %)
+Writing at 0x00447dc2... (3 %)
+Writing at 0x0044c208... (3 %)
+Writing at 0x004528bc... (4 %)
+Writing at 0x00456f62... (4 %)
+Writing at 0x0045d95a... (5 %)
+Writing at 0x00461dda... (5 %)
+Writing at 0x00468777... (5 %)
+Writing at 0x0046ca75... (6 %)
+Writing at 0x0047532a... (6 %)
+Writing at 0x004796a3... (7 %)
+Writing at 0x0047f40e... (7 %)
+Writing at 0x0048b850... (8 %)
+Writing at 0x0048fd1b... (8 %)
+Writing at 0x00496efe... (9 %)
+Writing at 0x004a23f6... (9 %)
+Writing at 0x004a6c35... (10 %)
+Writing at 0x004aee30... (10 %)
+Writing at 0x004c11ba... (10 %)
+Writing at 0x004c65a3... (11 %)
+Writing at 0x004ce875... (11 %)
+Writing at 0x004d7a48... (12 %)
+Writing at 0x004de2ff... (12 %)
+Writing at 0x004e5682... (13 %)
+Writing at 0x004ee52b... (13 %)
+Writing at 0x004f6615... (14 %)
+Writing at 0x004fdf0d... (14 %)
+Writing at 0x00507df4... (15 %)
+Writing at 0x00512234... (15 %)
+Writing at 0x005188f4... (15 %)
+Writing at 0x00526992... (16 %)
+Writing at 0x0052afb2... (16 %)
+Writing at 0x005367ee... (17 %)
+Writing at 0x00542559... (17 %)
+Writing at 0x00547e08... (18 %)
+Writing at 0x0054d29b... (18 %)
+Writing at 0x005516a5... (19 %)
+Writing at 0x0055ea60... (19 %)
+Writing at 0x0056a822... (20 %)
+Writing at 0x0057148c... (20 %)
+Writing at 0x0057b299... (21 %)
+Writing at 0x00582140... (21 %)
+Writing at 0x005904d8... (21 %)
+Writing at 0x005a0dec... (22 %)
+Writing at 0x005a6af8... (22 %)
+Writing at 0x005af460... (23 %)
+Writing at 0x005b9f14... (23 %)
+Writing at 0x005c7449... (24 %)
+Writing at 0x005cdd14... (24 %)
+Writing at 0x005d6008... (25 %)
+Writing at 0x005dfbf3... (25 %)
+Writing at 0x005e6de0... (26 %)
+Writing at 0x005f26aa... (26 %)
+Writing at 0x005f7b58... (26 %)
+Writing at 0x00606058... (27 %)
+Writing at 0x0060f023... (27 %)
+Writing at 0x00619a9e... (28 %)
+Writing at 0x00620584... (28 %)
+Writing at 0x00626ea2... (29 %)
+Writing at 0x00631068... (29 %)
+Writing at 0x00638678... (30 %)
+Writing at 0x0064619b... (30 %)
+Writing at 0x006505d5... (31 %)
+Writing at 0x006592c9... (31 %)
+Writing at 0x0065eafa... (31 %)
+Writing at 0x0066679f... (32 %)
+Writing at 0x0066f42a... (32 %)
+Writing at 0x00675b81... (33 %)
+Writing at 0x0067cfae... (33 %)
+Writing at 0x00685bc3... (34 %)
+Writing at 0x0068a3e4... (34 %)
+Writing at 0x0068e3df... (35 %)
+Writing at 0x006923da... (35 %)
+Writing at 0x006963b2... (36 %)
+Writing at 0x0069acf4... (36 %)
+Writing at 0x0069ff82... (36 %)
+Writing at 0x006a4e35... (37 %)
+Writing at 0x006aa491... (37 %)
+Writing at 0x006afcea... (38 %)
+Writing at 0x006b580a... (38 %)
+Writing at 0x006b97d7... (39 %)
+Writing at 0x006be064... (39 %)
+Writing at 0x006c205f... (40 %)
+Writing at 0x006c6034... (40 %)
+Writing at 0x006cd330... (41 %)
+Writing at 0x006d14fa... (41 %)
+Writing at 0x006d566f... (42 %)
+Writing at 0x006d9846... (42 %)
+Writing at 0x006dda54... (42 %)
+Writing at 0x006e1c7b... (43 %)
+Writing at 0x006e5edb... (43 %)
+Writing at 0x006ea119... (44 %)
+Writing at 0x006ee39e... (44 %)
+Writing at 0x006f2603... (45 %)
+Writing at 0x006f68a4... (45 %)
+Writing at 0x006fab71... (46 %)
+Writing at 0x006fee2d... (46 %)
+Writing at 0x00703112... (47 %)
+Writing at 0x007073cf... (47 %)
+Writing at 0x0070b644... (47 %)
+Writing at 0x0070f898... (48 %)
+Writing at 0x00713af7... (48 %)
+Writing at 0x00717d3e... (49 %)
+Writing at 0x0071bf79... (49 %)
+Writing at 0x00720183... (50 %)
+Writing at 0x0072439b... (50 %)
+Writing at 0x007289bc... (51 %)
+Writing at 0x0072d9ce... (51 %)
+Writing at 0x0073324c... (52 %)
+Writing at 0x0073975e... (52 %)
+Writing at 0x0074059e... (52 %)
+Writing at 0x00749ab1... (53 %)
+Writing at 0x0075436e... (53 %)
+Writing at 0x007589d6... (54 %)
+Writing at 0x0075d1a2... (54 %)
+Writing at 0x0076279a... (55 %)
+Writing at 0x00768ff3... (55 %)
+Writing at 0x0076d341... (56 %)
+Writing at 0x00771d5a... (56 %)
+Writing at 0x00776a41... (57 %)
+Writing at 0x0077bdd0... (57 %)
+Writing at 0x00780ac9... (57 %)
+Writing at 0x007858e4... (58 %)
+Writing at 0x0078a7e2... (58 %)
+Writing at 0x0078f96d... (59 %)
+Writing at 0x00793c35... (59 %)
+Writing at 0x00798551... (60 %)
+Writing at 0x0079cc5f... (60 %)
+Writing at 0x007a11c8... (61 %)
+Writing at 0x007a55ec... (61 %)
+Writing at 0x007a9968... (62 %)
+Writing at 0x007adfcf... (62 %)
+Writing at 0x007b2a3e... (63 %)
+Writing at 0x007b775e... (63 %)
+Writing at 0x007bbb09... (63 %)
+Writing at 0x007c05e4... (64 %)
+Writing at 0x007c4b27... (64 %)
+Writing at 0x007c9250... (65 %)
+Writing at 0x007cdd76... (65 %)
+Writing at 0x007d2d56... (66 %)
+Writing at 0x007d81ef... (66 %)
+Writing at 0x007dcb47... (67 %)
+Writing at 0x007e1ac0... (67 %)
+Writing at 0x007e6236... (68 %)
+Writing at 0x007ea8e7... (68 %)
+Writing at 0x007ef379... (68 %)
+Writing at 0x007f3668... (69 %)
+Writing at 0x007f7ffa... (69 %)
+Writing at 0x007fc735... (70 %)
+Writing at 0x00800c65... (70 %)
+Writing at 0x0080505e... (71 %)
+Writing at 0x008097c3... (71 %)
+Writing at 0x0080e40f... (72 %)
+Writing at 0x00813104... (72 %)
+Writing at 0x00817e37... (73 %)
+Writing at 0x0081d991... (73 %)
+Writing at 0x00824671... (73 %)
+Writing at 0x0082ae6a... (74 %)
+Writing at 0x00d60f15... (74 %)
+Writing at 0x00d68304... (75 %)
+Writing at 0x00d70c6d... (75 %)
+Writing at 0x00d783b3... (76 %)
+Writing at 0x00d807f0... (76 %)
+Writing at 0x00d88686... (77 %)
+Writing at 0x00d8fa4a... (77 %)
+Writing at 0x00d98cc3... (78 %)
+Writing at 0x00d9e9a6... (78 %)
+Writing at 0x00da93ea... (78 %)
+Writing at 0x00dae252... (79 %)
+Writing at 0x00db8416... (79 %)
+Writing at 0x00dbd841... (80 %)
+Writing at 0x00dc8182... (80 %)
+Writing at 0x00dd9d3c... (81 %)
+Writing at 0x00de7006... (81 %)
+Writing at 0x00dedb12... (82 %)
+Writing at 0x00df4591... (82 %)
+Writing at 0x00dfe1ec... (83 %)
+Writing at 0x00e0da86... (83 %)
+Writing at 0x00e198f6... (84 %)
+Writing at 0x00e1e1aa... (84 %)
+Writing at 0x00e23391... (84 %)
+Writing at 0x00e2902f... (85 %)
+Writing at 0x00e3631b... (85 %)
+Writing at 0x00e3bd8d... (86 %)
+Writing at 0x00e4068a... (86 %)
+Writing at 0x00e45487... (87 %)
+Writing at 0x00e4a7fd... (87 %)
+Writing at 0x00e501c7... (88 %)
+Writing at 0x00e56fb5... (88 %)
+Writing at 0x00e646f9... (89 %)
+Writing at 0x00e68916... (89 %)
+Writing at 0x00e6d1c8... (89 %)
+Writing at 0x00e71d2b... (90 %)
+Writing at 0x00e76b8a... (90 %)
+Writing at 0x00e7bdce... (91 %)
+Writing at 0x00e81464... (91 %)
+Writing at 0x00e86f71... (92 %)
+Writing at 0x00e8d4a9... (92 %)
+Writing at 0x00e95ba9... (93 %)
+Writing at 0x00e9cb12... (93 %)
+Writing at 0x00ea1444... (94 %)
+Writing at 0x00ea676b... (94 %)
+Writing at 0x00eac99c... (94 %)
+Writing at 0x00eb7d14... (95 %)
+Writing at 0x00ec07c4... (95 %)
+Writing at 0x00ec97d9... (96 %)
+Writing at 0x00ed2088... (96 %)
+Writing at 0x00ed77ed... (97 %)
+Writing at 0x00ee0239... (97 %)
+Writing at 0x00ee9793... (98 %)
+Writing at 0x00eef070... (98 %)
+Writing at 0x00ef8c1e... (99 %)
+Writing at 0x00f02033... (99 %)
+Writing at 0x00f0d9f2... (100 %)
+Wrote 11534336 bytes (3579796 compressed) at 0x00410000 in 71.5 seconds (effective 1291.4 kbit/s)...
+Hash of data verified.
+
+Leaving...
+Hard resetting via RTS pin...
+========================= [SUCCESS] Took 96.95 seconds =========================

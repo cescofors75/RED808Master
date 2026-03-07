@@ -43,9 +43,8 @@ MIDIController::MIDIController()
   deviceInfo.productId = 0;
   deviceInfo.connectTime = 0;
   
-  // Cargar mapeo desde NVS; si no existe, usar mapa GM por defecto
-  resetToDefaultMapping();
-  loadMappings();
+  // Evitar acceso NVS en constructor global: NVS puede no estar listo todavia.
+  initializeDefaultMappings();
   
   scanEnabled = false;  // Desactivado por defecto, se activa desde la web
   
@@ -72,12 +71,6 @@ MIDIController::~MIDIController() {
 }
 
 bool MIDIController::begin() {
-  Serial.println("\n========================================");
-  Serial.println("[MIDI USB OTG] Initializing USB Host...");
-  Serial.println("========================================");
-  Serial.println("[INFO] USB OTG port ready (GPIO 19/20)");
-  Serial.println("[INFO] Conecta dispositivo MIDI al puerto USB OTG");
-  Serial.println("[INFO] El puerto COM (Serial) sigue activo\n");
 
   // Install USB Host driver
   usb_host_config_t hostConfig = {
@@ -87,12 +80,9 @@ bool MIDIController::begin() {
 
   esp_err_t err = usb_host_install(&hostConfig);
   if (err != ESP_OK) {
-    Serial.printf("[MIDI] ❌ Failed to install USB Host: %s\n", esp_err_to_name(err));
-    Serial.println("[MIDI] Continuando sin soporte MIDI USB\n");
     return false;
   }
   hostInitialized = true;
-  Serial.println("[MIDI] ✓ USB Host driver installed");
 
   // Register client
   usb_host_client_config_t clientConfig = {
@@ -106,12 +96,10 @@ bool MIDIController::begin() {
 
   err = usb_host_client_register(&clientConfig, &clientHandle);
   if (err != ESP_OK) {
-    Serial.printf("[MIDI] ❌ Failed to register client: %s\n", esp_err_to_name(err));
     usb_host_uninstall();
     hostInitialized = false;
     return false;
   }
-  Serial.println("[MIDI] ✓ USB Host client registered");
 
   // Create USB host task
   xTaskCreatePinnedToCore(
@@ -125,19 +113,12 @@ bool MIDIController::begin() {
   );
 
   initialized = true;
-  Serial.println("[MIDI] ✓ MIDI Controller initialized");
-  Serial.println("[MIDI] 🎵 Esperando dispositivo MIDI en USB OTG...");
-  Serial.println("========================================\n");
   return true;
 }
 
 void MIDIController::usbHostTask(void* arg) {
   MIDIController* controller = static_cast<MIDIController*>(arg);
   
-  Serial.println("[MIDI Task] ✓ USB Host task started on Core 0");
-  Serial.println("[MIDI Task] Monitoring USB OTG port for connections...");
-  Serial.println("[DEBUG] Polling USB host events every 10ms");
-  Serial.println("[DEBUG] Conecta/desconecta el dispositivo ahora...\n");
   
   uint32_t lastDebugTime = 0;
   uint32_t pollCount = 0;
@@ -152,8 +133,6 @@ void MIDIController::usbHostTask(void* arg) {
       
       // Debug output every 5 seconds to show the task is alive
       if (millis() - lastDebugTime > 5000) {
-        Serial.printf("[MIDI Task] Alive - polled %d times in 5s | Device: %s\n", 
-                      pollCount, controller->deviceInfo.connected ? "CONNECTED" : "waiting...");
         pollCount = 0;
         lastDebugTime = millis();
       }
@@ -169,15 +148,8 @@ void MIDIController::usbHostTask(void* arg) {
 void MIDIController::clientEventCallback(const usb_host_client_event_msg_t* eventMsg, void* arg) {
   MIDIController* controller = static_cast<MIDIController*>(arg);
   
-  Serial.printf("\n[DEBUG] USB Event received! Type: %d\n", eventMsg->event);
   
   if (eventMsg->event == USB_HOST_CLIENT_EVENT_NEW_DEV) {
-    Serial.println("\n╔═══════════════════════════════════════════════╗");
-    Serial.println("║   🎹 DISPOSITIVO USB DETECTADO 🎹           ║");
-    Serial.println("╚═══════════════════════════════════════════════╝");
-    Serial.printf("[MIDI] Device address: %d\n", eventMsg->new_dev.address);
-    Serial.println("[MIDI] Intentando abrir y enumerar dispositivo...");
-    Serial.println("[MIDI] Puerto: USB OTG (GPIO 19/20)");
     
     // Open MIDI device and start reading
     if (controller->openMidiDevice(eventMsg->new_dev.address)) {
@@ -186,15 +158,9 @@ void MIDIController::clientEventCallback(const usb_host_client_event_msg_t* even
       controller->deviceInfo.connectTime = millis();
       controller->notifyDeviceChange(true);
     } else {
-      Serial.println("[MIDI] ❌ Failed to open MIDI device");
     }
     
   } else if (eventMsg->event == USB_HOST_CLIENT_EVENT_DEV_GONE) {
-    Serial.println("\n╔═══════════════════════════════════════════════╗");
-    Serial.println("║   ⚠️  DISPOSITIVO MIDI DESCONECTADO ⚠️       ║");
-    Serial.println("╚═══════════════════════════════════════════════╝");
-    Serial.println("[MIDI] Device removed from USB OTG");
-    Serial.println("[MIDI] Esperando nueva conexión...\n");
     
     controller->closeMidiDevice();
     controller->deviceInfo.connected = false;
@@ -277,8 +243,6 @@ void MIDIController::processMIDIMessage(uint8_t status, uint8_t data1, uint8_t d
     case MIDI_PROGRAM_CHANGE: msgType = "Program"; icon = "🎼"; break;
   }
   
-  Serial.printf("[MIDI] %s %s | Ch:%d | D1:%d D2:%d\n", 
-                icon, msgType, msg.channel + 1, msg.data1, msg.data2);
 }
 
 void MIDIController::getRecentMessages(MIDIMessage* buffer, size_t& count, size_t maxCount) {
@@ -298,21 +262,14 @@ void MIDIController::notifyDeviceChange(bool connected) {
   }
   
   if (connected) {
-    Serial.println("[WebInterface] Broadcasting MIDI device status to web clients");
-    Serial.printf("[MIDI] ✅ Device ready: %s\n", deviceInfo.deviceName.c_str());
-    Serial.println("[MIDI] 🎵 Toca notas MIDI 36-43 para triggear pads\n");
   } else {
-    Serial.println("[WebInterface] Broadcasting MIDI disconnection to web clients");
-    Serial.println("[MIDI] ❌ Device disconnected\n");
   }
 }
 
 bool MIDIController::openMidiDevice(uint8_t deviceAddress) {
-  Serial.println("[MIDI] Opening MIDI device...");
   
   // Close previous device if exists
   if (deviceHandle) {
-    Serial.println("[MIDI] Closing previous device first...");
     closeMidiDevice();
     vTaskDelay(pdMS_TO_TICKS(100)); // Wait for cleanup
   }
@@ -320,39 +277,31 @@ bool MIDIController::openMidiDevice(uint8_t deviceAddress) {
   // Open the device
   esp_err_t err = usb_host_device_open(clientHandle, deviceAddress, &deviceHandle);
   if (err != ESP_OK) {
-    Serial.printf("[MIDI] ❌ Failed to open device: %s\n", esp_err_to_name(err));
     return false;
   }
-  Serial.println("[MIDI] ✓ Device opened");
   
   // Get device descriptor
   const usb_device_desc_t* deviceDesc;
   err = usb_host_get_device_descriptor(deviceHandle, &deviceDesc);
   if (err != ESP_OK) {
-    Serial.printf("[MIDI] ❌ Failed to get device descriptor: %s\n", esp_err_to_name(err));
     usb_host_device_close(clientHandle, deviceHandle);
     deviceHandle = nullptr;
     return false;
   }
   
-  Serial.printf("[MIDI] Device VID:PID = %04X:%04X\n", deviceDesc->idVendor, deviceDesc->idProduct);
   deviceInfo.vendorId = deviceDesc->idVendor;
   deviceInfo.productId = deviceDesc->idProduct;
   
   // Get configuration descriptor
-  Serial.println("[MIDI] Getting configuration descriptor...");
   const usb_config_desc_t* configDesc;
   err = usb_host_get_active_config_descriptor(deviceHandle, &configDesc);
   if (err != ESP_OK) {
-    Serial.printf("[MIDI] ❌ Failed to get config descriptor: %s\n", esp_err_to_name(err));
     usb_host_device_close(clientHandle, deviceHandle);
     deviceHandle = nullptr;
     return false;
   }
-  Serial.printf("[MIDI] ✓ Config descriptor OK (length: %d bytes)\n", configDesc->wTotalLength);
   
   // Listar TODAS las interfaces para debug
-  Serial.println("[MIDI] === Listing all interfaces ===");
   const usb_standard_desc_t* desc = (const usb_standard_desc_t*)configDesc;
   uint16_t totalLength = configDesc->wTotalLength;
   uint16_t offset = 0;
@@ -362,16 +311,10 @@ bool MIDIController::openMidiDevice(uint8_t deviceAddress) {
     
     if (desc->bDescriptorType == USB_B_DESCRIPTOR_TYPE_INTERFACE) {
       const usb_intf_desc_t* intfDesc = (const usb_intf_desc_t*)desc;
-      Serial.printf("[MIDI]   Interface #%d: Class=0x%02X, SubClass=0x%02X, Protocol=0x%02X\n",
-                    intfDesc->bInterfaceNumber,
-                    intfDesc->bInterfaceClass,
-                    intfDesc->bInterfaceSubClass,
-                    intfDesc->bInterfaceProtocol);
     }
     
     offset += desc->bLength;
   }
-  Serial.println("[MIDI] === End interface list ===");
   
   // ── Buscar interfaz compatible (prioridad: MIDI Streaming > CDC > Vendor) ──
   interfaceNum = -1;
@@ -389,7 +332,6 @@ bool MIDIController::openMidiDevice(uint8_t deviceAddress) {
       // Clase 0x01 Audio, Subclase 0x03 MIDI Streaming — Arturia, Roland, Korg...
       if (intfDesc->bInterfaceClass == 0x01 && intfDesc->bInterfaceSubClass == 0x03) {
         interfaceNum = intfDesc->bInterfaceNumber;
-        Serial.printf("[MIDI] ✓ Found USB MIDI Streaming interface: %d\n", interfaceNum);
         break;
       }
       // CDC Data 0x0A
@@ -412,17 +354,14 @@ bool MIDIController::openMidiDevice(uint8_t deviceAddress) {
   if (interfaceNum < 0) interfaceNum = anyInterface;
   if (interfaceNum < 0) interfaceNum = 0; // último recurso
 
-  Serial.printf("[MIDI] Using interface: %d\n", interfaceNum);
   
   // Claim the interface
   err = usb_host_interface_claim(clientHandle, deviceHandle, interfaceNum, 0);
   if (err != ESP_OK) {
-    Serial.printf("[MIDI] ❌ Failed to claim interface: %s\n", esp_err_to_name(err));
     usb_host_device_close(clientHandle, deviceHandle);
     deviceHandle = nullptr;
     return false;
   }
-  Serial.printf("[MIDI] ✓ Interface %d claimed\n", interfaceNum);
   
   // Find BULK IN endpoint for data (prefer BULK over INTERRUPT)
   offset = 0;
@@ -430,7 +369,6 @@ bool MIDIController::openMidiDevice(uint8_t deviceAddress) {
   midiMaxPacketSize = 64;
   uint8_t fallbackEndpoint = 0;
   
-  Serial.println("[MIDI] Scanning endpoints...");
   
   while (offset < totalLength) {
     desc = (const usb_standard_desc_t*)((uint8_t*)configDesc + offset);
@@ -444,8 +382,6 @@ bool MIDIController::openMidiDevice(uint8_t deviceAddress) {
       if (isIN) {
         const char* typeStr = (epType == 0x02) ? "BULK" : 
                              (epType == 0x03) ? "INTERRUPT" : "OTHER";
-        Serial.printf("[MIDI]   EP 0x%02X: %s, maxPacket=%d\n", 
-                      epDesc->bEndpointAddress, typeStr, epDesc->wMaxPacketSize);
         
         // Preferir BULK (0x02) para datos
         if (epType == 0x02) {
@@ -465,13 +401,10 @@ bool MIDIController::openMidiDevice(uint8_t deviceAddress) {
   // Si no encontramos BULK, usar INTERRUPT
   if (midiEndpointAddress == 0 && fallbackEndpoint != 0) {
     midiEndpointAddress = fallbackEndpoint;
-    Serial.printf("[MIDI] ✓ Using INTERRUPT endpoint: 0x%02X\n", midiEndpointAddress);
   } else if (midiEndpointAddress != 0) {
-    Serial.printf("[MIDI] ✓ Using BULK endpoint: 0x%02X\n", midiEndpointAddress);
   }
   
   if (midiEndpointAddress == 0) {
-    Serial.println("[MIDI] ❌ No IN endpoint found");
     usb_host_interface_release(clientHandle, deviceHandle, interfaceNum);
     usb_host_device_close(clientHandle, deviceHandle);
     deviceHandle = nullptr;
@@ -481,32 +414,26 @@ bool MIDIController::openMidiDevice(uint8_t deviceAddress) {
   // Allocate transfer for reading data
   err = usb_host_transfer_alloc(midiMaxPacketSize, 0, &midiTransfer);
   if (err != ESP_OK) {
-    Serial.printf("[MIDI] ❌ Failed to allocate transfer: %s\n", esp_err_to_name(err));
     usb_host_interface_release(clientHandle, deviceHandle, interfaceNum);
     usb_host_device_close(clientHandle, deviceHandle);
     deviceHandle = nullptr;
     return false;
   }
   
-  Serial.println("[MIDI] ✓ Transfer allocated");
-  Serial.println("[MIDI] ✓ Ready to read MIDI data!");
   return true;
 }
 
 void MIDIController::closeMidiDevice() {
-  Serial.println("[MIDI] Closing device and freeing resources...");
   
   if (midiTransfer) {
     usb_host_transfer_free(midiTransfer);
     midiTransfer = nullptr;
-    Serial.println("[MIDI] ✓ Transfer freed");
   }
   
   // Release interface before closing device
   if (deviceHandle && interfaceNum >= 0) {
     esp_err_t err = usb_host_interface_release(clientHandle, deviceHandle, interfaceNum);
     if (err == ESP_OK) {
-      Serial.printf("[MIDI] ✓ Interface %d released\n", interfaceNum);
     }
     interfaceNum = -1;
   }
@@ -514,13 +441,11 @@ void MIDIController::closeMidiDevice() {
   if (deviceHandle) {
     usb_host_device_close(clientHandle, deviceHandle);
     deviceHandle = nullptr;
-    Serial.println("[MIDI] ✓ Device closed");
   }
   
   midiEndpointAddress = 0;
   midiMaxPacketSize = 0;
   
-  Serial.println("[MIDI] ✓ All resources freed");
 }
 
 void MIDIController::readMidiData() {
@@ -541,9 +466,7 @@ void MIDIController::readMidiData() {
   esp_err_t err = usb_host_transfer_submit(midiTransfer);
   if (err == ESP_OK) {
     transferSubmitted = true;
-    Serial.println("[MIDI] ✓ Continuous read transfer submitted");
   } else {
-    Serial.printf("[MIDI] ⚠️ Transfer submit failed: %s\n", esp_err_to_name(err));
   }
 }
 
@@ -557,7 +480,6 @@ void MIDIController::setPadMapping(int8_t pad, uint8_t newNote) {
     if (noteMappings[i].pad == pad) {
       noteMappings[i].note    = newNote;
       noteMappings[i].enabled = true;
-      Serial.printf("[MIDI Mapping] Pad %d → Note %d\n", pad, newNote);
       saveMappings();
       return;
     }
@@ -572,7 +494,6 @@ void MIDIController::setNoteMapping(uint8_t note, int8_t pad) {
     if (noteMappings[i].note == note) {
       noteMappings[i].pad = pad;
       noteMappings[i].enabled = (pad >= 0);
-      Serial.printf("[MIDI Mapping] Updated: Note %d → Pad %d\n", note, pad);
       saveMappings();
       return;
     }
@@ -584,10 +505,8 @@ void MIDIController::setNoteMapping(uint8_t note, int8_t pad) {
     noteMappings[mappingCount].pad = pad;
     noteMappings[mappingCount].enabled = (pad >= 0);
     mappingCount++;
-    Serial.printf("[MIDI Mapping] Added: Note %d → Pad %d\n", note, pad);
     saveMappings();
   } else {
-    Serial.println("[MIDI Mapping] ⚠️ Maximum mappings reached!");
   }
 }
 
@@ -604,13 +523,17 @@ void MIDIController::clearMapping(uint8_t note) {
   for (int i = 0; i < mappingCount; i++) {
     if (noteMappings[i].note == note) {
       noteMappings[i].enabled = false;
-      Serial.printf("[MIDI Mapping] Cleared: Note %d\n", note);
       return;
     }
   }
 }
 
 void MIDIController::resetToDefaultMapping() {
+  initializeDefaultMappings();
+  saveMappings();
+}
+
+void MIDIController::initializeDefaultMappings() {
   mappingCount = 0;
 
   // ================================================================
@@ -668,16 +591,13 @@ void MIDIController::resetToDefaultMapping() {
   noteMappings[mappingCount++] = {59, 4, true};  // Ride Cymbal 2        → CY
   noteMappings[mappingCount++] = {43, 8, true};  // High Floor Tom       → LT
   noteMappings[mappingCount++] = {45, 9, true};  // Low Tom              → MT
-
-  Serial.println("[MIDI Mapping] Reset to GM Drum Map (16 pads)");
-  Serial.println("  BD=36, SD=38, CH=42, OH=46, CY=49, CP=39, RS=37, CB=56");
-  Serial.println("  LT=41, MT=47, HT=50, MA=70, CL=75, HC=62, MC=63, LC=64");
-  saveMappings();
 }
 
 void MIDIController::saveMappings() {
   Preferences prefs;
-  prefs.begin("midi_map", false);
+  if (!prefs.begin("midi_map", false)) {
+    return;
+  }
   prefs.putInt("count", mappingCount);
   for (int i = 0; i < mappingCount; i++) {
     char keyNote[12], keyPad[12], keyEn[12];
@@ -689,35 +609,32 @@ void MIDIController::saveMappings() {
     prefs.putBool (keyEn,   noteMappings[i].enabled);
   }
   prefs.end();
-  Serial.printf("[MIDI Mapping] Saved %d mappings to NVS\n", mappingCount);
 }
 
 void MIDIController::loadMappings() {
   Preferences prefs;
-  prefs.begin("midi_map", true);  // read-only
+  if (!prefs.begin("midi_map", true)) {  // read-only
+    return;
+  }
   int count = prefs.getInt("count", -1);
-  prefs.end();
 
   if (count <= 0 || count > MAX_MIDI_MAPPINGS) {
-    Serial.println("[MIDI Mapping] No saved mapping found, using GM defaults");
+    prefs.end();
     return;  // Mantener el GM por defecto ya cargado
   }
 
-  Preferences prefs2;
-  prefs2.begin("midi_map", true);
   mappingCount = 0;
   for (int i = 0; i < count; i++) {
     char keyNote[12], keyPad[12], keyEn[12];
     snprintf(keyNote, sizeof(keyNote), "n%d", i);
     snprintf(keyPad,  sizeof(keyPad),  "p%d", i);
     snprintf(keyEn,   sizeof(keyEn),   "e%d", i);
-    noteMappings[i].note    = prefs2.getUChar(keyNote, 0);
-    noteMappings[i].pad     = prefs2.getChar (keyPad,  -1);
-    noteMappings[i].enabled = prefs2.getBool (keyEn,   false);
+    noteMappings[i].note    = prefs.getUChar(keyNote, 0);
+    noteMappings[i].pad     = prefs.getChar (keyPad,  -1);
+    noteMappings[i].enabled = prefs.getBool (keyEn,   false);
     mappingCount++;
   }
-  prefs2.end();
-  Serial.printf("[MIDI Mapping] Loaded %d mappings from NVS\n", mappingCount);
+  prefs.end();
 }
 
 const MIDINoteMapping* MIDIController::getAllMappings(int& count) const {

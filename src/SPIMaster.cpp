@@ -10,128 +10,8 @@
 // Bus HSPI (SPI3) — separado del display ST7789 que usa FSPI/SPI2
 static SPIClass daisySpi(HSPI);
 
-// ═══════════════════════════════════════════════════════
-// SPI DEBUG — Activar/desactivar logs por Serial
-// ═══════════════════════════════════════════════════════
-#define SPI_DEBUG_ENABLED   false  // true = log cada SPI cmd (solo para debug intensivo)
-#define SPI_DEBUG_PEAKS     false  // peaks cada 50ms = mucho spam
-#define SPI_DEBUG_SAMPLE    false  // chunks de sample transfer
-#define SPI_DEBUG_TRIG      false
-static constexpr bool kStrictProtocolBoundary = true;
-
-static const char* spiCmdName(uint8_t cmd) {
-    switch(cmd) {
-        case 0x01: return "TRIG_SEQ";
-        case 0x02: return "TRIG_LIVE";
-        case 0x03: return "TRIG_STOP";
-        case 0x04: return "STOP_ALL";
-        case 0x05: return "TRIG_SC";
-        case 0x10: return "VOL_MASTER";
-        case 0x11: return "VOL_SEQ";
-        case 0x12: return "VOL_LIVE";
-        case 0x13: return "VOL_TRACK";
-        case 0x14: return "PITCH_LIVE";
-        case 0x20: return "FILT_SET";
-        case 0x21: return "FILT_CUT";
-        case 0x22: return "FILT_RES";
-        case 0x23: return "FILT_BIT";
-        case 0x24: return "FILT_DIST";
-        case 0x25: return "FILT_DMOD";
-        case 0x26: return "FILT_SR";
-        case 0x30: return "DLY_ACT";
-        case 0x31: return "DLY_TIME";
-        case 0x32: return "DLY_FB";
-        case 0x33: return "DLY_MIX";
-        case 0x34: return "PH_ACT";
-        case 0x35: return "PH_RATE";
-        case 0x36: return "PH_DEPTH";
-        case 0x37: return "PH_FB";
-        case 0x38: return "FL_ACT";
-        case 0x39: return "FL_RATE";
-        case 0x3A: return "FL_DEPTH";
-        case 0x3B: return "FL_FB";
-        case 0x3C: return "FL_MIX";
-        case 0x3D: return "CMP_ACT";
-        case 0x3E: return "CMP_THR";
-        case 0x3F: return "CMP_RAT";
-        case 0x40: return "CMP_ATK";
-        case 0x41: return "CMP_REL";
-        case 0x42: return "CMP_MKP";
-        case 0x43: return "RVB_ACT";
-        case 0x44: return "RVB_FB";
-        case 0x45: return "RVB_LP";
-        case 0x46: return "RVB_MIX";
-        case 0x47: return "CHR_ACT";
-        case 0x48: return "CHR_RATE";
-        case 0x49: return "CHR_DEPT";
-        case 0x4A: return "CHR_MIX";
-        case 0x4B: return "TRM_ACT";
-        case 0x4C: return "TRM_RATE";
-        case 0x4D: return "TRM_DEPT";
-        case 0x4E: return "WFOLD";
-        case 0x4F: return "LIM_ACT";
-        case 0x50: return "TK_FILT";
-        case 0x51: return "TK_CLR_F";
-        case 0x52: return "TK_DIST";
-        case 0x53: return "TK_BITCR";
-        case 0x54: return "TK_ECHO";
-        case 0x55: return "TK_FLANG";
-        case 0x56: return "TK_COMP";
-        case 0x57: return "TK_CLR_L";
-        case 0x58: return "TK_CLR_X";
-        case 0x70: return "PD_FILT";
-        case 0x71: return "PD_CLR_F";
-        case 0x72: return "PD_DIST";
-        case 0x73: return "PD_BITCR";
-        case 0x74: return "PD_LOOP";
-        case 0x75: return "PD_REV";
-        case 0x76: return "PD_PITCH";
-        case 0x77: return "PD_STUTT";
-        case 0x78: return "PD_SCRAT";
-        case 0x79: return "PD_TURNT";
-        case 0x7A: return "PD_CLR";
-        case 0x90: return "SC_SET";
-        case 0x91: return "SC_CLR";
-        case 0xA0: return "SMPL_BEG";
-        case 0xA1: return "SMPL_DAT";
-        case 0xA2: return "SMPL_END";
-        case 0xA3: return "SMPL_UNL";
-        case 0xA4: return "SMPL_UNA";
-        case 0xB0: return "SD_DIRS";
-        case 0xB1: return "SD_FILES";
-        case 0xB2: return "SD_INFO";
-        case 0xB3: return "SD_LOAD";
-        case 0xB4: return "SD_LKIT";
-        case 0xB5: return "SD_KLIST";
-        case 0xB6: return "SD_STAT";
-        case 0xB7: return "SD_UKIT";
-        case 0xB8: return "SD_GLOAD";
-        case 0xB9: return "SD_ABORT";
-        case 0xE0: return "GET_STAT";
-        case 0xE1: return "GET_PEAK";
-        case 0xE2: return "GET_CPU";
-        case 0xE3: return "GET_VOIC";
-        case 0xE4: return "GET_EVTS";
-        case 0xEE: return "PING";
-        case 0xEF: return "RESET";
-        case 0xF0: return "BULK_TRG";
-        case 0xF1: return "BULK_FX";
-        case 0xC0: return "SYN_TRIG";
-        case 0xC1: return "SYN_PARA";
-        case 0xC2: return "SYN_NON";
-        case 0xC3: return "SYN_NOFF";
-        case 0xC4: return "SYN_303P";
-        case 0xC5: return "SYN_ACT";
-        default:   return "???";
-    }
-}
-
-static bool shouldLogCmd(uint8_t cmd) {
-    if (!SPI_DEBUG_ENABLED) return false;
-    if (cmd == CMD_GET_PEAKS && !SPI_DEBUG_PEAKS) return false;
-    if (cmd == CMD_SAMPLE_DATA && !SPI_DEBUG_SAMPLE) return false;
-    return true;
-}
+// ─── SPI command name lookup removed (was only used for spiLogCallback debug)
+// ─── Use cmd hex value directly in logs (e.g. 0xEE = PING)
 
 // ═══════════════════════════════════════════════════════
 // FILTER PRESETS (static, for UI compatibility)
@@ -158,7 +38,7 @@ static const FilterPreset filterPresets[] = {
 // CONSTRUCTOR / DESTRUCTOR
 // ═══════════════════════════════════════════════════════
 
-SPIMaster::SPIMaster() : seqNumber(0), spiErrorCount(0), stm32Connected(false), spiMutex(nullptr) {
+SPIMaster::SPIMaster() : seqNumber(0), spiErrorCount(0), stm32Connected(false), spiMutex(nullptr), spiLogCallback(nullptr) {
     spiMutex = xSemaphoreCreateMutex();
     // Initialize cached state
     cachedMasterVolume = 100;
@@ -220,6 +100,10 @@ SPIMaster::~SPIMaster() {
         vSemaphoreDelete(spiMutex);
         spiMutex = nullptr;
     }
+    if (spiCmdQueue) {
+        vQueueDelete(spiCmdQueue);
+        spiCmdQueue = nullptr;
+    }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -231,25 +115,17 @@ bool SPIMaster::begin() {
     digitalWrite(DAISY_SPI_CS, HIGH);
     daisySpi.begin(DAISY_SPI_SCK, DAISY_SPI_MISO, DAISY_SPI_MOSI, DAISY_SPI_CS);
 
-    Serial.println("[SPI] Transport initialized for Daisy/STM32 slave");
-    Serial.printf("[SPI] CS=GPIO%d SCK=GPIO%d MOSI=GPIO%d MISO=GPIO%d CLK=%luHz\n",
-                  DAISY_SPI_CS, DAISY_SPI_SCK, DAISY_SPI_MOSI, DAISY_SPI_MISO,
-                  (unsigned long)DAISY_SPI_CLOCK_HZ);
     
     // Try to connect to Daisy
     uint32_t rtt;
     for (int attempt = 0; attempt < 10; attempt++) {
         if (ping(rtt)) {
             stm32Connected = true;
-            Serial.printf("[SPI] Daisy connected! RTT: %d us\n", rtt);
             return true;
         }
         delay(200);
-        Serial.printf("[SPI] Ping attempt %d/10...\n", attempt + 1);
     }
     
-    Serial.println("[SPI] WARNING: Daisy not responding at boot");
-    Serial.println("[SPI] Continuing boot and retrying in background");
     return true;
 }
 
@@ -269,7 +145,32 @@ uint16_t SPIMaster::crc16(const uint8_t* data, uint16_t len) {
     return crc;
 }
 
+// ── Core0→Core1 queue drain — called at start of every process() tick ──────
+void SPIMaster::drainCmdQueue() {
+    if (!spiCmdQueue) return;
+    SpiQueuedCmd env;
+    while (xQueueReceive(spiCmdQueue, &env, 0) == pdTRUE) {
+        sendCommandDirect(env.cmd, env.payload, env.payloadLen);
+    }
+}
+
+// ── High-level sendCommand: enqueues from Core0, sends directly from Core1 ───
 bool SPIMaster::sendCommand(uint8_t cmd, const void* payload, uint16_t payloadLen) {
+    // Core0 (WiFi/WS task): enqueue for Core1 to send — never blocks WS handler
+    if (xPortGetCoreID() == 0 && spiCmdQueue && payloadLen <= SPI_QUEUE_PAYLOAD_MAX) {
+        SpiQueuedCmd env;
+        env.cmd = cmd;
+        env.payloadLen = (uint16_t)payloadLen;
+        if (payload && payloadLen > 0) memcpy(env.payload, payload, payloadLen);
+        // Non-blocking: if queue full, fall through to direct send (shouldn't happen)
+        if (xQueueSend(spiCmdQueue, &env, pdMS_TO_TICKS(5)) == pdTRUE)
+            return true;
+    }
+    return sendCommandDirect(cmd, payload, payloadLen);
+}
+
+// ── Raw SPI send (always executes synchronously) ─────────────────────────────
+bool SPIMaster::sendCommandDirect(uint8_t cmd, const void* payload, uint16_t payloadLen) {
     SPIPacketHeader header;
     header.magic = SPI_MAGIC_CMD;
     header.cmd = cmd;
@@ -277,33 +178,14 @@ bool SPIMaster::sendCommand(uint8_t cmd, const void* payload, uint16_t payloadLe
     header.sequence = seqNumber++;
     header.checksum = (payload && payloadLen > 0) ? crc16((const uint8_t*)payload, payloadLen) : 0;
     
-    if (shouldLogCmd(cmd)) {
-        Serial.printf("[TX] #%03d %-9s cmd=0x%02X len=%d crc=0x%04X\n",
-                      header.sequence, spiCmdName(cmd), cmd, payloadLen, header.checksum);
-        if (payload && payloadLen > 0 && payloadLen <= 16) {
-            Serial.print("         data: ");
-            for (int i = 0; i < payloadLen && i < 16; i++)
-                Serial.printf("%02X ", ((const uint8_t*)payload)[i]);
-            Serial.println();
-        }
-    }
-    
     // Acquire mutex (thread safety Core0 ↔ Core1)
     if (xSemaphoreTake(spiMutex, pdMS_TO_TICKS(30)) != pdTRUE) {
-        Serial.printf("[SPI] MUTEX TIMEOUT cmd=0x%02X\n", cmd);
         return false;
     }
     
-    const bool traceTrig = (cmd == CMD_TRIGGER_LIVE) && SPI_DEBUG_TRIG;
-    if (traceTrig && payload && payloadLen >= 2) {
-        const uint8_t* p = (const uint8_t*)payload;
-        Serial.printf("[TRIG] seq=%u pad=%u vel=%u\n", header.sequence, p[0], p[1]);
-    }
-
     const uint16_t totalLen = sizeof(SPIPacketHeader) + payloadLen;
     if (totalLen > sizeof(txBuffer)) {
         xSemaphoreGive(spiMutex);
-        Serial.printf("[SPI] TX packet too large: %u\n", totalLen);
         return false;
     }
 
@@ -317,9 +199,23 @@ bool SPIMaster::sendCommand(uint8_t cmd, const void* payload, uint16_t payloadLe
     daisySpi.transferBytes(txBuffer, rxBuffer, totalLen);
     digitalWrite(DAISY_SPI_CS, HIGH);
     daisySpi.endTransaction();
+
+    /* Inter-packet gap: dar tiempo a la Daisy para drenar RXFIFO
+     * y procesar el paquete anterior en su main loop.            */
+    delayMicroseconds(30);
     
     xSemaphoreGive(spiMutex);
-    
+
+    if (spiLogCallback && cmd != CMD_GET_PEAKS && cmd != CMD_GET_CPU_LOAD
+                       && cmd != CMD_PING    && cmd != CMD_GET_STATUS
+                       && cmd != CMD_GET_VOICES) {
+        char buf[96];
+        snprintf(buf, sizeof(buf),
+            "{\"type\":\"spi_log\",\"cmd\":\"0x%02X\",\"seq\":%d,\"len\":%d,\"ms\":%lu}",
+            (unsigned)cmd, (int)header.sequence,
+            (int)payloadLen, (unsigned long)millis());
+        spiLogCallback(buf);
+    }
     return true;
 }
 
@@ -332,20 +228,13 @@ bool SPIMaster::sendAndReceive(uint8_t cmd, const void* payload, uint16_t payloa
     header.sequence = seqNumber++;
     header.checksum = (payload && payloadLen > 0) ? crc16((const uint8_t*)payload, payloadLen) : 0;
     
-    if (shouldLogCmd(cmd)) {
-        Serial.printf("[TX] #%03d %-9s cmd=0x%02X len=%d (espera resp %d bytes)\n",
-                      header.sequence, spiCmdName(cmd), cmd, payloadLen, responseLen);
-    }
-    
     if (xSemaphoreTake(spiMutex, pdMS_TO_TICKS(50)) != pdTRUE) {
-        Serial.printf("[SPI] MUTEX TIMEOUT cmd=0x%02X (sendAndReceive)\n", cmd);
         return false;
     }
 
     const uint16_t totalLen = sizeof(SPIPacketHeader) + payloadLen;
     if (totalLen > sizeof(txBuffer)) {
         xSemaphoreGive(spiMutex);
-        Serial.printf("[SPI] TX packet too large: %u\n", totalLen);
         return false;
     }
 
@@ -363,45 +252,59 @@ bool SPIMaster::sendAndReceive(uint8_t cmd, const void* payload, uint16_t payloa
     delayMicroseconds(DAISY_SPI_RESPONSE_GAP_US);
 
     // Read response header + payload (segunda transacción CS)
-    SPIPacketHeader respHeader;
+    SPIPacketHeader respHeader = {};
     bool success = false;
+    uint8_t attempts = 0;
+    // 8 attempts × ~800µs = ≤6.4ms max block time from Core0 WS handler
+    static constexpr uint8_t kMaxAttempts = 8;
 
-    memset(txBuffer, 0xFF, sizeof(SPIPacketHeader));
-    daisySpi.beginTransaction(SPISettings(DAISY_SPI_CLOCK_HZ, MSBFIRST, SPI_MODE0));
-    digitalWrite(DAISY_SPI_CS, LOW);
-    daisySpi.transferBytes(txBuffer, reinterpret_cast<uint8_t*>(&respHeader), sizeof(SPIPacketHeader));
+    while (!success && attempts < kMaxAttempts) {
+        attempts++;
+        memset(&respHeader, 0, sizeof(respHeader));
+        memset(txBuffer, 0xFF, sizeof(SPIPacketHeader));
 
-    if (respHeader.magic == SPI_MAGIC_RESP &&
-        respHeader.cmd == cmd &&
-        respHeader.length <= responseLen &&
-        respHeader.length <= (SPI_MAX_PAYLOAD - sizeof(SPIPacketHeader))) {
-        if (respHeader.length > 0 && response) {
-            memset(txBuffer, 0xFF, respHeader.length);
-            daisySpi.transferBytes(txBuffer, static_cast<uint8_t*>(response), respHeader.length);
+        daisySpi.beginTransaction(SPISettings(DAISY_SPI_CLOCK_HZ, MSBFIRST, SPI_MODE0));
+        digitalWrite(DAISY_SPI_CS, LOW);
+        daisySpi.transferBytes(txBuffer, reinterpret_cast<uint8_t*>(&respHeader), sizeof(SPIPacketHeader));
+
+        const bool headerOk = (respHeader.magic == SPI_MAGIC_RESP) &&
+                              (respHeader.cmd == cmd) &&
+                              (respHeader.length <= responseLen) &&
+                              (respHeader.length <= (SPI_MAX_PAYLOAD - sizeof(SPIPacketHeader)));
+
+        if (headerOk) {
+            if (respHeader.length > 0 && response) {
+                memset(txBuffer, 0xFF, respHeader.length);
+                daisySpi.transferBytes(txBuffer, static_cast<uint8_t*>(response), respHeader.length);
+            }
+            success = true;
         }
-        success = true;
-        if (shouldLogCmd(cmd)) {
-            Serial.printf("[RX] #%03d %-9s OK len=%d\n",
-                          respHeader.sequence, spiCmdName(cmd), respHeader.length);
-        }
-    } else {
-        spiErrorCount++;
-        if (shouldLogCmd(cmd)) {
-            const uint8_t* raw = reinterpret_cast<const uint8_t*>(&respHeader);
-            Serial.printf("[RX] FAIL magic=0x%02X cmd=0x%02X len=%d (err=%d)\n",
-                          respHeader.magic, respHeader.cmd,
-                          respHeader.length, spiErrorCount);
-            Serial.printf("     raw: %02X %02X %02X %02X %02X %02X %02X %02X\n",
-                          raw[0], raw[1], raw[2], raw[3],
-                          raw[4], raw[5], raw[6], raw[7]);
+
+        digitalWrite(DAISY_SPI_CS, HIGH);
+        daisySpi.endTransaction();
+
+        if (!success) {
+            delayMicroseconds(800);
         }
     }
 
-    digitalWrite(DAISY_SPI_CS, HIGH);
-    daisySpi.endTransaction();
-    
+    if (!success) {
+        spiErrorCount++;
+    }
+
     xSemaphoreGive(spiMutex);
-    
+
+    if (spiLogCallback && cmd != CMD_GET_PEAKS && cmd != CMD_GET_CPU_LOAD
+                       && cmd != CMD_PING    && cmd != CMD_GET_STATUS
+                       && cmd != CMD_GET_VOICES) {
+        char buf[96];
+        snprintf(buf, sizeof(buf),
+            "{\"type\":\"spi_log\",\"cmd\":\"0x%02X\",\"seq\":%d,\"ok\":%s,\"try\":%d,\"ms\":%lu}",
+            (unsigned)cmd, (int)header.sequence,
+            success ? "true" : "false", (int)attempts, (unsigned long)millis());
+        spiLogCallback(buf);
+    }
+
     return success;
 }
 
@@ -410,61 +313,32 @@ bool SPIMaster::sendAndReceive(uint8_t cmd, const void* payload, uint16_t payloa
 // ═══════════════════════════════════════════════════════
 
 void SPIMaster::process() {
-    // One-way UART heartbeat (debug físico del enlace ESP32->Daisy)
-    // No depende de WebSocket, pads ni estado de conexión.
+    // ── 1. Drain commands queued from Core0 (WS/WiFi task) ──
+    drainCmdQueue();
+
+    // ── 2. Keepalive PING every 2s ──
     static uint32_t lastHeartbeat = 0;
-    if (stm32Connected && (millis() - lastHeartbeat > 1200)) {
-        sendCommand(CMD_PING, nullptr, 0);
+    if (stm32Connected && (millis() - lastHeartbeat > 2000)) {
+        sendCommandDirect(CMD_PING, nullptr, 0);
         lastHeartbeat = millis();
     }
 
-    // Optional telemetry polling (disabled in strict protocol boundary mode)
-    if (!kStrictProtocolBoundary) {
-        // Poll peaks every 50ms
-        if (millis() - lastPeakRequest > 50) {
-            requestPeaks();
-            lastPeakRequest = millis();
+    // ── 3. Drain Daisy events every 1.5s (SD load done, kit loaded, etc.) ──
+    // cachedStatus.evtCount is NOT used here because in strict mode requestStatus
+    // is never called, so evtCount would always be 0. We probe unconditionally.
+    if (millis() - lastStatusPoll > 1500) {
+        if (stm32Connected) {
+            drainEvents();
         }
-
-        // Poll full status every 500ms
-        if (millis() - lastStatusPoll > 500) {
-            if (!requestStatus() && stm32Connected) {
-                stm32Connected = false;
-                Serial.println("[SPI] Link lost - switching to reconnect mode");
-            }
-            lastStatusPoll = millis();
-
-            // Auto-drain events if any pending
-            if (cachedStatus.evtCount > 0) {
-                drainEvents();
-            }
-        }
-    } else {
-        // Strict mode: keep transport light and only drain Daisy events.
-        // Peaks are polled on-demand from WebInterface when clients need them.
-        if (millis() - lastStatusPoll > 1200) {
-            if (stm32Connected) {
-                drainEvents();
-            }
-            lastStatusPoll = millis();
-        }
+        lastStatusPoll = millis();
     }
-    
-    // Retry connection if not connected
+
+    // ── 4. Reconnect if link dropped ──
     if (!stm32Connected) {
         static uint32_t lastRetry = 0;
-        static uint32_t retryCount = 0;
         if (millis() - lastRetry > 3000) {
             uint32_t rtt;
-            retryCount++;
-            Serial.printf("[SPI] Retry #%lu — PING CS=GPIO%d SCK=GPIO%d MOSI=GPIO%d MISO=GPIO%d\n",
-                          retryCount, DAISY_SPI_CS, DAISY_SPI_SCK, DAISY_SPI_MOSI, DAISY_SPI_MISO);
-            if (ping(rtt)) {
-                stm32Connected = true;
-                Serial.printf("[SPI] Daisy CONECTADA! RTT: %lu us\n", rtt);
-            } else {
-                Serial.printf("[SPI] Daisy NO responde (intento %lu) — verifica cables D7/D8/D9/D10\n", retryCount);
-            }
+            if (ping(rtt)) stm32Connected = true;
             lastRetry = millis();
         }
     }
@@ -1128,7 +1002,6 @@ void SPIMaster::setPadLoop(int padIndex, bool enabled) {
     PadLoopPayload p = {(uint8_t)padIndex, (uint8_t)(enabled ? 1 : 0)};
     sendCommand(CMD_PAD_LOOP, &p, sizeof(p));
     
-    Serial.printf("[SPI] Pad %d loop: %s\n", padIndex, enabled ? "ON" : "OFF");
 }
 
 bool SPIMaster::isPadLooping(int padIndex) {
@@ -1219,8 +1092,6 @@ bool SPIMaster::transferSample(int padIndex, int16_t* buffer, uint32_t numSample
     
     uint32_t totalBytes = numSamples * sizeof(int16_t);
     
-    Serial.printf("[SPI] Transferring sample %d: %d samples (%d bytes)...\n",
-                  padIndex, numSamples, totalBytes);
     
     // 1. BEGIN
     SampleBeginPayload beginP = {};
@@ -1270,9 +1141,13 @@ bool SPIMaster::transferSample(int padIndex, int16_t* buffer, uint32_t numSample
     endP.checksum = crc16((uint8_t*)buffer, totalBytes > 65535 ? 65535 : (uint16_t)totalBytes);
     
     sendCommand(CMD_SAMPLE_END, &endP, sizeof(endP));
-    
-    Serial.printf("[SPI] Sample %d transfer complete: %d chunks, %d bytes\n",
-                  padIndex, chunkCount, totalBytes);
+
+    // Da tiempo a la Daisy para finalizar el buffer tras CMD_SAMPLE_END.
+    // Sin este delay, samples grandes (>32KB) producen ruido al disparar
+    // inmediatamente porque la STM32 aún está procesando los últimos chunks.
+    uint32_t waitMs = totalBytes < 32768 ? 60 : (totalBytes < 131072 ? 120 : 200);
+    vTaskDelay(pdMS_TO_TICKS(waitMs));
+
     return true;
 }
 
@@ -1362,12 +1237,12 @@ void SPIMaster::getTrackPeaks(float* outPeaks, int count) {
 }
 
 bool SPIMaster::requestPeaks() {
-    if (!stm32Connected) return false;
-    
     PeaksResponse resp;
     if (sendAndReceive(CMD_GET_PEAKS, nullptr, 0, &resp, sizeof(resp))) {
         memcpy(cachedTrackPeaks, resp.trackPeaks, sizeof(cachedTrackPeaks));
         cachedMasterPeak = resp.masterPeak;
+        /* Si la comunicación funciona, confirmar conexión aunque el boot ping fallara */
+        if (!stm32Connected) stm32Connected = true;
         return true;
     }
     return false;
@@ -1388,7 +1263,8 @@ bool SPIMaster::ping(uint32_t& roundtripUs) {
     uint32_t start = micros();
     if (sendAndReceive(CMD_PING, &pingP, sizeof(pingP), &pong, sizeof(pong))) {
         roundtripUs = micros() - start;
-        return (pong.echoTimestamp == pingP.timestamp);
+        if (!stm32Connected) stm32Connected = true;  // auto-reconnect si el boot ping falló
+        return true;
     }
     return false;
 }
@@ -1418,7 +1294,6 @@ void SPIMaster::resetDSP() {
     cachedLimiterActive = false;
     memset(&cachedStatus, 0, sizeof(cachedStatus));
     
-    Serial.println("[SPI] DSP Reset sent");
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1583,11 +1458,6 @@ bool SPIMaster::requestStatus() {
     StatusResponse resp = {};
     if (sendAndReceive(CMD_GET_STATUS, nullptr, 0, &resp, sizeof(resp))) {
         cachedStatus = resp;
-        if (SPI_DEBUG_ENABLED) {
-            Serial.printf("[SPI] Status: voices=%d cpu=%d%% kit='%s' pads=%d sd=%d evt=%d\n",
-                resp.activeVoices, resp.cpuLoadPercent, resp.currentKitName,
-                resp.totalPadsLoaded, resp.sdPresent, resp.evtCount);
-        }
         return true;
     }
     return false;
@@ -1606,41 +1476,20 @@ bool SPIMaster::requestEvents(EventsResponse& out) {
 
 bool SPIMaster::drainEvents() {
     if (!stm32Connected) return false;
-    uint8_t remaining = cachedStatus.evtCount;
     int totalDrained = 0;
-    
-    while (remaining > 0) {
+    // Probe unconditionally up to 4 rounds — do NOT rely on cachedStatus.evtCount
+    // because in normal operation requestStatus() is never called and evtCount=0.
+    for (int round = 0; round < 4; round++) {
         EventsResponse evtResp = {};
         if (!requestEvents(evtResp)) break;
         if (evtResp.count == 0) break;
-        
         for (int i = 0; i < evtResp.count; i++) {
             const NotifyEvent& evt = evtResp.events[i];
             totalDrained++;
-            
-            // Log the event
-            const char* evtName = "???";
-            switch (evt.type) {
-                case EVT_SD_BOOT_DONE:     evtName = "BOOT_DONE"; break;
-                case EVT_SD_KIT_LOADED:    evtName = "KIT_LOADED"; break;
-                case EVT_SD_SAMPLE_LOADED: evtName = "SAMPLE_LOADED"; break;
-                case EVT_SD_KIT_UNLOADED:  evtName = "KIT_UNLOADED"; break;
-                case EVT_SD_ERROR:         evtName = "SD_ERROR"; break;
-                case EVT_SD_XTRA_LOADED:   evtName = "XTRA_LOADED"; break;
-            }
-            Serial.printf("[SPI EVT] %s: pads=%d name='%s'\n", evtName, evt.padCount, evt.name);
-            
-            // Fire callback if registered
             if (eventCallback) {
                 eventCallback(evt, eventUserData);
             }
         }
-        
-        remaining -= evtResp.count;
-    }
-    
-    if (totalDrained > 0) {
-        Serial.printf("[SPI] Drained %d events\n", totalDrained);
     }
     return totalDrained > 0;
 }
@@ -1710,4 +1559,103 @@ void SPIMaster::synthSetActive(uint8_t engineMask) {
     if (sendCommand(CMD_SYNTH_ACTIVE, &p, sizeof(p))) {
         cachedSynthActiveMask = engineMask;
     }
+}
+
+// ═══════════════════════════════════════════════════════
+// DAISY SEQUENCER (0xD0-0xD8)
+// ═══════════════════════════════════════════════════════
+
+bool SPIMaster::dsqUploadTrack(uint8_t pattern, uint8_t track,
+                               const DsqStepPkt* steps, uint8_t stepCount)
+{
+    if (!steps || stepCount == 0 || stepCount > DSQ_MAX_STEPS) return false;
+
+    // Build payload: 4-byte header + stepCount * 4-byte DsqStepPkt
+    uint8_t buf[4 + DSQ_MAX_STEPS * sizeof(DsqStepPkt)];
+    buf[0] = pattern & 7;
+    buf[1] = track & 15;
+    buf[2] = stepCount;
+    buf[3] = 0; // reserved
+    memcpy(buf + 4, steps, stepCount * sizeof(DsqStepPkt));
+    return sendCommand(CMD_DSQ_UPLOAD_TRACK, buf, 4 + stepCount * sizeof(DsqStepPkt));
+}
+
+bool SPIMaster::dsqSetStep(uint8_t pattern, uint8_t track, uint8_t step,
+                           bool active, uint8_t velocity,
+                           uint8_t noteLenDiv, uint8_t probability)
+{
+    DsqSetStepPayload p;
+    p.pattern    = pattern & 7;
+    p.track      = track & 15;
+    p.step       = step < DSQ_MAX_STEPS ? step : 0;
+    p.active     = active ? 1 : 0;
+    p.velocity   = velocity ? velocity : 100;
+    p.noteLenDiv = noteLenDiv;
+    p.probability = probability ? probability : 100;
+    p.reserved   = 0;
+    return sendCommand(CMD_DSQ_SET_STEP, &p, sizeof(p));
+}
+
+bool SPIMaster::dsqControl(uint8_t mode) {
+    uint8_t buf[1] = { mode };
+    return sendCommand(CMD_DSQ_CONTROL, buf, 1);
+}
+
+bool SPIMaster::dsqSelectPattern(uint8_t pattern) {
+    uint8_t buf[1] = { (uint8_t)(pattern & 7) };
+    return sendCommand(CMD_DSQ_SELECT_PATTERN, buf, 1);
+}
+
+bool SPIMaster::dsqSetLength(uint8_t length) {
+    if (length != 16 && length != 32 && length != 64) return false;
+    uint8_t buf[1] = { length };
+    return sendCommand(CMD_DSQ_SET_LENGTH, buf, 1);
+}
+
+bool SPIMaster::dsqSetMute(uint8_t track, bool muted) {
+    uint8_t buf[2] = { (uint8_t)(track & 15), muted ? 1u : 0u };
+    return sendCommand(CMD_DSQ_SET_MUTE, buf, 2);
+}
+
+bool SPIMaster::dsqSetSwing(uint8_t amount) {
+    uint8_t buf[1] = { amount > 100 ? 100u : amount };
+    return sendCommand(CMD_DSQ_SET_SWING, buf, 1);
+}
+
+bool SPIMaster::dsqSetParamLock(uint8_t pattern, uint8_t track, uint8_t step,
+                                bool cutoffEn, uint16_t cutoffHz,
+                                bool reverbEn, uint8_t reverbSend,
+                                bool volEn, uint8_t volume)
+{
+    DsqSetParamLockPayload p;
+    p.pattern   = pattern & 7;
+    p.track     = track & 15;
+    p.step      = step < DSQ_MAX_STEPS ? step : 0;
+    p.cutoffEn  = cutoffEn ? 1 : 0;
+    p.cutoffHi  = (uint8_t)(cutoffHz >> 8);
+    p.cutoffLo  = (uint8_t)(cutoffHz & 0xFF);
+    p.reverbEn  = reverbEn ? 1 : 0;
+    p.reverbSend = reverbSend;
+    p.volEn     = volEn ? 1 : 0;
+    p.volume    = volume;
+    p.reserved[0] = p.reserved[1] = 0;
+    return sendCommand(CMD_DSQ_SET_PARAM_LOCK, &p, sizeof(p));
+}
+
+bool SPIMaster::dsqGetPos(uint8_t& outStep, uint8_t& outPattern, bool& outPlaying)
+{
+    DsqPosResponse r = {};
+    bool ok = sendAndReceive(CMD_DSQ_GET_POS, nullptr, 0, &r, sizeof(r));
+    if (ok) {
+        outStep    = r.currentStep;
+        outPattern = r.currentPattern;
+        outPlaying = r.playing != 0;
+    }
+    return ok;
+}
+
+bool SPIMaster::dsqSetTrackEngine(uint8_t track, int8_t engine)
+{
+    uint8_t buf[2] = { (uint8_t)(track & 15), (uint8_t)engine };
+    return sendCommand(CMD_DSQ_SET_TRACK_ENGINE, buf, 2);
 }

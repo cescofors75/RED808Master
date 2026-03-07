@@ -12,6 +12,8 @@ let wsConnected = false;
 let autoRefreshTimer = null;
 let autoRefreshEnabled = true;
 let logPaused = false;
+let spiLogPaused = false;
+let spiPktCount = 0;
 const chartHistory = { heap: [], psram: [], labels: [] };
 let chartCtx = null;
 let chartAnimId = null;
@@ -26,6 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('logPauseChk').addEventListener('change', e => {
     logPaused = e.target.checked;
   });
+  const spiPauseChk = document.getElementById('spiLogPauseChk');
+  if (spiPauseChk) spiPauseChk.addEventListener('change', e => { spiLogPaused = e.target.checked; });
 });
 
 // ── WebSocket ─────────────────────────────────────────────────────────────
@@ -74,6 +78,7 @@ function handleWsMsg(d) {
   if (d.type === 'sysinfo') updateDashboard(d);
   if (d.type === 'peaks')   updatePeaks(d.peaks, d.master);
   if (d.type === 'log')     admLog(d.msg, d.level || 'info');
+  if (d.type === 'spi_log') spiLogAppend(d);
   if (d.type === 'daisy')   updateDaisyStatus(d);
   if (d.wsClients != null)  updateWsClients(d.wsClients);
   if (d.udpClients != null) updateUdpClients(d.udpClients);
@@ -190,6 +195,13 @@ function updateDashboard(d) {
   setEl('ds-rtt', d.daisyRttMs != null && d.daisyRttMs >= 0 ? `${Number(d.daisyRttMs).toFixed(2)} ms` : '--');
   setEl('ds-samples', d.samplesLoaded != null ? d.samplesLoaded : '--');
   setEl('ds-voices', d.daisyVoices != null ? `${d.daisyVoices} voces` : '--');
+  setEl('ds-pads',   d.daisyPadsLoaded != null ? d.daisyPadsLoaded + ' / 24' : '--');
+  const errCnt = d.daisySpiErrCnt;
+  const errEl  = document.getElementById('ds-errcnt');
+  if (errEl && errCnt != null) {
+    errEl.textContent = errCnt;
+    errEl.style.color = errCnt > 0 ? '#f87171' : '';
+  }
   setEl('ds-uptime', d.uptime != null ? fmtUptime(d.uptime) : '--');
 
   if (Array.isArray(d.daisyTrackPeaks)) {
@@ -232,15 +244,20 @@ function updateSeqFromState(d) {
 
 // ── Daisy ─────────────────────────────────────────────────────────────────
 function updateDaisyStatus(d) {
-  const connected = d.connected || d.daisy_conn;
+  // Normalizar campo: el servidor envía 'daisyConnected', mensajes live usan 'connected'
+  const connected = d.daisyConnected || d.connected || d.daisy_conn;
   setBadge('daisy-badge', connected ? 'CONECTADO' : 'SIN CONEXIÓN',
            connected ? 'badge-ok' : 'badge-dim');
-  setEl('ds-rtt',     d.rtt     != null ? d.rtt + ' ms'     : '--');
-  setEl('ds-samples', d.samples != null ? d.samples          : '--');
-  setEl('ds-voices',  d.voices  != null ? d.voices + ' voces': '--');
+  setEl('ds-conn', connected ? 'OK' : 'OFFLINE');
+  setEl('ds-rtt',     d.daisyRttMs != null ? `${Number(d.daisyRttMs).toFixed(2)} ms` : (d.rtt != null ? d.rtt + ' ms' : '--'));
+  setEl('ds-samples', d.samplesLoaded != null ? d.samplesLoaded : (d.samples != null ? d.samples : '--'));
+  setEl('ds-voices',  d.daisyVoices  != null ? d.daisyVoices + ' voces' : (d.voices != null ? d.voices + ' voces' : '--'));
   setEl('ds-uptime',  d.uptime  != null ? fmtUptime(d.uptime): '--');
   const hint = document.getElementById('daisy-hint');
-  if (hint) hint.textContent = connected ? 'Conexión UDP activa' : 'Esperando Daisy Seed…';
+  if (hint) {
+    const status = connected ? 'Conexión SPI activa' : 'Esperando Daisy Seed…';
+    hint.textContent = `${status} — D7←GPIO7 (CS) · D8←GPIO4 (SCK) · D9→GPIO6 (MISO) · D10←GPIO5 (MOSI) · GND`;
+  }
 }
 
 // ── Peaks grid ────────────────────────────────────────────────────────────
@@ -394,6 +411,43 @@ function admToggleAutoRefresh() {
 function admClearLog() {
   const el = document.getElementById('admLog');
   if (el) el.innerHTML = '';
+}
+
+// ── SPI Log ───────────────────────────────────────────────────────────────
+function spiLogAppend(d) {
+  if (spiLogPaused) return;
+  const errOnly = document.getElementById('spiErrOnlyChk')?.checked;
+  if (errOnly && d.ok !== false) return;
+  const pre = document.getElementById('spiLog');
+  if (!pre) return;
+
+  spiPktCount++;
+  const cnt = document.getElementById('spi-pkt-count');
+  if (cnt) cnt.textContent = spiPktCount + ' pkts';
+
+  // ok === null  → sendCommand (fire-and-forget, no response expected)
+  // ok === true  → sendAndReceive OK
+  // ok === false → sendAndReceive FAIL
+  const okTag   = d.ok === true  ? ' ✓' : d.ok === false ? ' ✗ FAIL' : '';
+  const tryTag  = d.try != null  ? ` try=${d.try}` : '';
+  const lenTag  = d.len != null  ? ` len=${d.len}`  : '';
+  const ts      = d.ms  != null  ? `+${d.ms}ms` : new Date().toLocaleTimeString('es', {hour12: false});
+  const name    = d.name || ('0x' + (d.cmd || 0).toString(16).toUpperCase());
+
+  const line = document.createElement('span');
+  line.className = d.ok === false ? 'log-err' : d.ok === true ? 'log-info' : 'log-dim';
+  line.textContent = `[${ts}] ${name} (CMD=0x${(d.cmd||0).toString(16).toUpperCase()}) #${d.seq ?? '?'}${lenTag}${tryTag}${okTag}\n`;
+  pre.appendChild(line);
+  while (pre.children.length > 500) pre.removeChild(pre.firstChild);
+  pre.scrollTop = pre.scrollHeight;
+}
+
+function spiLogClear() {
+  const el = document.getElementById('spiLog');
+  if (el) el.innerHTML = '';
+  spiPktCount = 0;
+  const cnt = document.getElementById('spi-pkt-count');
+  if (cnt) cnt.textContent = '0 pkts';
 }
 function admSendWS(obj) {
   if (ws && ws.readyState === WebSocket.OPEN) {

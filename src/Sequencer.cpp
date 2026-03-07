@@ -29,7 +29,6 @@ Sequencer::Sequencer() :
   pd = (PatternData*)ps_calloc(1, sizeof(PatternData));
   if (!pd) {
     pd = (PatternData*)calloc(1, sizeof(PatternData));
-    Serial.println("[SEQ] WARN: ps_calloc failed – patterns in DRAM!");
   }
   // steps[] already zeroed by calloc; set non-zero defaults
   for (int p = 0; p < MAX_PATTERNS; p++) {
@@ -68,12 +67,10 @@ Sequencer::~Sequencer() {
 void Sequencer::start() {
   playing = true;
   lastStepTime = micros();
-  Serial.println("Sequencer started");
 }
 
 void Sequencer::stop() {
   playing = false;
-  Serial.println("Sequencer stopped");
 }
 
 void Sequencer::reset() {
@@ -136,7 +133,6 @@ void Sequencer::update() {
           nextPattern = 0; // Loop back to start
         }
         currentPattern = nextPattern;
-        Serial.printf("[Song] Advanced to pattern %d/%d\n", currentPattern + 1, songLength);
         if (patternChangeCallback != nullptr) {
           patternChangeCallback(currentPattern, songLength);
         }
@@ -269,7 +265,6 @@ void Sequencer::clearPattern(int pattern) {
     }
   }
   
-  Serial.printf("Pattern %d cleared\n", pattern);
 }
 
 void Sequencer::clearPattern() {
@@ -283,7 +278,6 @@ void Sequencer::clearTrack(int track) {
     pd->steps[currentPattern][track][s] = false;
   }
   
-  Serial.printf("Track %d cleared\n", track);
 }
 
 // ============= VELOCITY EDITING =============
@@ -353,14 +347,12 @@ void Sequencer::setPatternBulk(int pattern, const bool stepsData[MAX_TRACKS][STE
       pd->stepReverbSendLockValue[pattern][t][s] = 0;
     }
   }
-  Serial.printf("[Bulk] Pattern %d written (%dx%d)\n", pattern, MAX_TRACKS, patternLength);
 }
 
 void Sequencer::selectPattern(int pattern) {
   if (pattern < 0 || pattern >= MAX_PATTERNS) return;
   
   currentPattern = pattern;
-  Serial.printf("Pattern %d selected\n", pattern);
 }
 
 void Sequencer::muteTrack(int track, bool muted) {
@@ -413,7 +405,6 @@ void Sequencer::copyPattern(int src, int dst) {
     }
   }
   
-  Serial.printf("Pattern %d copied to %d\n", src, dst);
 }
 
 int Sequencer::getCurrentStep() {
@@ -487,6 +478,13 @@ uint16_t Sequencer::getStepCutoffLock(int track, int step) {
   return pd->stepCutoffLockHz[currentPattern][track][step];
 }
 
+uint16_t Sequencer::getStepCutoffLock(int pattern, int track, int step) {
+  if (pattern < 0 || pattern >= MAX_PATTERNS) return 1000;
+  if (track < 0 || track >= MAX_TRACKS) return 1000;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return 1000;
+  return pd->stepCutoffLockHz[pattern][track][step];
+}
+
 void Sequencer::setStepReverbSendLock(int track, int step, bool enabled, uint8_t sendLevel) {
   if (track < 0 || track >= MAX_TRACKS) return;
   if (step < 0 || step >= STEPS_PER_PATTERN) return;
@@ -514,6 +512,13 @@ uint8_t Sequencer::getStepReverbSendLock(int track, int step) {
   if (track < 0 || track >= MAX_TRACKS) return 0;
   if (step < 0 || step >= STEPS_PER_PATTERN) return 0;
   return pd->stepReverbSendLockValue[currentPattern][track][step];
+}
+
+uint8_t Sequencer::getStepReverbSendLock(int pattern, int track, int step) {
+  if (pattern < 0 || pattern >= MAX_PATTERNS) return 0;
+  if (track < 0 || track >= MAX_TRACKS) return 0;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return 0;
+  return pd->stepReverbSendLockValue[pattern][track][step];
 }
 
 void Sequencer::setStepProbability(int track, int step, uint8_t probability) {
@@ -605,7 +610,6 @@ void Sequencer::setPatternLength(int len) {
   if (currentStep >= patternLength) {
     currentStep = 0;
   }
-  Serial.printf("[SEQ] Pattern length set to %d steps\n", patternLength);
 }
 
 int Sequencer::getPatternLength() {
@@ -619,9 +623,7 @@ void Sequencer::setSongMode(bool enabled) {
   if (songMode) {
     // When entering song mode, start from pattern 0
     currentPattern = 0;
-    Serial.printf("[Song] Song mode ON, length=%d patterns\n", songLength);
   } else {
-    Serial.println("[Song] Song mode OFF");
   }
 }
 
@@ -633,7 +635,6 @@ void Sequencer::setSongLength(int length) {
   if (length < 1) length = 1;
   if (length > MAX_PATTERNS) length = MAX_PATTERNS;
   songLength = length;
-  Serial.printf("[Song] Song length set to %d patterns\n", songLength);
 }
 
 int Sequencer::getSongLength() {
@@ -647,7 +648,6 @@ void Sequencer::toggleLoop(int track) {
     loopActive[track] = !loopActive[track];
     loopPaused[track] = false; // Reset pause state
     loopStepCounter[track] = 0; // Reset counter
-    Serial.printf("[Loop] Track %d: %s (type=%d)\n", track, loopActive[track] ? "ACTIVE" : "INACTIVE", loopType[track]);
   }
 }
 
@@ -655,7 +655,6 @@ void Sequencer::setLoopType(int track, LoopType type) {
   if (track >= 0 && track < MAX_TRACKS) {
     loopType[track] = type;
     loopStepCounter[track] = 0;
-    Serial.printf("[Loop] Track %d type set to %d\n", track, type);
   }
 }
 
@@ -670,7 +669,6 @@ void Sequencer::pauseLoop(int track) {
   if (track >= 0 && track < MAX_TRACKS) {
     if (loopActive[track]) {
       loopPaused[track] = !loopPaused[track];
-      Serial.printf("[Loop] Track %d: %s\n", track, loopPaused[track] ? "PAUSED" : "RESUMED");
     }
   }
 }

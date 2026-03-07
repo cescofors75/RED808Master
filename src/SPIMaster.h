@@ -10,6 +10,16 @@
 #include <Arduino.h>
 #include "protocol.h"
 #include <freertos/semphr.h>
+#include <freertos/queue.h>
+
+// SPI fire-and-forget queue — Core0 (WS/WiFi) → Core1 (SPI task) dispatch.
+// Prevents the async WebSocket handler from blocking on SPI mutex.
+static constexpr uint16_t SPI_QUEUE_PAYLOAD_MAX = 96;
+struct SpiQueuedCmd {
+    uint8_t  cmd;
+    uint16_t payloadLen;
+    uint8_t  payload[SPI_QUEUE_PAYLOAD_MAX];
+};
 
 // Audio constants (shared with STM32)
 #define SAMPLE_RATE 44100
@@ -30,8 +40,8 @@
 #define DAISY_SPI_SCK              4
 #define DAISY_SPI_MOSI             5
 #define DAISY_SPI_MISO             6
-#define DAISY_SPI_CLOCK_HZ    2000000UL
-#define DAISY_SPI_RESPONSE_GAP_US  8000   /* 8ms — Daisy necesita tiempo para audio callback (2.67ms) + process */
+#define DAISY_SPI_CLOCK_HZ    1000000UL   /* 1MHz — margen vs OVR en slave polling */
+#define DAISY_SPI_RESPONSE_GAP_US  6000   /* 6ms — margen seguro para Daisy con audio activo */
 
 // Audio constants (mirrored from old AudioEngine for compatibility)
 static constexpr int MAX_AUDIO_TRACKS = 16;
@@ -330,6 +340,35 @@ public:
     uint8_t getSynthActiveMask() const { return cachedSynthActiveMask; }
 
     // ══════════════════════════════════════════════════
+    // DAISY SEQUENCER (sequencer runs on Daisy Seed)
+    // ══════════════════════════════════════════════════
+    // Upload all steps for one track/pattern (caller builds DsqStepPkt[] from Sequencer)
+    bool dsqUploadTrack(uint8_t pattern, uint8_t track,
+                        const DsqStepPkt* steps, uint8_t stepCount);
+    // Update a single step
+    bool dsqSetStep(uint8_t pattern, uint8_t track, uint8_t step,
+                    bool active, uint8_t velocity, uint8_t noteLenDiv, uint8_t probability);
+    // Playback control: 0=stop 1=play 2=reset
+    bool dsqControl(uint8_t mode);
+    // Select active pattern
+    bool dsqSelectPattern(uint8_t pattern);
+    // Set pattern length (16/32/64)
+    bool dsqSetLength(uint8_t length);
+    // Mute/unmute a track
+    bool dsqSetMute(uint8_t track, bool muted);
+    // Swing amount 0-100
+    bool dsqSetSwing(uint8_t amount);
+    // Per-step parameter lock
+    bool dsqSetParamLock(uint8_t pattern, uint8_t track, uint8_t step,
+                         bool cutoffEn, uint16_t cutoffHz,
+                         bool reverbEn, uint8_t reverbSend,
+                         bool volEn, uint8_t volume);
+    // Query sequencer position (blocking round-trip)
+    bool dsqGetPos(uint8_t& outStep, uint8_t& outPattern, bool& outPlaying);
+    // Set engine for a track in Daisy sequencer (-1=sampler, 0=808, 1=909, 2=505, 3=303)
+    bool dsqSetTrackEngine(uint8_t track, int8_t engine);
+
+    // ══════════════════════════════════════════════════
     // FILTER PRESETS (static, for UI)
     // ══════════════════════════════════════════════════
     static const FilterPreset* getFilterPreset(FilterType type);
@@ -338,6 +377,14 @@ public:
     // Connection status
     bool isConnected() const { return stm32Connected; }
     uint32_t getSPIErrors() const { return spiErrorCount; }
+
+    // ══════════════════════════════════════════════════
+    // SPI LOG CALLBACK (WebSocket diagnostics)
+    // ══════════════════════════════════════════════════
+    // Called after each SPI transaction (except CMD_GET_PEAKS spam).
+    // JSON: {"type":"spi_log","name":"PING","cmd":238,"seq":3,"len":4,"ok":true,"try":1,"ms":12345}
+    typedef void (*SpiLogCallback)(const char* json);
+    void setSpiLogCallback(SpiLogCallback cb) { spiLogCallback = cb; }
     
     // Process (called from task loop — handles IRQ, peak polling)
     void process();
@@ -412,9 +459,16 @@ private:
     
     // SPI mutex for thread safety (Core0 triggers vs Core1 process)
     SemaphoreHandle_t spiMutex;
-    
+    // Core0 → Core1 fire-and-forget command queue (avoids blocking WS handler)
+    QueueHandle_t     spiCmdQueue;
+
+    // SPI log callback (diagnostics via WebSocket admin panel)
+    SpiLogCallback spiLogCallback;
+
     // SPI low-level
     bool sendCommand(uint8_t cmd, const void* payload, uint16_t payloadLen);
+    bool sendCommandDirect(uint8_t cmd, const void* payload, uint16_t payloadLen);
+    void drainCmdQueue();   // Called from Core1 process() loop
     bool sendAndReceive(uint8_t cmd, const void* payload, uint16_t payloadLen,
                         void* response, uint16_t responseLen);
     uint16_t crc16(const uint8_t* data, uint16_t len);

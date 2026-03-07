@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <LittleFS.h>
+#include <ArduinoJson.h>
 #include <Adafruit_NeoPixel.h>
 #include "SPIMaster.h"
 #include "SampleManager.h"
@@ -8,8 +9,7 @@
 #include "WebInterface.h"
 #include "MIDIController.h"
 #include "LFOEngine.h"
-
-// --- I2S pins now on STM32 (BCK=42, WS=41, DOUT=40 ya no se usan en ESP32) ---
+#include "PhysControlButtons.h"
 
 // LED RGB integrado ESP32-S3
 #define RGB_LED_PIN  48
@@ -29,9 +29,6 @@
 #define AP_SSID     "RED808"
 #define AP_PASSWORD "red808esp32"
 
-// USB MIDI HOST (desactivar temporalmente para aislar problemas de arranque/web)
-#define ENABLE_USB_MIDI false
-
 // Daisy-first workflow: no precarga de samples locales en boot de ESP32.
 // Los samples se gestionan desde SD en Daisy vía comandos SD_*.
 #define BOOT_PRELOAD_LOCAL_SAMPLES false
@@ -48,6 +45,19 @@ WebInterface webInterface;
 MIDIController midiController;
 Adafruit_NeoPixel rgbLed(RGB_LED_NUM, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);
 
+// ── Botones físicos con LED RGB ──────────────────────────────────
+PhysControlButtons ctrlButtons;
+bool gMultiviewActive = false;   // estado actual del panel multiview
+// Estado de FX master para toggles desde botones físicos
+bool gDelayActive    = false;
+bool gReverbActive   = false;
+bool gChorusActive   = false;
+bool gPhaserActive   = false;
+bool gFlangerActive  = false;
+bool gCompActive     = false;
+bool gTremoloActive  = false;
+bool gLimiterActive  = true;
+bool gDistActive     = false;
 // Track synth engine map for sequencer tracks:
 // -1 = sample, 0 = 808, 1 = 909, 2 = 505, 3 = 303
 int8_t gTrackSynthEngine[16] = {
@@ -59,12 +69,12 @@ int8_t gTrackSynthEngine[16] = {
 
 void setTrackSynthEngine(int track, int8_t engine) {
     if (track < 0 || track >= 16) return;
-    if (engine < -1 || engine > 3) return;
+    if (engine < -1 || engine > 6) return;  // 0=808,1=909,2=505,3=303,4=WT,5=SH101,6=FM2Op
     gTrackSynthEngine[track] = engine;
 }
 
 void setAllTrackSynthEngines(int8_t engine) {
-    if (engine < -1 || engine > 3) return;
+    if (engine < -1 || engine > 6) return;  // 0-6 valid engine IDs
     for (int i = 0; i < 16; i++) {
         gTrackSynthEngine[i] = engine;
     }
@@ -150,39 +160,85 @@ void showReadyLED() {
 volatile uint8_t ledBrightness = 0;
 volatile bool ledFading = false;
 volatile bool ledMonoMode = false;
-volatile bool midiUsbActive = false;
 
 void setLedMonoMode(bool enabled) {
     ledMonoMode = enabled;
-    Serial.printf("[LED] Mono mode %s\n", enabled ? "ENABLED" : "DISABLED");
 }
 
 // --- TASKS (CORE PINNING) ---
-// CORE 1: Sequencer + SPI Master (Máxima Prioridad)
-// El secuenciador y la comunicación SPI comparten Core 1 para mínima latencia
+
+// ── Triggers eliminados: el secuenciador ahora corre en Daisy Seed ──
+// Daisy dispara los samples sample-accurately internamente (DsqFireStep).
+// ESP32 solo sube el patrón una vez y envía CMD_DSQ_CONTROL play/stop.
+
+// Helper: convierte un patrón del Sequencer ESP32 → DsqStepPkt y lo sube a Daisy
+void dsqUploadPattern(int pattern) {
+    const int stepCount = sequencer.getPatternLength();  // longitud global
+    const int clampedLen = (stepCount >= 64) ? 64 : (stepCount >= 32) ? 32 : 16;
+    DsqStepPkt pkt[DSQ_MAX_STEPS];
+    for (int trk = 0; trk < DSQ_TRACKS; trk++) {
+        for (int s = 0; s < clampedLen; s++) {
+            pkt[s].active      = sequencer.getStep(pattern, trk, s) ? 1 : 0;
+            pkt[s].velocity    = sequencer.getStepVelocity(pattern, trk, s);
+            pkt[s].noteLenDiv  = sequencer.getStepNoteLen(pattern, trk, s);
+            pkt[s].probability = sequencer.getStepProbability(pattern, trk, s);
+        }
+        spiMaster.dsqSetLength((uint8_t)clampedLen);
+        spiMaster.dsqUploadTrack((uint8_t)pattern, (uint8_t)trk, pkt, (uint8_t)clampedLen);
+        // Param locks
+        for (int s = 0; s < clampedLen; s++) {
+            uint16_t ch = sequencer.getStepCutoffLock(pattern, trk, s);
+            bool ce = (ch != 0 && ch != 1000);
+            uint8_t rv = sequencer.getStepReverbSendLock(pattern, trk, s);
+            bool re = (rv != 0);
+            uint8_t vl = sequencer.getStepVolumeLock(pattern, trk, s);
+            bool ve = (vl != 0);
+            if (ce || re || ve) {
+                spiMaster.dsqSetParamLock(
+                    (uint8_t)pattern, (uint8_t)trk, (uint8_t)s,
+                    ce, ch, re, rv, ve, vl
+                );
+            }
+        }
+    }
+}
+
+// CORE 1: Sequencer UI + SPI Master
+// El secuenciador corre en Daisy Seed; aquí solo actualizamos estado UI y LFO.
 void spiAudioTask(void *pvParameters) {
-    Serial.println("[Task] SPI Audio Task en Core 1 (Prioridad: 24)");
+    // Subir todos los patrones a Daisy Seed al arrancar
+    // (el SPI ya está listo porque spiMaster.begin() fue llamado en setup)
+    for (int pat = 0; pat < DSQ_PATTERNS; pat++) {
+        dsqUploadPattern(pat);
+        vTaskDelay(pdMS_TO_TICKS(2));   // pequeño gap entre patrones
+    }
+    // Seleccionar patrón activo en Daisy
+    spiMaster.dsqSelectPattern((uint8_t)sequencer.getCurrentPattern());
+    // Sync tempo inicial a secuenciador Daisy
+    spiMaster.setTempo((float)sequencer.getTempo());
+
     while (true) {
-        sequencer.update();     // Tick del secuenciador
-        lfoEngine.update(sequencer.getTempo(), spiMaster); // LFO modulation
-        spiMaster.process();    // Poll peaks, manage SPI comms
-        vTaskDelay(pdMS_TO_TICKS(1)); // ~1000Hz loop
+        sequencer.update();   // Mantiene internos del secuenciador (beat UI, song mode)
+        lfoEngine.update(sequencer.getTempo(), spiMaster);
+        spiMaster.process();
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 
 // CORE 0: WiFi, Web Server, MIDI, LED (Prioridad Media)
 void systemTask(void *pvParameters) {
-    Serial.println("[Task] System Task en Core 0 (Prioridad: 5)");
     
     uint32_t lastLedUpdate = 0;
+    uint32_t lastBtnUpdate  = 0;
     
     while (true) {
         webInterface.update();
         webInterface.handleUdp();
-        if (midiUsbActive) {
-            midiController.update();
+        // Botones físicos — Core 0 (mismo que rgbLed para evitar conflicto RMT)
+        if (millis() - lastBtnUpdate >= 5) {
+            lastBtnUpdate = millis();
+            ctrlButtons.update();
         }
-        
         // Fade out del LED después de trigger
         if (ledFading && millis() - lastLedUpdate > 20) {
             lastLedUpdate = millis();
@@ -202,28 +258,15 @@ void systemTask(void *pvParameters) {
     }
 }
 
-// Callback que el Sequencer llama cada vez que hay un "trigger" en un step
-// NO enciende el LED (solo secuenciador)
-void onStepTrigger(int track, uint8_t velocity, uint8_t trackVolume, uint32_t noteLenSamples) {
-    int8_t engine = getTrackSynthEngine(track);
-    if (engine >= 0 && engine <= 3) {
-        float scaled = (velocity / 127.0f)
-                     * (trackVolume / 100.0f)
-                     * (spiMaster.getSequencerVolume() / 100.0f);
-        uint8_t synthVelocity = (uint8_t)constrain((int)roundf(scaled * 127.0f), 1, 127);
-        spiMaster.synthTrigger((uint8_t)engine, (uint8_t)track, synthVelocity);
-    } else {
-        spiMaster.triggerSampleSequencer(track, velocity, trackVolume, noteLenSamples);
-    }
-    lfoEngine.onPadTrigger(track);  // LFO retrigger on sequencer hit
-}
+// onStepTrigger eliminado: el secuenciador corre en Daisy Seed.
+// Los triggers sample se disparan en DsqFireStep() dentro del AudioCallback.
+// Los synth triggers (808/909/505 sintéticos) siguen siendo controlados por la UI.
 
 // Función para triggers manuales desde live pads (web interface)
 // Esta SÍ enciende el LED RGB
 void triggerPadWithLED(int track, uint8_t velocity) {
-    Serial.printf("[PAD] trigger pad=%d vel=%d\n", track, velocity);
     int8_t engine = getTrackSynthEngine(track);
-    if (track >= 0 && track < 16 && engine >= 0 && engine <= 3) {
+    if (track >= 0 && track < 16 && engine >= 0 && engine <= 6) {
         uint8_t liveVol = spiMaster.getLiveVolume();
         float scaled = (velocity / 127.0f) * (liveVol / 100.0f);
         uint8_t synthVelocity = (uint8_t)constrain((int)roundf(scaled * 127.0f), 1, 127);
@@ -293,46 +336,24 @@ void setup() {
     rgbLed.setBrightness(255);
     showBootLED();
     delay(500);
-    
-    Serial.begin(115200);
-    
-    // Esperar serial (máximo 3 segundos)
-    int waitCount = 0;
-    while (!Serial && waitCount < 6) {
-        delay(500);
-        waitCount++;
-    }
-    
-    Serial.println("\n=================================");
-    Serial.println("    BOOT START - RED808");
-    Serial.println("=================================");
-    Serial.flush();
-    
-    Serial.println("\n=== RED808 ESP32-S3 DRUM MACHINE ===");
-    Serial.println("[STEP 1] Starting Filesystem...");
-    Serial.flush();
-    
+
     // 1. Filesystem
     if (!LittleFS.begin(true)) {
-        Serial.println("LittleFS FAIL");
         rgbLed.setPixelColor(0, 0xFF0000);
         rgbLed.show();
         while(1) { delay(1000); }
     }
-    Serial.println("LittleFS OK");
 
-    Serial.println("[STEP 2] Initializing SPI Master (STM32 Audio Slave)...");
+    // NVS ya esta disponible en setup: cargar mapeos MIDI persistidos aqui.
+    midiController.loadMappings();
+
     // 2. SPI Master — connects to STM32 for audio DSP
     if (!spiMaster.begin()) {
-        Serial.println("SPI MASTER INIT FAIL");
         rgbLed.setPixelColor(0, 0xFF0000);
         rgbLed.show();
         while(1) { delay(1000); }
     }
-    Serial.println("SPI Master OK");
     
-    Serial.println("[STEP 3] Initializing Sample Manager...");
-    Serial.flush();
     
     showLoadingSamplesLED();
     delay(300);
@@ -350,13 +371,9 @@ void setup() {
 
             if (loadedMainPads >= 16) {
                 shouldPreloadLocalSamples = false;
-                Serial.printf("[BOOT] Daisy already has %d/16 pads loaded (kit='%s') -> skipping ESP32 sample preload\n",
-                              loadedMainPads, sdStatus.currentKit);
             } else {
-                Serial.printf("[BOOT] Daisy has %d/16 pads loaded -> ESP32 preload enabled\n", loadedMainPads);
             }
         } else {
-            Serial.println("[BOOT] Daisy SD status unavailable -> ESP32 preload enabled");
         }
     } else {
         SdStatusResponse sdStatus = {};
@@ -369,19 +386,13 @@ void setup() {
             if (loadedMainPads == 0) {
                 const char* defaultKit = "RED 808 KARZ";
                 bool sent = spiMaster.sdLoadKit(defaultKit, 0, 16);
-                Serial.printf("[BOOT] Daisy-first fallback: no pads loaded -> load kit '%s' (%s)\n",
-                              defaultKit, sent ? "sent" : "FAIL");
             } else {
-                Serial.printf("[BOOT] Daisy-first: Daisy already has %d/16 pads loaded (kit='%s')\n",
-                              loadedMainPads, sdStatus.currentKit);
             }
         } else {
-            Serial.println("[BOOT] Daisy-first: SD status unavailable at boot");
         }
     }
 
     if (shouldPreloadLocalSamples) {
-        Serial.println("[STEP 5] Loading all samples from families...");
         const char* families[] = {"BD", "SD", "CH", "OH", "CY", "CP", "RS", "CB", "LT", "MT", "HT", "MA", "CL", "HC", "MC", "LC"};
 
         // ============= RED 808 KARZ - Default Sample Kit =============
@@ -408,7 +419,6 @@ void setup() {
         // Try loading from RED 808 KARZ first
         File karzDir = LittleFS.open("/RED 808 KARZ", "r");
         if (karzDir && karzDir.isDirectory()) {
-            Serial.println("[RED 808 KARZ] Found default kit folder, loading...");
             File kf = karzDir.openNextFile();
             while (kf) {
                 if (!kf.isDirectory()) {
@@ -427,14 +437,11 @@ void setup() {
                             String searchStr = String("808 ") + String(karzMap[m].prefix);
                             if (upper.startsWith(searchStr) || upper.startsWith(String("808") + String(karzMap[m].prefix))) {
                                 String fullPath = String("/RED 808 KARZ/") + kfName;
-                                Serial.printf("  [KARZ] %s -> %s (pad %d)... ", kfName.c_str(), families[karzMap[m].padIndex], karzMap[m].padIndex);
 
                                 if (sampleManager.loadSample(fullPath.c_str(), karzMap[m].padIndex)) {
-                                    Serial.printf("✓ (%d bytes)\n", sampleManager.getSampleLength(karzMap[m].padIndex) * 2);
                                     karzLoaded[karzMap[m].padIndex] = true;
                                     karzCount++;
                                 } else {
-                                    Serial.println("✗ FAILED");
                                 }
                                 break;
                             }
@@ -445,9 +452,7 @@ void setup() {
                 kf = karzDir.openNextFile();
             }
             karzDir.close();
-            Serial.printf("[RED 808 KARZ] Loaded %d/%d instruments from default kit\n", karzCount, 16);
         } else {
-            Serial.println("[RED 808 KARZ] Default kit folder not found, using per-family folders");
         }
 
         // Fallback: load missing instruments from individual family folders
@@ -455,12 +460,10 @@ void setup() {
             if (karzLoaded[i]) continue;  // Already loaded from KARZ
 
             String path = String("/") + String(families[i]);
-            Serial.printf("  [%d] %s: Opening %s... ", i, families[i], path.c_str());
 
             File dir = LittleFS.open(path, "r");
 
             if (dir && dir.isDirectory()) {
-                Serial.println("OK");
                 File file = dir.openNextFile();
                 bool loaded = false;
 
@@ -475,13 +478,10 @@ void setup() {
                             }
 
                             String fullPath = String("/") + String(families[i]) + "/" + filename;
-                            Serial.printf("       Loading %s... ", fullPath.c_str());
 
                             if (sampleManager.loadSample(fullPath.c_str(), i)) {
-                                Serial.printf("✓ (%d bytes)\n", sampleManager.getSampleLength(i) * 2);
                                 loaded = true;
                             } else {
-                                Serial.println("✗ FAILED");
                             }
                         }
                     }
@@ -494,37 +494,18 @@ void setup() {
                 dir.close();
 
                 if (!loaded) {
-                    Serial.println("       ✗ No compatible samples (.raw/.wav) found");
                 }
             } else {
-                Serial.println("✗ Directory not found or not accessible");
             }
         }
 
-        Serial.printf("✓ Samples loaded: %d/16\n", sampleManager.getLoadedSamplesCount());
     } else {
-        Serial.println("[BOOT] Daisy-first mode: skipping local sample preload (ESP32->Daisy transfer not needed)");
     }
 
     // 4. Sequencer Setup
-    sequencer.setStepCallback(onStepTrigger);
-    sequencer.setStepAutomationCallback([](int track, int /*step*/,
-                                           bool cutoffEnabled, uint16_t cutoffHz,
-                                           bool reverbEnabled, uint8_t reverbSend,
-                                           bool volumeEnabled, uint8_t volume) {
-        if (track < 0 || track >= 16) return;
-        if (cutoffEnabled) {
-            spiMaster.setTrackFilter(track, FILTER_LOWPASS, (float)cutoffHz, 1.2f, 0.0f);
-        }
-        if (reverbEnabled) {
-            spiMaster.setTrackReverbSend(track, reverbSend);
-        }
-        if (volumeEnabled) {
-            sequencer.setTrackVolume(track, volume);
-            spiMaster.setTrackVolume(track, volume);
-        }
-    });
-    
+    // Trigger + automation callbacks eliminados → secuenciador interno en Daisy.
+    // Solo mantenemos step change para indicador de beat en la web UI.
+
     // Callback para sincronización en tiempo real con la web
     sequencer.setStepChangeCallback([](int newStep) {
         webInterface.broadcastStep(newStep);
@@ -768,11 +749,8 @@ void setup() {
 
     sequencer.selectPattern(0); // Empezar con Hip Hop
     // sequencer.start(); // DISABLED: User must press PLAY
-    Serial.println("✓ Sequencer: 6 patrones cargados (Hip Hop, Techno, DnB, Breakbeat, House, Cinematic Hybrid)");
-    Serial.println("   Sequencer en PAUSA - presiona PLAY para iniciar");
 
     // 5. WiFi: STA (red doméstica) con fallback a AP
-    Serial.println("\n[STEP 5] Starting WiFi...");
     
     showWiFiLED();
     delay(500);
@@ -781,17 +759,213 @@ void setup() {
     const char* staPass = strlen(HOME_WIFI_PASS) > 0 ? HOME_WIFI_PASS : nullptr;
     
     if (webInterface.begin(AP_SSID, AP_PASSWORD, staSSID, staPass, HOME_WIFI_TIMEOUT)) {
-        if (webInterface.isSTAMode()) {
-            Serial.print("WiFi STA OK | IP: ");
-        } else {
-            Serial.print("WiFi AP OK | IP: ");
-        }
-        Serial.println(webInterface.getIP());
         showWebServerLED();
         delay(500);
-    } else {
-        Serial.println("WiFi FAIL - continuing");
     }
+
+    // Callback: WebInterface notifica cuando llega POST /api/buttons
+    // Aplica nueva config en tiempo real sin reiniciar
+    webInterface.setBtnConfigCallback([](const String& json) {
+        StaticJsonDocument<1024> doc;
+        if (deserializeJson(doc, json)) return;
+        // Acepta array plano [...] o {"buttons":[...]}
+        JsonArray arr = doc.is<JsonArray>() ? doc.as<JsonArray>() : doc["buttons"].as<JsonArray>();
+        if (arr.isNull()) return;
+        for (int i = 0; i < 4 && i < (int)arr.size(); i++) {
+            BtnCfg cfg;
+            cfg.funcId   = arr[i]["funcId"]   | (uint8_t)ctrlButtons.getCfg(i).funcId;
+            cfg.colorOff = arr[i]["colorOff"]  | (uint32_t)CTRL_CLR_RED;
+            cfg.colorOn  = arr[i]["colorOn"]   | (uint32_t)CTRL_CLR_GREEN;
+            const char* lbl = arr[i]["label"];
+            if (lbl) strncpy(cfg.label, lbl, 19);
+            ctrlButtons.setCfg(i, cfg);
+        }
+    });
+
+    // --- BOTONES FÍSICOS CON LED RGB ---
+    // Cargar configuración guardada antes de begin()
+    {
+        File f;
+        if (LittleFS.exists("/buttons.json")) {
+            f = LittleFS.open("/buttons.json", "r");
+        }
+        if (f) {
+            StaticJsonDocument<1024> doc;
+            if (!deserializeJson(doc, f)) {
+                // Acepta array plano [...] o {"buttons":[...]}
+                JsonArray arr = doc.is<JsonArray>() ? doc.as<JsonArray>() : doc["buttons"].as<JsonArray>();
+                if (!arr.isNull()) {
+                    for (int i = 0; i < 4 && i < (int)arr.size(); i++) {
+                        BtnCfg cfg;
+                        cfg.funcId   = arr[i]["funcId"]   | (uint8_t)ctrlButtons.getCfg(i).funcId;
+                        cfg.colorOff = arr[i]["colorOff"]  | (uint32_t)CTRL_CLR_RED;
+                        cfg.colorOn  = arr[i]["colorOn"]   | (uint32_t)CTRL_CLR_GREEN;
+                        const char* lbl = arr[i]["label"];
+                        if (lbl) strncpy(cfg.label, lbl, 19);
+                        ctrlButtons.setCfg(i, cfg);
+                    }
+                }
+            }
+            f.close();
+        }
+    }
+    ctrlButtons.begin();
+
+    // Callback genérico — dispatcher de todas las funciones
+    ctrlButtons.onAction = [](int btnIdx, uint8_t funcId) {
+        char buf[128];
+        switch (funcId) {
+            /* ── Transporte ── */
+            case BTN_FUNC_PLAY_PAUSE: {
+                bool nowPlaying = !sequencer.isPlaying();
+                if (nowPlaying) { sequencer.start(); spiMaster.dsqControl(1); }
+                else            { sequencer.stop();  spiMaster.dsqControl(0); }
+                ctrlButtons.setLedState(btnIdx, nowPlaying);
+                webInterface.broadcastSequencerState();
+                break;
+            }
+            case BTN_FUNC_STOP:
+                sequencer.stop(); spiMaster.dsqControl(0);
+                ctrlButtons.setLedState(btnIdx, false);
+                webInterface.broadcastSequencerState();
+                break;
+            case BTN_FUNC_NEXT_PATTERN:
+            case BTN_FUNC_NEXT_PAT_PLAY: {
+                int next = (sequencer.getCurrentPattern() + 1) % DSQ_PATTERNS;
+                sequencer.selectPattern(next);
+                spiMaster.dsqSelectPattern((uint8_t)next);
+                if (funcId == BTN_FUNC_NEXT_PAT_PLAY) { sequencer.start(); spiMaster.dsqControl(1); }
+                ctrlButtons.flashLed(btnIdx);
+                snprintf(buf, sizeof(buf),
+                    "{\"type\":\"physButton\",\"action\":\"nextPattern\",\"pattern\":%d}", next);
+                webInterface.broadcastRaw(buf);
+                break;
+            }
+            case BTN_FUNC_PREV_PATTERN:
+            case BTN_FUNC_PREV_PAT_PLAY: {
+                int prev = (sequencer.getCurrentPattern() + DSQ_PATTERNS - 1) % DSQ_PATTERNS;
+                sequencer.selectPattern(prev);
+                spiMaster.dsqSelectPattern((uint8_t)prev);
+                if (funcId == BTN_FUNC_PREV_PAT_PLAY) { sequencer.start(); spiMaster.dsqControl(1); }
+                ctrlButtons.flashLed(btnIdx);
+                snprintf(buf, sizeof(buf),
+                    "{\"type\":\"physButton\",\"action\":\"prevPattern\",\"pattern\":%d}", prev);
+                webInterface.broadcastRaw(buf);
+                break;
+            }
+            case BTN_FUNC_TAP_TEMPO:
+                ctrlButtons.flashLed(btnIdx, CTRL_CLR_YELLOW);
+                // Tap tempo no implementado aquí (requiere multipress timing)
+                break;
+            /* ── Navegación ── */
+            case BTN_FUNC_MULTIVIEW:
+                gMultiviewActive = !gMultiviewActive;
+                ctrlButtons.setLedState(btnIdx, gMultiviewActive);
+                snprintf(buf, sizeof(buf),
+                    "{\"type\":\"physButton\",\"action\":\"multiview\",\"active\":%s}",
+                    gMultiviewActive ? "true" : "false");
+                webInterface.broadcastRaw(buf);
+                break;
+            /* ── Volumen ── */
+            case BTN_FUNC_MASTER_VOL_UP: {
+                uint8_t v = min(150, (int)spiMaster.getMasterVolume() + 5);
+                spiMaster.setMasterVolume(v);
+                ctrlButtons.flashLed(btnIdx, CTRL_CLR_GREEN);
+                break;
+            }
+            case BTN_FUNC_MASTER_VOL_DN: {
+                uint8_t v = (uint8_t)max(0, (int)spiMaster.getMasterVolume() - 5);
+                spiMaster.setMasterVolume(v);
+                ctrlButtons.flashLed(btnIdx, CTRL_CLR_RED);
+                break;
+            }
+            case BTN_FUNC_LIVE_VOL_UP: {
+                uint8_t v = min(180, (int)spiMaster.getLiveVolume() + 5);
+                spiMaster.setLiveVolume(v);
+                ctrlButtons.flashLed(btnIdx, CTRL_CLR_GREEN);
+                break;
+            }
+            case BTN_FUNC_LIVE_VOL_DN: {
+                uint8_t v = (uint8_t)max(0, (int)spiMaster.getLiveVolume() - 5);
+                spiMaster.setLiveVolume(v);
+                ctrlButtons.flashLed(btnIdx, CTRL_CLR_RED);
+                break;
+            }
+            /* ── Tempo ── */
+            case BTN_FUNC_TEMPO_UP1: spiMaster.setTempo(sequencer.getTempo() + 1);  sequencer.setTempo(sequencer.getTempo() + 1);  ctrlButtons.flashLed(btnIdx, CTRL_CLR_YELLOW); break;
+            case BTN_FUNC_TEMPO_DN1: spiMaster.setTempo(max(20.f, sequencer.getTempo() - 1)); sequencer.setTempo(max(20.f, sequencer.getTempo() - 1)); ctrlButtons.flashLed(btnIdx, CTRL_CLR_YELLOW); break;
+            case BTN_FUNC_TEMPO_UP5: spiMaster.setTempo(sequencer.getTempo() + 5);  sequencer.setTempo(sequencer.getTempo() + 5);  ctrlButtons.flashLed(btnIdx, CTRL_CLR_YELLOW); break;
+            case BTN_FUNC_TEMPO_DN5: spiMaster.setTempo(max(20.f, sequencer.getTempo() - 5)); sequencer.setTempo(max(20.f, sequencer.getTempo() - 5)); ctrlButtons.flashLed(btnIdx, CTRL_CLR_YELLOW); break;
+            /* ── FX Master toggles ── */
+            case BTN_FUNC_DELAY_TOGGLE:   gDelayActive   = !gDelayActive;   spiMaster.setDelayActive(gDelayActive);    ctrlButtons.setLedState(btnIdx, gDelayActive);   break;
+            case BTN_FUNC_REVERB_TOGGLE:  gReverbActive  = !gReverbActive;  spiMaster.setReverbActive(gReverbActive);  ctrlButtons.setLedState(btnIdx, gReverbActive);  break;
+            case BTN_FUNC_CHORUS_TOGGLE:  gChorusActive  = !gChorusActive;  spiMaster.setChorusActive(gChorusActive);  ctrlButtons.setLedState(btnIdx, gChorusActive);  break;
+            case BTN_FUNC_PHASER_TOGGLE:  gPhaserActive  = !gPhaserActive;  spiMaster.setPhaserActive(gPhaserActive);  ctrlButtons.setLedState(btnIdx, gPhaserActive);  break;
+            case BTN_FUNC_FLANGER_TOGGLE: gFlangerActive = !gFlangerActive; spiMaster.setFlangerActive(gFlangerActive); ctrlButtons.setLedState(btnIdx, gFlangerActive); break;
+            case BTN_FUNC_COMP_TOGGLE:    gCompActive    = !gCompActive;    spiMaster.setCompressorActive(gCompActive);  ctrlButtons.setLedState(btnIdx, gCompActive);    break;
+            case BTN_FUNC_TREMOLO_TOGGLE: gTremoloActive = !gTremoloActive; spiMaster.setTremoloActive(gTremoloActive); ctrlButtons.setLedState(btnIdx, gTremoloActive); break;
+            case BTN_FUNC_LIMITER_TOGGLE: gLimiterActive = !gLimiterActive; spiMaster.setLimiterActive(gLimiterActive); ctrlButtons.setLedState(btnIdx, gLimiterActive); break;
+            case BTN_FUNC_DIST_TOGGLE:    gDistActive    = !gDistActive; ctrlButtons.setLedState(btnIdx, gDistActive); break;
+            /* ── Mute/Solo ── */
+            case BTN_FUNC_MUTE_ALL:
+                for (int t=0;t<16;t++) spiMaster.setTrackMute(t, true);
+                ctrlButtons.setLedState(btnIdx, true);
+                break;
+            case BTN_FUNC_UNMUTE_ALL:
+                for (int t=0;t<16;t++) spiMaster.setTrackMute(t, false);
+                ctrlButtons.setLedState(btnIdx, false);
+                break;
+            /* ── Longitud patrón ── */
+            case BTN_FUNC_PAT_LEN_CYCLE: {
+                int cur = sequencer.getPatternLength();
+                int next = (cur == 16) ? 32 : (cur == 32) ? 64 : 16;
+                sequencer.setPatternLength(next);
+                spiMaster.dsqSetLength((uint8_t)next);
+                ctrlButtons.flashLed(btnIdx, CTRL_CLR_PURPLE);
+                break;
+            }
+            /* ── Ir a patrón N ── */
+            case BTN_FUNC_PATTERN_0: case BTN_FUNC_PATTERN_1: case BTN_FUNC_PATTERN_2:
+            case BTN_FUNC_PATTERN_3: case BTN_FUNC_PATTERN_4: case BTN_FUNC_PATTERN_5:
+            case BTN_FUNC_PATTERN_6: case BTN_FUNC_PATTERN_7: {
+                int pIdx = funcId - BTN_FUNC_PATTERN_0;
+                sequencer.selectPattern(pIdx);
+                spiMaster.dsqSelectPattern((uint8_t)pIdx);
+                ctrlButtons.flashLed(btnIdx, CTRL_CLR_CYAN);
+                snprintf(buf, sizeof(buf),
+                    "{\"type\":\"physButton\",\"action\":\"nextPattern\",\"pattern\":%d}", pIdx);
+                webInterface.broadcastRaw(buf);
+                break;
+            }
+            /* ── Live Pads (disparo directo vía SPI) ── */
+            case BTN_FUNC_LIVE_PAD_0:  case BTN_FUNC_LIVE_PAD_1:  case BTN_FUNC_LIVE_PAD_2:
+            case BTN_FUNC_LIVE_PAD_3:  case BTN_FUNC_LIVE_PAD_4:  case BTN_FUNC_LIVE_PAD_5:
+            case BTN_FUNC_LIVE_PAD_6:  case BTN_FUNC_LIVE_PAD_7:  case BTN_FUNC_LIVE_PAD_8:
+            case BTN_FUNC_LIVE_PAD_9:  case BTN_FUNC_LIVE_PAD_10: case BTN_FUNC_LIVE_PAD_11:
+            case BTN_FUNC_LIVE_PAD_12: case BTN_FUNC_LIVE_PAD_13: case BTN_FUNC_LIVE_PAD_14:
+            case BTN_FUNC_LIVE_PAD_15: {
+                uint8_t padIdx = (uint8_t)(funcId - BTN_FUNC_LIVE_PAD_0);
+                spiMaster.triggerSampleLive(padIdx, 127);
+                ctrlButtons.flashLed(btnIdx, CTRL_CLR_GREEN);
+                snprintf(buf, sizeof(buf),
+                    "{\"type\":\"physButton\",\"action\":\"triggerPad\",\"pad\":%d}", padIdx);
+                webInterface.broadcastRaw(buf);
+                break;
+            }
+            /* ── XTRA Pads (índices 16-23) ── */
+            case BTN_FUNC_XTRA_PAD_0: case BTN_FUNC_XTRA_PAD_1: case BTN_FUNC_XTRA_PAD_2:
+            case BTN_FUNC_XTRA_PAD_3: case BTN_FUNC_XTRA_PAD_4: case BTN_FUNC_XTRA_PAD_5:
+            case BTN_FUNC_XTRA_PAD_6: case BTN_FUNC_XTRA_PAD_7: {
+                uint8_t padIdx = (uint8_t)(16 + (funcId - BTN_FUNC_XTRA_PAD_0));
+                spiMaster.triggerSampleLive(padIdx, 127);
+                ctrlButtons.flashLed(btnIdx, CTRL_CLR_ORANGE);
+                snprintf(buf, sizeof(buf),
+                    "{\"type\":\"physButton\",\"action\":\"triggerPad\",\"pad\":%d}", padIdx);
+                webInterface.broadcastRaw(buf);
+                break;
+            }
+        }
+    };
 
     // --- SD EVENT CALLBACK (Daisy → WebSocket) ---
     spiMaster.setEventCallback([](const NotifyEvent& evt, void* /*ud*/) {
@@ -806,48 +980,15 @@ void setup() {
         String out;
         serializeJson(doc, out);
         webInterface.broadcastRaw(out.c_str());
-        Serial.printf("[SD-EVT] type=%d pads=%d name=%s\n", evt.type, evt.padCount, evt.name);
     });
-    Serial.println("[SD] Event callback bridge installed");
-
-    // --- MIDI USB HOST ---
-    Serial.println("\n[STEP 6] Initializing MIDI USB...");
-    if (ENABLE_USB_MIDI) {
-        if (midiController.begin()) {
-            midiUsbActive = true;
-            webInterface.setMIDIController(&midiController);
-            
-            midiController.setMessageCallback([](const MIDIMessage& msg) {
-                webInterface.broadcastMIDIMessage(msg);
-                if (msg.type == MIDI_NOTE_ON && msg.data2 > 0) {
-                    int8_t pad = midiController.getMappedPad(msg.data1);
-                    if (pad >= 0 && pad < 8) {
-                        triggerPadWithLED(pad, msg.data2);
-                    }
-                }
-            });
-            
-            midiController.setDeviceCallback([](bool connected, const MIDIDeviceInfo& info) {
-                webInterface.broadcastMIDIDeviceStatus(connected, info);
-            });
-            
-            Serial.println("MIDI USB Host ready");
-        } else {
-            Serial.println("MIDI init failed - continuing");
-        }
-    } else {
-        midiUsbActive = false;
-        Serial.println("MIDI USB Host DISABLED (ENABLE_USB_MIDI=false)");
-    }
 
     // --- DUAL-CORE TASKS ---
-    Serial.println("\n[STEP 7] Creating dual-core tasks...");
     
     // CORE 1: SPI Audio Task (Sequencer + SPI) - Prioridad máxima
     xTaskCreatePinnedToCore(
         spiAudioTask,
         "SPIAudioTask",
-        16384,  // 16KB stack - margen seguro para cadena sequencer→SPI→Serial
+        20480,  // 20KB stack — patrón upload en boot + DSQ upload (16 tracks × 8 patrones)
         NULL,
         24,     // Prioridad máxima
         NULL,
@@ -866,25 +1007,15 @@ void setup() {
     );
 
     showReadyLED();
-    if (webInterface.isSTAMode()) {
-        Serial.printf("\n=== RED808 READY - STA mode, open http://%s ===\n\n",
-                      webInterface.getIP().c_str());
-    } else {
-        Serial.println("\n=== RED808 READY - Connect to WiFi RED808, open 192.168.4.1 ===\n");
-    }
 }
 
 void loop() {
     // Stats cada 10 segundos (reducido para menos overhead)
     static uint32_t lastStats = 0;
     if (millis() - lastStats > 10000) {
-        Serial.printf("Uptime: %ds | Heap: %d (min:%d) | PSRAM: %d | WS clients: %d\n", 
-                      millis()/1000, ESP.getFreeHeap(), ESP.getMinFreeHeap(), 
-                      ESP.getFreePsram(), 0);
-        
-        // Warn if heap is dangerously low
         if (ESP.getFreeHeap() < 30000) {
-            Serial.println("⚠️ WARNING: Low heap memory!");
+            // Heap critically low — broadcast warning to connected clients
+            webInterface.broadcastRaw("{\"type\":\"warning\",\"msg\":\"low_heap\"}");
         }
         lastStats = millis();
     }

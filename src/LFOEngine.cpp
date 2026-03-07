@@ -241,10 +241,10 @@ void LFOEngine::applyModulation(uint8_t pad, SPIMaster& spi) {
             break;
         }
         case LFO_TGT_VOLUME: {
-            // Modulate master volume: base 80, range ±40
-            // v=+1 → 120, v=-1 → 40, v=0 → 80
+            // Modulate per-track volume: base 80, range ±40
+            // v=+1 → 100%, v=-1 → 40%, v=0 → 80% (throb effect)
             uint8_t vol = (uint8_t)constrain((int)(80.0f + v * 40.0f), 0, 100);
-            spi.setMasterVolume(vol);
+            spi.setTrackVolume((int)pad, vol);
             break;
         }
         case LFO_TGT_PAN: {
