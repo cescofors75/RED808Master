@@ -633,6 +633,7 @@ h2 {
 .global-kit-controls {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 6px;
     padding: 5px 8px;
     border-radius: 8px;
@@ -11859,8 +11860,10 @@ body.embed-mode .tab-content:not(.active) { display: none !important; }
 
 /* ═══════════════════════════════════════════════════════
    SYNTH ENGINE SELECTOR STRIP (Live Pads)
-   4 small toggle buttons: 808 / 909 / 505 / 303
-   Positioned vertically on the right side of each pad.
+   Two-column selector:
+   left = WT / SH / FM
+   right = 808 / 909 / 505 / 303
+   Positioned inside each pad.
    ═══════════════════════════════════════════════════════ */
 
 .pad-synth-strip {
@@ -11868,8 +11871,8 @@ body.embed-mode .tab-content:not(.active) { display: none !important; }
     right: 2px;
     top: 50%;
     transform: translateY(-50%);
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
     gap: 2px;
     z-index: 20;
     pointer-events: auto;
@@ -11893,6 +11896,16 @@ body.embed-mode .tab-content:not(.active) { display: none !important; }
     touch-action: manipulation;
     user-select: none;
     -webkit-user-select: none;
+}
+
+.synth-btn-left,
+.synth-btn-right {
+    justify-self: end;
+}
+
+.synth-btn-placeholder {
+    visibility: hidden;
+    pointer-events: none;
 }
 
 @media (min-width: 1200px) {
@@ -11945,6 +11958,30 @@ body.embed-mode .tab-content:not(.active) { display: none !important; }
     box-shadow: 0 0 8px rgba(155, 89, 182, 0.75), inset 0 1px 0 rgba(255,255,255,0.15);
 }
 
+/* WTOSC — naranja */
+.synth-btn[data-engine="4"].active {
+    background: linear-gradient(145deg, #c85f14, #8f430d);
+    border-color: #e67e22;
+    color: #fff;
+    box-shadow: 0 0 8px rgba(230, 126, 34, 0.75), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+
+/* SH-101 — verde azulado */
+.synth-btn[data-engine="5"].active {
+    background: linear-gradient(145deg, #1f8f6b, #16634b);
+    border-color: #27ae60;
+    color: #fff;
+    box-shadow: 0 0 8px rgba(39, 174, 96, 0.75), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+
+/* FM 2-Op — coral */
+.synth-btn[data-engine="6"].active {
+    background: linear-gradient(145deg, #c44536, #8f2f25);
+    border-color: #e74c3c;
+    color: #fff;
+    box-shadow: 0 0 8px rgba(231, 76, 60, 0.75), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+
 /* Badge de engine activo en la esquina superior izquierda del pad */
 .pad.synth-mode-active::before {
     position: absolute;
@@ -11965,6 +12002,8 @@ body.embed-mode .tab-content:not(.active) { display: none !important; }
 .pad[data-synth-engine="2"].synth-mode-active::before { content: "505"; background: #1e8449; }
 .pad[data-synth-engine="3"].synth-mode-active::before { content: "303"; background: #7d3c98; }
 .pad[data-synth-engine="4"].synth-mode-active::before { content: "WT";  background: #c85f14; }
+.pad[data-synth-engine="5"].synth-mode-active::before { content: "SH";  background: #1f8f6b; }
+.pad[data-synth-engine="6"].synth-mode-active::before { content: "FM";  background: #c44536; }
 
 /* Border glow on pad when synth mode active */
 .pad[data-synth-engine="0"].synth-mode-active { border-color: rgba(231, 76, 60, 0.6); }
@@ -11972,6 +12011,8 @@ body.embed-mode .tab-content:not(.active) { display: none !important; }
 .pad[data-synth-engine="2"].synth-mode-active { border-color: rgba(46, 204, 113, 0.6); }
 .pad[data-synth-engine="3"].synth-mode-active { border-color: rgba(155, 89, 182, 0.6); }
 .pad[data-synth-engine="4"].synth-mode-active { border-color: rgba(230, 110, 30, 0.6); }
+.pad[data-synth-engine="5"].synth-mode-active { border-color: rgba(39, 174, 96, 0.6); }
+.pad[data-synth-engine="6"].synth-mode-active { border-color: rgba(231, 76, 60, 0.6); }
 
 /* Ensure pad-container has overflow visible for the strip */
 .pad-container {

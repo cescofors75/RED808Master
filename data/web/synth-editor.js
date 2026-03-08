@@ -1047,7 +1047,7 @@ function openSynthModal(padIndex) {
 
     const inst = (engine < 3) ? padToInstrument(engine, padIndex) : -1;
     const instName = getInstrumentName(engine, inst);
-    const engineLabel = ['TR-808','TR-909','TR-505','TB-303','WTOSC'][engine] || '';
+    const engineLabel = ['TR-808','TR-909','TR-505','TB-303','WTOSC','SH-101','FM2OP'][engine] || '';
     const color = ENGINE_COLORS[engine];
     const padName = (typeof padNames !== 'undefined') ? padNames[padIndex] : `Pad ${padIndex+1}`;
 

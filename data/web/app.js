@@ -50,11 +50,11 @@ let preSoloMuteState = null;    // estado de mutes guardado antes de entrar en s
 let padFilterState = new Array(24).fill(0); // 0 = FILTER_NONE (16 main + 8 xtra)
 let trackFilterState = new Array(16).fill(0); // 0 = FILTER_NONE
 
-// Synth engine selector per pad (-1 = sample mode, 0=808, 1=909, 2=505, 3=303)
+// Synth engine selector per pad (-1 = sample mode, 0=808, 1=909, 2=505, 3=303, 4=WT, 5=SH101, 6=FM2OP)
 let padSynthEngine = new Array(16).fill(-1);
 // TB-303 note map per live pad (chromatic scale C3-D5)
 const PAD_303_NOTES = [48,50,52,53,55,57,59,60,62,64,65,67,69,71,72,74];
-const SYNTH_ENGINE_LABELS = ['808','909','505','303','WTOSC'];
+const SYNTH_ENGINE_LABELS = ['808','909','505','303','WT','SH101','FM2OP'];
 
 // Per-track live FX state (Echo, Flanger, Compressor)
 let trackLiveFxState = new Array(16).fill(null).map(() => ({
@@ -1218,11 +1218,14 @@ function createPads() {
         synthStrip.className = 'pad-synth-strip';
         synthStrip.dataset.pad = i;
         synthStrip.innerHTML = `
-            <button class="synth-btn" data-pad="${i}" data-engine="0" title="TR-808 synth engine">808</button>
-            <button class="synth-btn" data-pad="${i}" data-engine="1" title="TR-909 synth engine">909</button>
-            <button class="synth-btn" data-pad="${i}" data-engine="2" title="TR-505 synth engine">505</button>
-            <button class="synth-btn" data-pad="${i}" data-engine="3" title="TB-303 bass synth">303</button>
-            <button class="synth-btn" data-pad="${i}" data-engine="4" title="Wavetable OSC">WT</button>
+            <button class="synth-btn synth-btn-left" data-pad="${i}" data-engine="4" title="Wavetable OSC">WT</button>
+            <button class="synth-btn synth-btn-right" data-pad="${i}" data-engine="0" title="TR-808 synth engine">808</button>
+            <button class="synth-btn synth-btn-left" data-pad="${i}" data-engine="5" title="SH-101 monosynth">SH</button>
+            <button class="synth-btn synth-btn-right" data-pad="${i}" data-engine="1" title="TR-909 synth engine">909</button>
+            <button class="synth-btn synth-btn-left" data-pad="${i}" data-engine="6" title="FM 2-Op synth">FM</button>
+            <button class="synth-btn synth-btn-right" data-pad="${i}" data-engine="2" title="TR-505 synth engine">505</button>
+            <span class="synth-btn synth-btn-placeholder" aria-hidden="true"></span>
+            <button class="synth-btn synth-btn-right" data-pad="${i}" data-engine="3" title="TB-303 bass synth">303</button>
         `;
         synthStrip.querySelectorAll('.synth-btn').forEach(btn => {
             const stopEvt = (e) => { e.stopPropagation(); };
@@ -2709,7 +2712,7 @@ function updatePadSynthVisual(padIndex, engine) {
         pad.setAttribute('data-synth-engine', engine);
     }
 
-    // Actualizar aspecto de los 4 botones de este pad
+    // Actualizar aspecto de todos los botones de engine de este pad
     const strip = document.querySelector(`.pad-synth-strip[data-pad="${padIndex}"]`);
     if (strip) {
         strip.querySelectorAll('.synth-btn').forEach(btn => {
@@ -2732,7 +2735,7 @@ function refreshGlobalKitButtons() {
 
 function setSynthEngineExact(padIndex, engine, notifyBackend = true, refreshGlobal = true) {
     if (padIndex < 0 || padIndex >= 16) return;
-    const normalizedEngine = (typeof engine === 'number' && engine >= 0 && engine <= 4) ? engine : -1;
+    const normalizedEngine = (typeof engine === 'number' && engine >= 0 && engine <= 6) ? engine : -1;
     if (padSynthEngine[padIndex] === normalizedEngine) {
         if (refreshGlobal) refreshGlobalKitButtons();
         return;
@@ -2781,7 +2784,7 @@ function setSynthEngine(padIndex, engine) {
 }
 
 function applyGlobalKitToAllPads(engine) {
-    const normalizedEngine = (typeof engine === 'number' && engine >= 0 && engine <= 4) ? engine : -1;
+    const normalizedEngine = (typeof engine === 'number' && engine >= 0 && engine <= 6) ? engine : -1;
     // BUG FIX: si algún pad estaba en 303, parar la nota antes de cambiar kit
     const any303Active = padSynthEngine.some(e => e === 3);
     if (any303Active && normalizedEngine !== 3) {
