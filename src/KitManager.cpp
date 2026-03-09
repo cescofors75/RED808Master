@@ -44,6 +44,7 @@ int KitManager::scanKits() {
   // Kit Único: Todos los instrumentos disponibles
   Kit& kit = kits[0];
   strncpy(kit.name, "RED808 16-Track", 31);
+  kit.name[31] = '\0';
   kit.sampleCount = 0;
 
   // Cargar primer sample de cada carpeta
@@ -68,6 +69,7 @@ int KitManager::scanKits() {
         // Agregar al kit
         kit.samples[kit.sampleCount].padIndex = i;
         strncpy(kit.samples[kit.sampleCount].filename, fullPath, 63);
+        kit.samples[kit.sampleCount].filename[63] = '\0';
         kit.sampleCount++;
         
         found = true;

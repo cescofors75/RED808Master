@@ -337,6 +337,7 @@ public:
     void synth303NoteOff();
     void synth303Param(uint8_t paramId, float value);
     void synthSetActive(uint8_t engineMask);
+    void synthPreset(uint8_t engine, uint8_t preset);
     uint8_t getSynthActiveMask() const { return cachedSynthActiveMask; }
 
     // ══════════════════════════════════════════════════

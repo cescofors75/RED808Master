@@ -778,6 +778,7 @@ void setup() {
             cfg.colorOn  = arr[i]["colorOn"]   | (uint32_t)CTRL_CLR_GREEN;
             const char* lbl = arr[i]["label"];
             if (lbl) strncpy(cfg.label, lbl, 19);
+            cfg.label[19] = '\0';
             ctrlButtons.setCfg(i, cfg);
         }
     });
@@ -802,6 +803,7 @@ void setup() {
                         cfg.colorOn  = arr[i]["colorOn"]   | (uint32_t)CTRL_CLR_GREEN;
                         const char* lbl = arr[i]["label"];
                         if (lbl) strncpy(cfg.label, lbl, 19);
+                        cfg.label[19] = '\0';
                         ctrlButtons.setCfg(i, cfg);
                     }
                 }

@@ -224,16 +224,18 @@ typedef struct __attribute__((packed)) {
 
 // ═══════════════════════════════════════════════════════
 // COMMANDS: SYNTH ENGINES (0xC0 - 0xCF)
-//   Daisy Seed onboard synthesis: TR-808, TR-909, TR-505
-//   (percussive engines) + TB-303 (bass synth).
-//   engine IDs: 0=TR-808, 1=TR-909, 2=TR-505, 3=TB-303
+//   Daisy Seed onboard synthesis: TR-808, TR-909, TR-505,
+//   TB-303, WTOSC, SH-101 y FM2Op.
+//   engine IDs: 0=TR-808, 1=TR-909, 2=TR-505, 3=TB-303,
+//               4=WTOSC, 5=SH-101, 6=FM2Op
 // ═══════════════════════════════════════════════════════
 #define CMD_SYNTH_TRIGGER    0xC0  // Trigger one synth instrument
 #define CMD_SYNTH_PARAM      0xC1  // Set synth instrument parameter
 #define CMD_SYNTH_NOTE_ON    0xC2  // TB-303 note on (MIDI note + accent/slide)
 #define CMD_SYNTH_NOTE_OFF   0xC3  // TB-303 note off (no payload)
 #define CMD_SYNTH_303_PARAM  0xC4  // TB-303 global parameter
-#define CMD_SYNTH_ACTIVE     0xC5  // Engine active mask (bit0=808, bit1=909, bit2=505, bit3=303)
+#define CMD_SYNTH_ACTIVE     0xC5  // Engine active mask (bit0=808, bit1=909, bit2=505, bit3=303, bit4=WT, bit5=SH101, bit6=FM2Op)
+#define CMD_SYNTH_PRESET     0xC6  // Apply factory preset [engine(1), preset(1)]
 
 // Synth engine IDs
 #define SYNTH_ENGINE_808   0
@@ -315,8 +317,14 @@ typedef struct __attribute__((packed)) {
 
 // CMD_SYNTH_ACTIVE (0xC5) — 1 byte
 typedef struct __attribute__((packed)) {
-    uint8_t  engineMask;  // bit0=808, bit1=909, bit2=505, bit3=303  (default 0x0F)
+    uint8_t  engineMask;  // bit0=808, bit1=909, bit2=505, bit3=303, bit4=WT, bit5=SH101, bit6=FM2Op
 } SynthActivePayload;
+
+// CMD_SYNTH_PRESET (0xC6) — 2 bytes
+typedef struct __attribute__((packed)) {
+    uint8_t  engine;
+    uint8_t  preset;
+} SynthPresetPayload;
 
 // ═══════════════════════════════════════════════════════
 // COMMANDS: DAISY SEQUENCER (0xD0 - 0xDF)

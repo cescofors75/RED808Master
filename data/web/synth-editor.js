@@ -2,7 +2,7 @@
  * synth-editor.js
  * Synth Parameter Editor for RED808 Drum Machine
  * Provides waveform visualization on pads and a full parameter modal
- * for TR-808, TR-909, TR-505, and TB-303 synth engines.
+ * for TR-808, TR-909, TR-505, TB-303, WTOSC, SH-101, and FM2Op.
  */
 
 // ============================================================
@@ -198,6 +198,247 @@ const PARAMS_FM2OP = [
     { paramId:13, name:'Vel Sens',   min:0, max:1, step:0.01, default:0.7, unit:'' },
     { paramId:14, name:'Volume',     min:0, max:1, step:0.01, default:0.75, unit:'' },
 ];
+
+const SYNTH_FACTORY_PRESETS = {
+    0: [
+        { name:'Classic 808', volumes:[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], instrumentValues:{ 0:{0:0.45,1:55,2:0.30,4:0.15,5:8.0,6:0.08,3:0.80}, 1:{0:0.18,1:185,2:0.50,4:0.60,3:0.80}, 2:{0:0.28,2:0.70,3:0.80}, 3:{0:0.042,3:0.80}, 4:{0:0.28,3:0.80}, 14:{0:0.08,1:1.0,3:0.80}, 15:{0:0.85,3:0.80} } },
+        { name:'Hip-Hop',     volumes:[1.1, 0.9, 0.8, 0.55, 0.6, 0.8, 0.7, 0.7, 0.75, 0.7, 0.65, 0.6, 0.5, 0.7, 0.5, 0.4], instrumentValues:{ 0:{0:0.80,1:46,2:0.55,4:0.24,5:10.5,6:0.12,3:0.92}, 1:{0:0.28,1:160,2:0.35,4:0.72,3:0.74}, 2:{0:0.34,2:0.58,3:0.72}, 3:{0:0.030,3:0.55}, 4:{0:0.22,3:0.60}, 5:{0:0.42,1:70,5:0.22,3:0.76}, 6:{0:0.34,1:108,5:0.20,3:0.70}, 7:{0:0.28,1:162,5:0.16,3:0.68} } },
+        { name:'Techno',      volumes:[1.2, 1.0, 0.6, 0.8, 0.7, 0.5, 0.5, 0.5, 0.4, 0.4, 0.4, 0.3, 0.6, 0.5, 0.3, 0.5], instrumentValues:{ 0:{0:0.36,1:62,2:0.62,4:0.10,5:13.0,6:0.05,3:0.95}, 1:{0:0.16,1:210,2:0.68,4:0.45,3:0.82}, 2:{0:0.20,2:0.85,3:0.62}, 3:{0:0.050,3:0.82}, 4:{0:0.40,3:0.74}, 14:{0:0.05,1:1.18,3:0.55}, 15:{0:1.20,3:0.62} } },
+        { name:'Latin',       volumes:[0.7, 0.6, 0.4, 0.5, 0.5, 0.8, 0.8, 0.9, 1.0, 1.0, 1.1, 1.1, 0.8, 0.8, 0.7, 0.4], instrumentValues:{ 0:{0:0.30,1:58,2:0.18,4:0.10,5:7.0,6:0.06,3:0.68}, 5:{0:0.48,1:92,5:0.14,3:0.86}, 6:{0:0.42,1:144,5:0.14,3:0.84}, 7:{0:0.34,1:215,5:0.10,3:0.92}, 8:{0:0.26,1:150,3:0.92}, 9:{0:0.22,1:228,3:0.96}, 10:{0:0.18,1:320,3:1.00}, 11:{3:0.96}, 12:{3:0.78}, 13:{3:0.82} } },
+    ],
+    1: [
+        { name:'Classic 909', volumes:[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], instrumentValues:{ 0:{0:0.40,1:50,3:0.80}, 1:{0:0.25,2:0.50,4:0.50,3:0.80}, 2:{0:0.30,3:0.80}, 3:{0:0.04,3:0.80}, 4:{0:0.30,3:0.80}, 5:{0:0.30,1:80,3:0.80}, 6:{0:0.30,1:120,3:0.80}, 7:{0:0.30,1:180,3:0.80}, 8:{0:0.50,3:0.80}, 9:{0:0.80,3:0.80}, 10:{3:0.80} } },
+        { name:'Techno',      volumes:[1.2, 1.0, 0.5, 0.9, 0.8, 0.5, 0.5, 0.5, 0.7, 0.3, 0.4], instrumentValues:{ 0:{0:0.55,1:46,3:0.95}, 1:{0:0.20,2:0.68,4:0.72,3:0.84}, 2:{0:0.18,3:0.62}, 3:{0:0.05,3:0.88}, 4:{0:0.42,3:0.80}, 5:{0:0.22,1:76,3:0.60}, 6:{0:0.22,1:116,3:0.60}, 7:{0:0.20,1:170,3:0.60}, 8:{0:0.85,3:0.74}, 9:{0:0.50,3:0.56} } },
+        { name:'House Pound', volumes:[1.1, 0.8, 1.0, 0.6, 0.7, 0.6, 0.6, 0.6, 0.8, 0.4, 0.5], instrumentValues:{ 0:{0:0.62,1:42,3:0.92}, 1:{0:0.22,2:0.42,4:0.40,3:0.70}, 2:{0:0.34,3:0.92}, 3:{0:0.032,3:0.66}, 4:{0:0.24,3:0.74}, 5:{0:0.34,1:78,3:0.68}, 6:{0:0.34,1:118,3:0.68}, 7:{0:0.32,1:176,3:0.68}, 8:{0:0.95,3:0.86}, 9:{0:0.58,3:0.62} } },
+        { name:'Industrial',  volumes:[1.2, 1.1, 0.8, 1.0, 0.9, 0.7, 0.7, 0.7, 0.5, 0.8, 0.7], instrumentValues:{ 0:{0:0.70,1:58,3:1.00}, 1:{0:0.34,2:0.82,4:0.86,3:0.95}, 2:{0:0.40,3:0.88}, 3:{0:0.06,3:0.96}, 4:{0:0.52,3:0.90}, 5:{0:0.38,1:90,3:0.76}, 6:{0:0.38,1:136,3:0.76}, 7:{0:0.36,1:196,3:0.76}, 8:{0:1.40,3:0.66}, 9:{0:1.80,3:0.82}, 10:{3:0.76} } },
+    ],
+    2: [
+        { name:'Classic 505', volumes:[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], instrumentValues:{ 0:{0:0.40,1:55,3:0.80}, 1:{0:0.25,2:0.50,3:0.80}, 2:{0:0.30,3:0.80}, 3:{0:0.04,3:0.80}, 4:{0:0.30,3:0.80}, 5:{0:0.30,1:80,3:0.80}, 6:{0:0.30,1:120,3:0.80}, 7:{0:0.30,1:180,3:0.80}, 8:{0:0.10,3:0.80}, 9:{0:0.80,3:0.80}, 10:{3:0.80} } },
+        { name:'New Wave',    volumes:[0.8, 0.9, 0.7, 0.9, 0.8, 0.6, 0.6, 0.7, 1.1, 0.6, 0.7], instrumentValues:{ 0:{0:0.24,1:68,3:0.72}, 1:{0:0.22,2:0.62,3:0.82}, 2:{0:0.22,3:0.66}, 3:{0:0.05,3:0.90}, 4:{0:0.24,3:0.82}, 8:{0:0.14,3:0.98}, 9:{0:0.42,3:0.62} } },
+        { name:'Electro',     volumes:[1.2, 1.0, 0.6, 0.8, 0.7, 0.7, 0.7, 0.7, 0.5, 0.5, 0.6], instrumentValues:{ 0:{0:0.30,1:60,3:0.92}, 1:{0:0.18,2:0.70,3:0.84}, 2:{0:0.18,3:0.60}, 3:{0:0.05,3:0.80}, 4:{0:0.22,3:0.72}, 5:{0:0.24,1:92,3:0.72}, 6:{0:0.24,1:136,3:0.72}, 7:{0:0.22,1:196,3:0.72} } },
+        { name:'Lo-Fi Hip-Hop', volumes:[1.0, 0.9, 0.7, 0.6, 0.6, 0.8, 0.8, 0.7, 0.4, 0.5, 0.5], instrumentValues:{ 0:{0:0.55,1:48,3:0.88}, 1:{0:0.32,2:0.32,3:0.74}, 2:{0:0.40,3:0.64}, 3:{0:0.03,3:0.58}, 4:{0:0.18,3:0.58}, 5:{0:0.36,1:74,3:0.78}, 6:{0:0.34,1:110,3:0.78}, 7:{0:0.30,1:168,3:0.74}, 8:{0:0.08,3:0.44}, 9:{0:1.10,3:0.50} } },
+    ],
+    3: [
+        { name:'Classic Acid', values:{ 0:1200.0, 1:0.72, 2:0.65, 3:0.35, 4:0.60, 5:0.09, 6:0.0, 7:0.80, 8:0.001, 9:0.0, 10:0.15, 11:0.12, 12:0.08, 13:0.04, 14:0.0 } },
+        { name:'Resonant Squelch', values:{ 0:900.0, 1:0.92, 2:0.95, 3:0.45, 4:0.85, 5:0.12, 6:0.0, 7:0.85, 8:0.001, 9:0.0, 10:0.18, 11:0.28, 12:0.06, 13:0.08, 14:0.0 } },
+        { name:'Sub Bass', values:{ 0:240.0, 1:0.45, 2:0.25, 3:0.60, 4:0.25, 5:0.06, 6:1.0, 7:0.90, 8:0.004, 9:0.45, 10:0.35, 11:0.18, 12:0.45, 13:0.02, 14:0.0 } },
+        { name:'Soft Lead', values:{ 0:2200.0, 1:0.58, 2:0.40, 3:0.80, 4:0.35, 5:0.15, 6:1.0, 7:0.75, 8:0.010, 9:0.35, 10:0.40, 11:0.08, 12:0.18, 13:0.12, 14:0.0 } },
+    ],
+    4: [
+        { name:'Classic Pad', values:{ 0:1.2, 1:30, 2:900, 3:0.75, 4:6500, 5:0.20, 6:0.15, 7:2 } },
+        { name:'Glass Pluck', values:{ 0:2.7, 1:0, 2:260, 3:0.82, 4:4200, 5:5.20, 6:0.08, 7:1 } },
+        { name:'Organ Motion', values:{ 0:6.0, 1:8, 2:1200, 3:0.78, 4:9000, 5:0.90, 6:0.30, 7:2 } },
+        { name:'PWM Bass', values:{ 0:4.0, 1:0, 2:320, 3:0.85, 4:2400, 5:3.50, 6:0.12, 7:0 } },
+    ],
+    5: [
+        { name:'Bass Punch', values:{ 0:0.0, 1:0.50, 2:0.72, 4:650.0, 5:0.25, 6:0.55, 7:0.001, 8:0.18, 9:0.0, 10:0.08, 11:0.001, 12:0.14, 13:0.10, 14:0.0, 15:0.0, 16:0.0, 17:0.05, 18:0.04, 19:0.85 } },
+        { name:'Acid Lead', values:{ 0:0.0, 1:0.42, 2:0.20, 4:1800.0, 5:0.70, 6:0.75, 7:0.001, 8:0.35, 9:0.25, 10:0.18, 11:0.001, 12:0.25, 13:5.50, 14:0.18, 15:1.0, 16:0.0, 17:0.12, 18:0.07, 19:0.80 } },
+        { name:'PWM Keys', values:{ 0:1.0, 1:0.28, 2:0.15, 4:2600.0, 5:0.35, 6:0.45, 7:0.010, 8:0.40, 9:0.55, 10:0.28, 11:0.010, 12:0.45, 13:3.20, 14:0.32, 15:0.0, 16:1.0, 17:0.0, 18:0.03, 19:0.78 } },
+        { name:'Drone Pad', values:{ 0:2.0, 1:0.50, 2:0.35, 4:1200.0, 5:0.82, 6:0.60, 7:0.120, 8:1.20, 9:0.75, 10:1.00, 11:0.080, 12:1.60, 13:0.35, 14:0.40, 15:1.0, 16:0.0, 17:0.18, 18:0.15, 19:0.72 } },
+    ],
+    6: [
+        { name:'FM Bass', values:{ 0:0.001, 1:0.30, 2:0.00, 3:0.12, 4:0.001, 5:0.22, 6:0.00, 7:0.15, 8:1.00, 9:5.50, 10:0.08, 11:0.0, 12:0.0, 13:0.40, 14:0.85 } },
+        { name:'EPiano', values:{ 0:0.001, 1:1.40, 2:0.15, 3:1.10, 4:0.001, 5:0.90, 6:0.00, 7:0.60, 8:2.00, 9:3.20, 10:0.05, 11:1.0, 12:0.8, 13:0.75, 14:0.80 } },
+        { name:'Bell', values:{ 0:0.001, 1:2.60, 2:0.00, 3:1.80, 4:0.001, 5:1.40, 6:0.00, 7:1.00, 8:3.00, 9:8.50, 10:0.12, 11:0.0, 12:1.5, 13:0.85, 14:0.75 } },
+        { name:'Growl Lead', values:{ 0:0.005, 1:0.50, 2:0.35, 3:0.25, 4:0.001, 5:0.40, 6:0.20, 7:0.30, 8:1.50, 9:10.50, 10:0.50, 11:2.0, 12:7.0, 13:0.60, 14:0.82 } },
+    ],
+};
+
+function ensureSynthPresetCss() {
+    if (document.getElementById('synth-preset-css')) return;
+    const style = document.createElement('style');
+    style.id = 'synth-preset-css';
+    style.textContent = `
+        .synth-preset-section { display:flex; flex-direction:column; gap:8px; margin:0 0 12px; }
+        .synth-preset-header { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+        .synth-preset-title { font-size:11px; font-weight:700; letter-spacing:1.2px; text-transform:uppercase; color:#9aa4b3; }
+        .synth-preset-subtitle { font-size:10px; color:#6c7684; }
+        .synth-preset-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:8px; }
+        .synth-preset-chip { border:1px solid rgba(255,255,255,0.12); border-radius:10px; background:linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02)); color:#e9eef6; padding:10px 8px; font-size:11px; font-weight:700; cursor:pointer; transition:transform .12s ease, border-color .12s ease, box-shadow .12s ease; }
+        .synth-preset-chip:hover { transform:translateY(-1px); border-color:rgba(255,255,255,0.28); }
+        .synth-preset-chip.active { box-shadow:0 0 0 1px currentColor inset, 0 0 18px rgba(255,255,255,0.08); }
+    `;
+    document.head.appendChild(style);
+}
+
+function getSynthFactoryPresets(engine) {
+    return SYNTH_FACTORY_PRESETS[engine] || [];
+}
+
+function getPadsUsingEngine(engine, fallbackPadIndex) {
+    const pads = [];
+    if (typeof padSynthEngine !== 'undefined') {
+        for (let pad = 0; pad < 16; pad++) {
+            if (padSynthEngine[pad] === engine) pads.push(pad);
+        }
+    }
+    if (!pads.length && fallbackPadIndex >= 0) pads.push(fallbackPadIndex);
+    return pads;
+}
+
+function captureSynthEngineSnapshot(engine, fallbackPadIndex) {
+    const entries = [];
+    getPadsUsingEngine(engine, fallbackPadIndex).forEach((pad) => {
+        getParamsForPad(engine, pad).forEach((param) => {
+            entries.push({
+                pad,
+                engine,
+                paramId: param.paramId,
+                value: getSynthParamValue(pad, engine, param.paramId),
+            });
+        });
+    });
+    return entries;
+}
+
+function sendSynthParamWs(padIndex, engine, paramId, value) {
+    if (typeof ws === 'undefined' || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (engine === 3) {
+        ws.send(JSON.stringify({ cmd: 'synth303Param', paramId, value }));
+        return;
+    }
+    const instrument = (engine === 4) ? padIndex : padToInstrument(engine, padIndex);
+    ws.send(JSON.stringify({ cmd: 'synthParam', engine, instrument, paramId, value }));
+}
+
+function applySynthPresetLocally(engine, presetIndex, sourcePadIndex) {
+    const preset = getSynthFactoryPresets(engine)[presetIndex];
+    if (!preset) return;
+
+    const pads = getPadsUsingEngine(engine, sourcePadIndex);
+    pads.forEach((pad) => {
+        if (engine <= 2 && Array.isArray(preset.volumes)) {
+            const instrument = padToInstrument(engine, pad);
+            const volume = preset.volumes[instrument];
+            if (volume !== undefined) {
+                setSynthParamValue(pad, engine, 3, volume);
+            }
+            const instrumentValues = (preset.instrumentValues && preset.instrumentValues[instrument]) || null;
+            Object.entries(instrumentValues || {}).forEach(([paramId, value]) => {
+                setSynthParamValue(pad, engine, Number(paramId), value);
+            });
+        }
+        Object.entries(preset.values || {}).forEach(([paramId, value]) => {
+            setSynthParamValue(pad, engine, Number(paramId), value);
+        });
+        refreshPadWaveform(pad);
+    });
+    refreshModalWaveform();
+}
+
+function sendSynthPresetCommand(engine, presetIndex) {
+    if (typeof ws === 'undefined' || !ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'synthPreset', engine, preset: presetIndex }));
+}
+
+function renderSynthPresetSection(engine) {
+    const presets = getSynthFactoryPresets(engine);
+    if (!presets.length) return '';
+    return `
+        <div class="synth-preset-section">
+            <div class="synth-preset-header">
+                <div class="synth-preset-title">Factory Presets</div>
+                <div class="synth-preset-subtitle">4 snapshots por motor</div>
+            </div>
+            <div class="synth-preset-grid">
+                ${presets.map((preset, index) => `<button class="synth-preset-chip" data-preset-index="${index}">${preset.name}</button>`).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function refreshGenericSynthModalControls(engine, padIndex) {
+    const modal = document.getElementById('synthParamModal');
+    if (!modal) return;
+    getParamsForPad(engine, padIndex).forEach((param) => {
+        const value = getSynthParamValue(padIndex, engine, param.paramId);
+        if (param.labels) {
+            const group = modal.querySelector(`.synth-param-toggle-group[data-param-id="${param.paramId}"]`);
+            if (!group) return;
+            group.querySelectorAll('.synth-param-toggle-btn').forEach((btn) => {
+                btn.classList.toggle('active', parseFloat(btn.dataset.value) === value);
+            });
+            return;
+        }
+        const slider = modal.querySelector(`.synth-param-slider[data-param-id="${param.paramId}"]`);
+        const span = modal.querySelector(`.synth-param-value[data-param-id="${param.paramId}"]`);
+        if (slider) slider.value = value;
+        if (span) span.textContent = formatParamValue(value, param.unit);
+    });
+}
+
+function refreshWtModalControls(padIndex) {
+    const wavePos   = getSynthParamValue(padIndex, 4, 0);
+    const attackMs  = getSynthParamValue(padIndex, 4, 1);
+    const decayMs   = getSynthParamValue(padIndex, 4, 2);
+    const volume    = getSynthParamValue(padIndex, 4, 3);
+    const filterCut = getSynthParamValue(padIndex, 4, 4);
+    const lfoRate   = getSynthParamValue(padIndex, 4, 5);
+    const lfoDepth  = getSynthParamValue(padIndex, 4, 6);
+    const lfoTarget = getSynthParamValue(padIndex, 4, 7);
+
+    const morphSlider = document.getElementById('wtMorphSlider');
+    const morphLabel = document.getElementById('wtMorphLabel');
+    const attackLbl = document.getElementById('wtAttackLbl');
+    const decayLbl = document.getElementById('wtDecayLbl');
+    const filterSlider = document.getElementById('wtFilterSlider');
+    const filterLbl = document.getElementById('wtFilterLbl');
+    const volFill = document.getElementById('wtVolFill');
+    const volumeLbl = document.getElementById('wtVolumeLbl');
+    const lfoRateSlider = document.getElementById('wtLfoRate');
+    const lfoRateLbl = document.getElementById('wtLfoRateLbl');
+    const lfoDepthSlider = document.getElementById('wtLfoDepth');
+    const lfoDepthLbl = document.getElementById('wtLfoDepthLbl');
+
+    if (morphSlider) morphSlider.value = wavePos;
+    if (morphLabel) morphLabel.textContent = `▸ ${wavePos.toFixed(2)}`;
+    if (attackLbl) attackLbl.textContent = Math.round(attackMs);
+    if (decayLbl) decayLbl.textContent = Math.round(decayMs);
+    if (filterSlider) filterSlider.value = filterCut;
+    if (filterLbl) filterLbl.textContent = filterCut >= 1000 ? (filterCut/1000).toFixed(1)+'kHz' : Math.round(filterCut)+'Hz';
+    if (volFill) volFill.style.height = `${Math.round(volume * 100)}%`;
+    if (volumeLbl) volumeLbl.textContent = `${Math.round(volume * 100)}%`;
+    if (lfoRateSlider) lfoRateSlider.value = lfoRate;
+    if (lfoRateLbl) lfoRateLbl.textContent = `${lfoRate.toFixed(1)}Hz`;
+    if (lfoDepthSlider) lfoDepthSlider.value = lfoDepth;
+    if (lfoDepthLbl) lfoDepthLbl.textContent = `${Math.round(lfoDepth * 100)}%`;
+
+    document.querySelectorAll('.wt-wave-cell').forEach((cell) => {
+        const selected = Math.round(wavePos) === parseInt(cell.dataset.w, 10);
+        cell.classList.toggle('active', selected);
+        const canvas = document.getElementById(`wtCell${cell.dataset.w}`);
+        if (canvas) _wtDrawCell(canvas, parseInt(cell.dataset.w, 10), selected ? WT_COLOR : '#555');
+    });
+    document.querySelectorAll('.wt-lfo-target-btn').forEach((btn) => {
+        btn.classList.toggle('active', parseInt(btn.dataset.t, 10) === lfoTarget);
+    });
+    _wtDrawMorph(wavePos);
+    _wtDrawAdsr(attackMs, decayMs);
+    _wtDrawFilter(filterCut);
+    _wtDrawLfo(lfoRate, lfoDepth);
+}
+
+function refreshActiveSynthModalControls(engine, padIndex) {
+    if (engine === 4) refreshWtModalControls(padIndex);
+    else refreshGenericSynthModalControls(engine, padIndex);
+    refreshModalWaveform();
+}
+
+function attachSynthPresetHandlers(modal, engine, padIndex) {
+    const buttons = modal.querySelectorAll('[data-preset-index]');
+    if (!buttons.length) return;
+    buttons.forEach((button) => {
+        button.addEventListener('click', () => {
+            const presetIndex = parseInt(button.dataset.presetIndex, 10);
+            sendSynthPresetCommand(engine, presetIndex);
+            applySynthPresetLocally(engine, presetIndex, padIndex);
+            refreshActiveSynthModalControls(engine, padIndex);
+            buttons.forEach((b) => b.classList.remove('active'));
+            button.classList.add('active');
+            scheduleAutoPreview(padIndex, engine);
+        });
+    });
+}
 
 function getParamsForPad(engine, padIndex) {
     if (engine === 4) return PARAMS_WTOSC;
@@ -493,7 +734,7 @@ function refreshAllSynthOverlays() {
 // ============================================================
 let synthModalPad = -1;
 let synthModalEngine = -1;
-let synthModalSnapshot = {};   // Copia de valores al abrir — para Cancelar
+let synthModalSnapshot = [];   // Copia de valores al abrir — para Cancelar
 let synthAutoPreviewTimer = null;
 
 // Programa un re-trigger automático ~200ms después de mover un slider
@@ -558,6 +799,7 @@ function _injectWtModalCss() {
 
 function openWtOscModal(padIndex) {
     _injectWtModalCss();
+    ensureSynthPresetCss();
     const engine = 4;
     synthModalPad = padIndex;
     synthModalEngine = engine;
@@ -573,11 +815,7 @@ function openWtOscModal(padIndex) {
     const lfoTarget = getSynthParamValue(padIndex, engine, 7);
 
     // Snapshot for cancel
-    synthModalSnapshot = {
-        '4_0': wavePos,  '4_1': attackMs,  '4_2': decayMs,
-        '4_3': volume,   '4_4': filterCut, '4_5': lfoRate,
-        '4_6': lfoDepth, '4_7': lfoTarget
-    };
+    synthModalSnapshot = captureSynthEngineSnapshot(engine, padIndex);
 
     const padName  = (typeof padNames !== 'undefined') ? padNames[padIndex] : `Pad ${padIndex+1}`;
     const midiNote = (typeof trackWtNoteJs !== 'undefined') ? trackWtNoteJs[padIndex] : 60;
@@ -616,6 +854,8 @@ function openWtOscModal(padIndex) {
     </div>
     <button class="synth-modal-close-btn" id="synthModalClose">✕</button>
   </div>
+
+    ${renderSynthPresetSection(engine)}
 
   <div class="wt-section-label">Wave Shape</div>
   <div class="wt-wave-grid" id="wtWaveGrid">${waveGridHtml}</div>
@@ -689,6 +929,7 @@ function openWtOscModal(padIndex) {
 </div>`;
 
     modal.classList.add('active');
+    attachSynthPresetHandlers(modal, engine, padIndex);
 
     // ── Draw all canvases ──
     for (let i = 0; i < 8; i++) {
@@ -856,10 +1097,12 @@ function openWtOscModal(padIndex) {
 
     // ── Cancel ──
     document.getElementById('synthModalCancel').addEventListener('click', () => {
-        Object.entries(synthModalSnapshot).forEach(([key, val]) => {
-            const pid = parseInt(key.split('_')[1]);
-            sendP(pid, val);
+        (synthModalSnapshot || []).forEach((entry) => {
+            setSynthParamValue(entry.pad, entry.engine, entry.paramId, entry.value);
+            sendSynthParamWs(entry.pad, entry.engine, entry.paramId, entry.value);
+            refreshPadWaveform(entry.pad);
         });
+        refreshModalWaveform();
         modal.classList.remove('active');
     });
 
@@ -1032,6 +1275,7 @@ function openSynthModal(padIndex) {
     const engine = (typeof padSynthEngine !== 'undefined') ? padSynthEngine[padIndex] : -1;
     if (engine < 0) return;
     if (engine === 4) { openWtOscModal(padIndex); return; }
+    ensureSynthPresetCss();
 
     synthModalPad = padIndex;
     synthModalEngine = engine;
@@ -1039,11 +1283,7 @@ function openSynthModal(padIndex) {
     const params = getParamsForPad(engine, padIndex);
 
     // ── Snapshot: guardar valores actuales para poder cancelar ──────────────
-    synthModalSnapshot = {};
-    params.forEach(p => {
-        const key = `${engine}_${p.paramId}`;
-        synthModalSnapshot[key] = getSynthParamValue(padIndex, engine, p.paramId);
-    });
+    synthModalSnapshot = captureSynthEngineSnapshot(engine, padIndex);
 
     const inst = (engine < 3) ? padToInstrument(engine, padIndex) : -1;
     const instName = getInstrumentName(engine, inst);
@@ -1074,6 +1314,7 @@ function openSynthModal(padIndex) {
             <div class="synth-modal-waveform-wrap">
                 <canvas id="synthModalCanvas" width="600" height="120"></canvas>
             </div>
+            ${renderSynthPresetSection(engine)}
             <div class="synth-modal-params" id="synthModalParams"></div>
             <div class="synth-modal-footer">
                 <button class="synth-modal-cancel-btn" id="synthModalCancel">✖ Cancelar</button>
@@ -1085,6 +1326,7 @@ function openSynthModal(padIndex) {
 
     // Build parameter sliders
     const paramsContainer = modal.querySelector('#synthModalParams');
+    attachSynthPresetHandlers(modal, engine, padIndex);
     params.forEach(p => {
         const currentVal = getSynthParamValue(padIndex, engine, p.paramId);
         const paramRow = document.createElement('div');
@@ -1186,30 +1428,17 @@ function closeSynthModal() {
     }
     synthModalPad = -1;
     synthModalEngine = -1;
-    synthModalSnapshot = {};
+    synthModalSnapshot = [];
 }
 
 // Cancelar: restaurar todos los parámetros al estado pre-apertura
 function cancelSynthModal(padIndex, engine, params) {
-    params.forEach(p => {
-        const key = `${engine}_${p.paramId}`;
-        const originalVal = (synthModalSnapshot[key] !== undefined)
-            ? synthModalSnapshot[key]
-            : p.default;
-
-        // Restaurar en memoria local
-        setSynthParamValue(padIndex, engine, p.paramId, originalVal);
-
-        // Re-enviar al hardware para revertir el sonido
-        if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
-            if (engine === 3) {
-                ws.send(JSON.stringify({ cmd: 'synth303Param', paramId: p.paramId, value: originalVal }));
-            } else {
-                const instrument = padToInstrument(engine, padIndex);
-                ws.send(JSON.stringify({ cmd: 'synthParam', engine, instrument, paramId: p.paramId, value: originalVal }));
-            }
-        }
+    (synthModalSnapshot || []).forEach((entry) => {
+        setSynthParamValue(entry.pad, entry.engine, entry.paramId, entry.value);
+        sendSynthParamWs(entry.pad, entry.engine, entry.paramId, entry.value);
+        refreshPadWaveform(entry.pad);
     });
+    refreshModalWaveform();
     closeSynthModal();
 }
 

@@ -79,6 +79,7 @@ bool SampleManager::loadSample(const char* filename, int padIndex) {
   if (name) name++; // Skip '/'
   else name = filename;
   strncpy(sampleNames[padIndex], name, 31);
+  sampleNames[padIndex][31] = '\0';
   
   // Register with SPI Master → STM32 audio slave
   spiMaster.setSampleBuffer(padIndex, sampleBuffers[padIndex], sampleLengths[padIndex]);

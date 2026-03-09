@@ -38,7 +38,7 @@ static const FilterPreset filterPresets[] = {
 // CONSTRUCTOR / DESTRUCTOR
 // ═══════════════════════════════════════════════════════
 
-SPIMaster::SPIMaster() : seqNumber(0), spiErrorCount(0), stm32Connected(false), spiMutex(nullptr), spiLogCallback(nullptr) {
+SPIMaster::SPIMaster() : seqNumber(0), spiErrorCount(0), stm32Connected(false), spiMutex(nullptr), spiCmdQueue(nullptr), spiLogCallback(nullptr) {
     spiMutex = xSemaphoreCreateMutex();
     // Initialize cached state
     cachedMasterVolume = 100;
@@ -61,7 +61,7 @@ SPIMaster::SPIMaster() : seqNumber(0), spiErrorCount(0), stm32Connected(false), 
     cachedWaveFolderGain = 1.0f;
     cachedLimiterActive = false;
     memset(&cachedStatus, 0, sizeof(cachedStatus));
-    cachedSynthActiveMask = 0x0F;
+    cachedSynthActiveMask = 0x7B;
     
     for (int i = 0; i < MAX_AUDIO_TRACKS; i++) {
         cachedTrackFilter[i] = FILTER_NONE;
@@ -114,6 +114,10 @@ bool SPIMaster::begin() {
     pinMode(DAISY_SPI_CS, OUTPUT);
     digitalWrite(DAISY_SPI_CS, HIGH);
     daisySpi.begin(DAISY_SPI_SCK, DAISY_SPI_MISO, DAISY_SPI_MOSI, DAISY_SPI_CS);
+
+    if (!spiCmdQueue) {
+        spiCmdQueue = xQueueCreate(32, sizeof(SpiQueuedCmd));
+    }
 
     
     // Try to connect to Daisy
@@ -1559,6 +1563,13 @@ void SPIMaster::synthSetActive(uint8_t engineMask) {
     if (sendCommand(CMD_SYNTH_ACTIVE, &p, sizeof(p))) {
         cachedSynthActiveMask = engineMask;
     }
+}
+
+void SPIMaster::synthPreset(uint8_t engine, uint8_t preset) {
+    SynthPresetPayload p;
+    p.engine = engine;
+    p.preset = preset;
+    sendCommand(CMD_SYNTH_PRESET, &p, sizeof(p));
 }
 
 // ═══════════════════════════════════════════════════════

@@ -48,6 +48,32 @@ extern void setAllTrackSynthEngines(int8_t engine);
 static constexpr bool kStrictProtocolBoundary = true;
 static String gDaisyPadFiles[MAX_PADS];
 
+static void clearTrackLoopStateForSynth(int track, AsyncWebSocket* ws) {
+  if (track < 0 || track >= 16) {
+    return;
+  }
+
+  const bool loopWasActive = sequencer.isLooping(track) || sequencer.isLoopPaused(track);
+  if (sequencer.isLooping(track)) {
+    sequencer.toggleLoop(track);
+  }
+
+  spiMaster.setPadLoop(track, false);
+  spiMaster.stopSample(track);
+
+  if (loopWasActive && ws) {
+    StaticJsonDocument<160> responseDoc;
+    responseDoc["type"] = "loopState";
+    responseDoc["track"] = track;
+    responseDoc["active"] = false;
+    responseDoc["paused"] = false;
+    responseDoc["loopType"] = (int)sequencer.getLoopType(track);
+    String output;
+    serializeJson(responseDoc, output);
+    ws->textAll(output);
+  }
+}
+
 // ── SPI log broadcast bridge ───────────────────────────────────────────────
 // g_wsSpiLog points to the AsyncWebSocket instance once begin() creates it.
 // spiLogDispatch is registered with SPIMaster as a plain-function callback.
@@ -3750,6 +3776,10 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       spiMaster.synth303NoteOff();
     }
 
+    if (engine >= 0) {
+      clearTrackLoopStateForSynth(track, ws);
+    }
+
     setTrackSynthEngine(track, (int8_t)engine);
     spiMaster.dsqSetTrackEngine((uint8_t)track, (int8_t)engine);
 
@@ -3774,6 +3804,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
           spiMaster.synth303NoteOff();
           break;
         }
+      }
+    }
+
+    if (engine >= 0) {
+      for (int i = 0; i < 16; i++) {
+        clearTrackLoopStateForSynth(i, ws);
       }
     }
 
@@ -4033,7 +4069,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
 
   // ══════════════════════════════════════════════════════
-  // SYNTH ENGINES — TR-808/909/505 percussive + TB-303 bass
+  // SYNTH ENGINES — TR-808/909/505 + TB-303 + WTOSC + SH-101 + FM2Op
   // ══════════════════════════════════════════════════════
 
   // {"cmd":"synthTrigger","engine":0,"instrument":0,"velocity":100}
@@ -4083,13 +4119,28 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     spiMaster.synth303Param(paramId, value);
   }
 
-  // {"cmd":"synthActive","mask":15}   (bit0=808, bit1=909, bit2=505, bit3=303)
+  // {"cmd":"synthActive","mask":123}   (bit0=808, bit1=909, bit2=505, bit3=303, bit4=WT, bit5=SH101, bit6=FM2Op)
   else if (cmd == "synthActive") {
-    uint8_t mask = doc["mask"] | 0x0F;
+    uint8_t mask = doc["mask"] | 0x7B;
     spiMaster.synthSetActive(mask);
     StaticJsonDocument<64> resp;
     resp["type"] = "synthActiveAck";
     resp["mask"] = mask;
+    String output;
+    serializeJson(resp, output);
+    if (ws) ws->textAll(output);
+  }
+
+  // {"cmd":"synthPreset","engine":5,"preset":2}
+  else if (cmd == "synthPreset") {
+    uint8_t engine = doc["engine"] | 0;
+    uint8_t preset = doc["preset"] | 0;
+    spiMaster.synthPreset(engine, preset);
+
+    StaticJsonDocument<96> resp;
+    resp["type"] = "synthPresetAck";
+    resp["engine"] = engine;
+    resp["preset"] = preset;
     String output;
     serializeJson(resp, output);
     if (ws) ws->textAll(output);
