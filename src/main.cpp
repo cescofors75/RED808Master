@@ -359,10 +359,6 @@ void setup() {
     esp_reset_reason_t reason = esp_reset_reason();
     Serial.printf("[BOOT] Reset reason: %d\n", (int)reason);
 
-    // ── Task Watchdog: 10s timeout, subscribe this (setup/loop) task ──
-    esp_task_wdt_init(10, true);   // 10s, panic on timeout
-    esp_task_wdt_add(NULL);        // subscribe current task (loopTask)
-
     // 1. Filesystem
     if (!LittleFS.begin(true)) {
         rgbLed.setPixelColor(0, 0xFF0000);
@@ -1049,6 +1045,11 @@ void setup() {
         NULL,
         0       // CORE 0: WiFi, Web, MIDI, LED
     );
+
+    // ── Task Watchdog: 10s timeout, panic on timeout ──
+    // Initialized AFTER setup completes to avoid WDT reset during sample loading
+    esp_task_wdt_init(10, true);
+    esp_task_wdt_add(NULL);  // subscribe loopTask
 
     showReadyLED();
 }

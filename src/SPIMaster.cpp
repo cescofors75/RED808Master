@@ -338,8 +338,10 @@ void SPIMaster::process() {
         lastPeakPoll = millis();
     }
 
-    // ── 4. Refresh status for /adm telemetry every 3s ──
-    if (millis() - lastStatusPoll > 3000) {
+    // ── 4. Refresh status for /adm telemetry every 3s (immediate on first run) ──
+    static bool firstStatusPoll = true;
+    if (firstStatusPoll || millis() - lastStatusPoll > 3000) {
+        firstStatusPoll = false;
         if (stm32Connected) {
             requestStatus();
             drainEvents();

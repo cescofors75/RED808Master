@@ -27,6 +27,9 @@ static constexpr unsigned long kFastVolumeCmdMinMs = 8;
 
 extern SPIMaster spiMaster;
 extern Sequencer sequencer;
+
+// Page‐transition broadcast pause: set when '/' is served, cleared after 2s
+static volatile unsigned long pageTransitionMs = 0;
 extern void dsqUploadPattern(int pattern);  // upload one pattern to Daisy sequencer
 
 // Helper: lee todos los param locks de un step del Sequencer y los envía a Daisy
@@ -378,6 +381,9 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   
   // Servir archivos grandes con gzip explícito para máximo rendimiento
   server->on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    // Pause periodic broadcasts during page transition to free TCP/Core0
+    pageTransitionMs = millis();
+    if (ws) ws->cleanupClients(0);  // close all old WS clients immediately
     sendWebAsset(request, "/index.html", "text/html", "no-cache, no-store, must-revalidate");
   });
 
@@ -387,52 +393,54 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   });
   
   server->on("/app.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/app.js", "application/javascript", "no-cache, no-store, must-revalidate");
+    sendWebAsset(request, "/app.js", "application/javascript", "max-age=86400");
   });
   
   server->on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/style.css", "text/css", "no-cache, no-store, must-revalidate");
+    sendWebAsset(request, "/style.css", "text/css", "max-age=86400");
   });
   
   server->on("/keyboard-controls.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/keyboard-controls.js", "application/javascript", "no-cache, no-store, must-revalidate");
+    sendWebAsset(request, "/keyboard-controls.js", "application/javascript", "max-age=86400");
   });
   
   server->on("/keyboard-styles.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/keyboard-styles.css", "text/css", "no-cache, no-store, must-revalidate");
+    sendWebAsset(request, "/keyboard-styles.css", "text/css", "max-age=86400");
   });
   
   server->on("/midi-import.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/midi-import.js", "application/javascript", "no-cache, no-store, must-revalidate");
+    sendWebAsset(request, "/midi-import.js", "application/javascript", "max-age=86400");
   });
   
   server->on("/chat-agent.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/chat-agent.js", "application/javascript");
+    sendWebAsset(request, "/chat-agent.js", "application/javascript", "max-age=86400");
   });
   
   server->on("/waveform-visualizer.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/waveform-visualizer.js", "application/javascript");
+    sendWebAsset(request, "/waveform-visualizer.js", "application/javascript", "max-age=86400");
   });
 
   server->on("/synth-editor.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/synth-editor.js", "application/javascript");
+    sendWebAsset(request, "/synth-editor.js", "application/javascript", "max-age=86400");
   });
 
   server->on("/export-pattern.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/export-pattern.js", "application/javascript");
+    sendWebAsset(request, "/export-pattern.js", "application/javascript", "max-age=86400");
   });
   
   // Patchbay page
   server->on("/patchbay", HTTP_GET, [](AsyncWebServerRequest *request){
+    pageTransitionMs = millis();
+    if (ws) ws->cleanupClients(0);
     sendWebAsset(request, "/patchbay.html", "text/html");
   });
   
   server->on("/patchbay.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/patchbay.css", "text/css");
+    sendWebAsset(request, "/patchbay.css", "text/css", "max-age=86400");
   });
   
   server->on("/patchbay.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/patchbay.js", "application/javascript");
+    sendWebAsset(request, "/patchbay.js", "application/javascript", "max-age=86400");
   });
 
   // Multiview page — redirect to .html served by serveStatic (avoids AsyncFileResponse 500 edge case)
@@ -445,12 +453,11 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   });
 
   server->on("/multiview.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/multiview.css", "text/css");
+    sendWebAsset(request, "/multiview.css", "text/css", "max-age=86400");
   });
-
+  
   server->on("/multiview.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/multiview.js", "application/javascript");
-  });
+    sendWebAsset(request, "/multiview.js", "application/javascript", "max-age=86400");
 
   // Admin page
   server->on("/adm", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -467,7 +474,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   
   // Fallback para otros archivos estáticos (favicon, etc)
   server->serveStatic("/", LittleFS, "/web/")
-    .setCacheControl("no-cache, no-store, must-revalidate");
+    .setCacheControl("max-age=86400");
   
   // API REST
   server->on("/api/trigger", HTTP_POST, [](AsyncWebServerRequest *request){
@@ -1582,10 +1589,16 @@ void WebInterface::update() {
   if (!initialized || !ws || !server) return;
   
   unsigned long now = millis();
+
+  // Skip periodic broadcasts during page transitions (2s window)
+  bool pageLoading = (pageTransitionMs != 0 && (now - pageTransitionMs) < 2000);
+  if (pageTransitionMs != 0 && (now - pageTransitionMs) >= 2000) {
+    pageTransitionMs = 0;  // clear flag
+  }
   
   // Broadcast audio levels for all WS clients (main UI + /adm)
   static unsigned long lastAudioLevels = 0;
-  if (now - lastAudioLevels >= 100 && ws->count() > 0) {
+  if (!pageLoading && now - lastAudioLevels >= 100 && ws->count() > 0) {
     lastAudioLevels = now;
 
     // Peak data is polled by SPIMaster::process() on Core1 —
@@ -1614,7 +1627,7 @@ void WebInterface::update() {
   
   // Broadcast LFO scope data every 50ms (20fps) — binary protocol
   static unsigned long lastLfoScope = 0;
-  if (now - lastLfoScope >= 50 && ws->count() > 0 && ESP.getFreeHeap() >= 25000) {
+  if (!pageLoading && now - lastLfoScope >= 50 && ws->count() > 0 && ESP.getFreeHeap() >= 25000) {
     lastLfoScope = now;
     LfoScopeData scope;
     lfoEngine.getScopeData(scope);
