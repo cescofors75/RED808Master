@@ -378,6 +378,7 @@ public:
     // Connection status
     bool isConnected() const { return stm32Connected; }
     uint32_t getSPIErrors() const { return spiErrorCount; }
+    float getLastPingMs() const { return lastPingRttMs; }
 
     // ══════════════════════════════════════════════════
     // SPI LOG CALLBACK (WebSocket diagnostics)
@@ -394,6 +395,7 @@ private:
     uint16_t seqNumber;
     uint32_t spiErrorCount;
     bool stm32Connected;
+    float lastPingRttMs = -1.0f;
     
     // TX/RX buffers
     uint8_t txBuffer[SPI_MAX_PAYLOAD];

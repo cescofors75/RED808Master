@@ -116,7 +116,7 @@ bool SPIMaster::begin() {
     daisySpi.begin(DAISY_SPI_SCK, DAISY_SPI_MISO, DAISY_SPI_MOSI, DAISY_SPI_CS);
 
     if (!spiCmdQueue) {
-        spiCmdQueue = xQueueCreate(32, sizeof(SpiQueuedCmd));
+        spiCmdQueue = xQueueCreate(64, sizeof(SpiQueuedCmd));
     }
 
     
@@ -160,15 +160,16 @@ void SPIMaster::drainCmdQueue() {
 
 // ── High-level sendCommand: enqueues from Core0, sends directly from Core1 ───
 bool SPIMaster::sendCommand(uint8_t cmd, const void* payload, uint16_t payloadLen) {
-    // Core0 (WiFi/WS task): enqueue for Core1 to send — never blocks WS handler
+    // Core0 (WiFi/WS task): enqueue for Core1 to send — never block WS handler
     if (xPortGetCoreID() == 0 && spiCmdQueue && payloadLen <= SPI_QUEUE_PAYLOAD_MAX) {
         SpiQueuedCmd env;
         env.cmd = cmd;
         env.payloadLen = (uint16_t)payloadLen;
         if (payload && payloadLen > 0) memcpy(env.payload, payload, payloadLen);
-        // Non-blocking: if queue full, fall through to direct send (shouldn't happen)
-        if (xQueueSend(spiCmdQueue, &env, pdMS_TO_TICKS(5)) == pdTRUE)
-            return true;
+        // Non-blocking enqueue; if queue full, DROP command (never fall through
+        // to sendCommandDirect which would block Core0 on spiMutex and risk WDT)
+        xQueueSend(spiCmdQueue, &env, pdMS_TO_TICKS(5));
+        return true;
     }
     return sendCommandDirect(cmd, payload, payloadLen);
 }
@@ -320,24 +321,33 @@ void SPIMaster::process() {
     // ── 1. Drain commands queued from Core0 (WS/WiFi task) ──
     drainCmdQueue();
 
-    // ── 2. Keepalive PING every 2s ──
+    // ── 2. Keepalive PING every 2s (with RTT tracking for telemetry) ──
     static uint32_t lastHeartbeat = 0;
     if (stm32Connected && (millis() - lastHeartbeat > 2000)) {
-        sendCommandDirect(CMD_PING, nullptr, 0);
+        uint32_t rttUs = 0;
+        if (ping(rttUs)) {
+            lastPingRttMs = (float)rttUs / 1000.0f;
+        }
         lastHeartbeat = millis();
     }
 
-    // ── 3. Drain Daisy events every 1.5s (SD load done, kit loaded, etc.) ──
-    // cachedStatus.evtCount is NOT used here because in strict mode requestStatus
-    // is never called, so evtCount would always be 0. We probe unconditionally.
-    if (millis() - lastStatusPoll > 1500) {
+    // ── 3. Poll audio peaks every 120ms ──
+    static uint32_t lastPeakPoll = 0;
+    if (stm32Connected && (millis() - lastPeakPoll > 120)) {
+        requestPeaks();
+        lastPeakPoll = millis();
+    }
+
+    // ── 4. Refresh status for /adm telemetry every 3s ──
+    if (millis() - lastStatusPoll > 3000) {
         if (stm32Connected) {
+            requestStatus();
             drainEvents();
         }
         lastStatusPoll = millis();
     }
 
-    // ── 4. Reconnect if link dropped ──
+    // ── 5. Reconnect if link dropped ──
     if (!stm32Connected) {
         static uint32_t lastRetry = 0;
         if (millis() - lastRetry > 3000) {

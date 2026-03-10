@@ -2,6 +2,7 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <Adafruit_NeoPixel.h>
+#include <esp_task_wdt.h>
 #include "SPIMaster.h"
 #include "SampleManager.h"
 #include "Sequencer.h"
@@ -25,8 +26,8 @@
 // --- WiFi: Red Doméstica (modo STA) ---
 // Pon aquí tu SSID y contraseña WiFi de casa.
 // Si se deja vacío (""), usará solo modo AP (red propia RED808).
-#define HOME_WIFI_SSID     "MIWIFI_2G_yU2f"         // ← tu WiFi doméstico, ej: "MiRedCasa"
-#define HOME_WIFI_PASS     "M6LR7zHk"   
+#define HOME_WIFI_SSID     ""         // vacío = solo modo AP (RED808)
+#define HOME_WIFI_PASS     ""   
 
 #define HOME_WIFI_TIMEOUT  12000      // ms para intentar conectar (12s)
 
@@ -212,6 +213,8 @@ void dsqUploadPattern(int pattern) {
 // CORE 1: Sequencer UI + SPI Master
 // El secuenciador corre en Daisy Seed; aquí solo actualizamos estado UI y LFO.
 void spiAudioTask(void *pvParameters) {
+    esp_task_wdt_add(NULL);  // subscribe to TWDT
+
     // Subir todos los patrones a Daisy Seed al arrancar
     // (el SPI ya está listo porque spiMaster.begin() fue llamado en setup)
     for (int pat = 0; pat < DSQ_PATTERNS; pat++) {
@@ -227,13 +230,15 @@ void spiAudioTask(void *pvParameters) {
         sequencer.update();   // Mantiene internos del secuenciador (beat UI, song mode)
         lfoEngine.update(sequencer.getTempo(), spiMaster);
         spiMaster.process();
+        esp_task_wdt_reset();
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 
 // CORE 0: WiFi, Web Server, MIDI, LED (Prioridad Media)
 void systemTask(void *pvParameters) {
-    
+    esp_task_wdt_add(NULL);  // subscribe to TWDT
+
     uint32_t lastLedUpdate = 0;
 #if ENABLE_PHYSICAL_BUTTONS
     uint32_t lastBtnUpdate  = 0;
@@ -266,6 +271,7 @@ void systemTask(void *pvParameters) {
         }
         
         vTaskDelay(pdMS_TO_TICKS(2)); // 500Hz system loop - mínima latencia WiFi
+        esp_task_wdt_reset();
     }
 }
 
@@ -348,11 +354,20 @@ void setup() {
     showBootLED();
     delay(500);
 
+    // ── Reset reason logging ──
+    esp_reset_reason_t reason = esp_reset_reason();
+    Serial.printf("[BOOT] Reset reason: %d\n", (int)reason);
+
+    // ── Task Watchdog: 10s timeout, subscribe this (setup/loop) task ──
+    esp_task_wdt_init(10, true);   // 10s, panic on timeout
+    esp_task_wdt_add(NULL);        // subscribe current task (loopTask)
+
     // 1. Filesystem
     if (!LittleFS.begin(true)) {
         rgbLed.setPixelColor(0, 0xFF0000);
         rgbLed.show();
-        while(1) { delay(1000); }
+        delay(3000);
+        ESP.restart();
     }
 
     // NVS ya esta disponible en setup: cargar mapeos MIDI persistidos aqui.
@@ -362,7 +377,8 @@ void setup() {
     if (!spiMaster.begin()) {
         rgbLed.setPixelColor(0, 0xFF0000);
         rgbLed.show();
-        while(1) { delay(1000); }
+        delay(3000);
+        ESP.restart();
     }
     
     
@@ -761,15 +777,12 @@ void setup() {
     sequencer.selectPattern(0); // Empezar con Hip Hop
     // sequencer.start(); // DISABLED: User must press PLAY
 
-    // 5. WiFi: STA (red doméstica) con fallback a AP
+    // 5. WiFi: solo modo AP (RED808)
     
     showWiFiLED();
     delay(500);
     
-    const char* staSSID = strlen(HOME_WIFI_SSID) > 0 ? HOME_WIFI_SSID : nullptr;
-    const char* staPass = strlen(HOME_WIFI_PASS) > 0 ? HOME_WIFI_PASS : nullptr;
-    
-    if (webInterface.begin(AP_SSID, AP_PASSWORD, staSSID, staPass, HOME_WIFI_TIMEOUT)) {
+    if (webInterface.begin(AP_SSID, AP_PASSWORD, nullptr, nullptr, 0)) {
         showWebServerLED();
         delay(500);
     }
@@ -1040,11 +1053,15 @@ void setup() {
 }
 
 void loop() {
-    // Stats cada 10 segundos (reducido para menos overhead)
+    esp_task_wdt_reset();   // feed TWDT every iteration
+
+    // Heap monitor cada 10 segundos
     static uint32_t lastStats = 0;
     if (millis() - lastStats > 10000) {
-        if (ESP.getFreeHeap() < 30000) {
-            // Heap critically low — broadcast warning to connected clients
+        uint32_t heap = ESP.getFreeHeap();
+        uint32_t minHeap = ESP.getMinFreeHeap();
+        Serial.printf("[HEAP] free=%u min=%u psram=%u\n", heap, minHeap, (uint32_t)ESP.getFreePsram());
+        if (heap < 30000) {
             webInterface.broadcastRaw("{\"type\":\"warning\",\"msg\":\"low_heap\"}");
         }
         lastStats = millis();

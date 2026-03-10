@@ -20,10 +20,10 @@
 // Hardening de estabilidad WS bajo estrés
 static constexpr size_t kWsMaxTextBytes = 24576;
 static constexpr size_t kWsMaxBinaryBytes = 256;
-static constexpr unsigned long kFastMasterCmdMinMs = 20;
-static constexpr unsigned long kFastTrackCmdMinMs = 20;
-static constexpr unsigned long kFastPadCmdMinMs = 20;
-static constexpr unsigned long kFastVolumeCmdMinMs = 15;
+static constexpr unsigned long kFastMasterCmdMinMs = 8;
+static constexpr unsigned long kFastTrackCmdMinMs = 8;
+static constexpr unsigned long kFastPadCmdMinMs = 8;
+static constexpr unsigned long kFastVolumeCmdMinMs = 8;
 
 extern SPIMaster spiMaster;
 extern Sequencer sequencer;
@@ -334,87 +334,35 @@ WebInterface::~WebInterface() {
 }
 
 bool WebInterface::begin(const char* apSsid, const char* apPassword,
-                         const char* staSSID, const char* staPassword,
-                         unsigned long staTimeoutMs) {
+                         const char* /* staSSID */, const char* /* staPassword */,
+                         unsigned long /* staTimeoutMs */) {
   _staConnected = false;
-  
-  // Desactivar ahorro de energía WiFi
+
+  // ── Modo AP exclusivo — máxima estabilidad ──
   WiFi.setSleep(false);
   WiFi.persistent(false);          // no guarda credenciales en NVS (evita flash corrupto)
-  WiFi.setAutoReconnect(true);
   WiFi.mode(WIFI_OFF);
   delay(100);
-  
-  // Potencia TX máxima
+
+  WiFi.mode(WIFI_AP);
+  delay(50);
+
+  IPAddress local_IP(192, 168, 4, 1);
+  IPAddress gateway(192, 168, 4, 1);
+  IPAddress subnet(255, 255, 255, 0);
+  WiFi.softAPConfig(local_IP, gateway, subnet);
+  WiFi.softAP(apSsid, apPassword, 1, 0, 4);   // canal 1, visible, max 4 clientes
+  delay(200);
+
+  // Protocolo b/g/n y beacon 100ms
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
-  
-  // ── Intentar modo STA (red doméstica) si se proporcionó SSID ──
-  if (staSSID && strlen(staSSID) > 0) {
-    WiFi.mode(WIFI_AP_STA);
-    
-    // Configurar AP primero (siempre disponible)
-    IPAddress local_IP(192, 168, 4, 1);
-    IPAddress gateway(192, 168, 4, 1);
-    IPAddress subnet(255, 255, 255, 0);
-    WiFi.softAPConfig(local_IP, gateway, subnet);
-    WiFi.softAP(apSsid, apPassword, 1, 0, 4);
-    delay(100);
-    
-    // Protocolo b/g/n y beacon para AP
-    esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-    wifi_config_t conf;
-    esp_wifi_get_config(WIFI_IF_AP, &conf);
-    conf.ap.beacon_interval = 100;
-    esp_wifi_set_config(WIFI_IF_AP, &conf);
-    
-    
-    // Ahora conectar a red doméstica
-    WiFi.begin(staSSID, staPassword);
-    
-    // No bloquear demasiado el arranque del servidor web.
-    // AP ya está activo; usamos el timeout completo pasado por el usuario (mínimo 8s).
-    const unsigned long quickStaWaitMs = (staTimeoutMs < 8000UL) ? 8000UL : staTimeoutMs;
-    unsigned long t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && (millis() - t0) < quickStaWaitMs) {
-      delay(250);
-    }
-    
-    if (WiFi.status() == WL_CONNECTED) {
-      _staConnected = true;
-      WiFi.setSleep(false);
-      
-      // Reconfigure AP to match STA channel (avoids channel conflicts in AP+STA mode)
-      uint8_t staChannel = WiFi.channel();
-      WiFi.softAP(apSsid, apPassword, staChannel, 0, 4);
-    } else {
-      // AP ya está corriendo, no hay que hacer nada más
-    }
-  }
-  
-  // ── Fallback: modo AP solo (sin SSID doméstico configurado) ──
-  if (!_staConnected && !(staSSID && strlen(staSSID) > 0)) {
-    WiFi.mode(WIFI_AP);
-    delay(50);
-    
-    IPAddress local_IP(192, 168, 4, 1);
-    IPAddress gateway(192, 168, 4, 1);
-    IPAddress subnet(255, 255, 255, 0);
-    WiFi.softAPConfig(local_IP, gateway, subnet);
-    
-    WiFi.softAP(apSsid, apPassword, 1, 0, 4);
-    delay(200);
-    
-    // Protocolo b/g/n
-    esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-    
-    wifi_config_t conf;
-    esp_wifi_get_config(WIFI_IF_AP, &conf);
-    conf.ap.beacon_interval = 100;
-    esp_wifi_set_config(WIFI_IF_AP, &conf);
-    
-    WiFi.setSleep(false);
-    
-  }
+  esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+  wifi_config_t conf;
+  esp_wifi_get_config(WIFI_IF_AP, &conf);
+  conf.ap.beacon_interval = 100;
+  esp_wifi_set_config(WIFI_IF_AP, &conf);
+
+  WiFi.setSleep(false);
   
   // Crear servidor web
   server = new AsyncWebServer(80);
@@ -587,22 +535,10 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   });
   
   // Endpoint para info del sistema (para dashboard /adm)
+  // ZERO SPI calls here — only reads cached data.
+  // SPI polling (status/peaks/ping) runs on Core1 via SPIMaster::process().
   server->on("/api/sysinfo", HTTP_GET, [this](AsyncWebServerRequest *request){
     StaticJsonDocument<3072> doc;
-
-    // Daisy status refresh for admin telemetry
-    spiMaster.requestStatus();
-    spiMaster.requestPeaks();
-    static uint32_t lastPingMs = 0;
-    static bool lastPingOk = false;
-    static float lastPingMsValue = -1.0f;
-    uint32_t nowMs = millis();
-    if (nowMs - lastPingMs > 5000) {
-      uint32_t rttUs = 0;
-      lastPingOk = spiMaster.ping(rttUs);
-      lastPingMsValue = lastPingOk ? ((float)rttUs / 1000.0f) : -1.0f;
-      lastPingMs = nowMs;
-    }
     
     // Info de memoria
     doc["heapFree"] = ESP.getFreeHeap();
@@ -611,24 +547,13 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     doc["psramSize"] = ESP.getPsramSize();
     doc["flashSize"] = ESP.getFlashChipSize();
     
-    // Info de WiFi (adaptado a STA o AP)
-    extern WebInterface webInterface;
-    if (webInterface.isSTAMode()) {
-      doc["wifiMode"] = "STA";
-      doc["ssid"] = WiFi.SSID();
-      doc["ip"] = WiFi.localIP().toString();
-      doc["gateway"] = WiFi.gatewayIP().toString();
-      doc["rssi"] = WiFi.RSSI();
-      doc["channel"] = WiFi.channel();
-      doc["txPower"] = "19.5dBm";
-    } else {
-      doc["wifiMode"] = "AP";
-      doc["ssid"] = WiFi.softAPSSID();
-      doc["ip"] = WiFi.softAPIP().toString();
-      doc["channel"] = WiFi.channel();
-      doc["txPower"] = "19.5dBm";
-      doc["connectedStations"] = WiFi.softAPgetStationNum();
-    }
+    // Info de WiFi (AP-only)
+    doc["wifiMode"] = "AP";
+    doc["ssid"] = WiFi.softAPSSID();
+    doc["ip"] = WiFi.softAPIP().toString();
+    doc["channel"] = WiFi.channel();
+    doc["txPower"] = "19.5dBm";
+    doc["connectedStations"] = WiFi.softAPgetStationNum();
     
     // Info de WebSocket
     if (ws) {
@@ -664,10 +589,10 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     doc["samplesLoaded"] = sampleManager.getLoadedSamplesCount();
     doc["memoryUsed"] = sampleManager.getTotalMemoryUsed();
 
-    // Daisy realtime telemetry — usar ping reciente O estado de conexión guardado
-    doc["daisyConnected"] = spiMaster.isConnected() || lastPingOk;
-    doc["daisyPingOk"] = lastPingOk;
-    doc["daisyRttMs"] = lastPingMsValue;
+    // Daisy realtime telemetry — uses cached data only (no SPI calls)
+    doc["daisyConnected"] = spiMaster.isConnected();
+    doc["daisyPingOk"] = spiMaster.isConnected();
+    doc["daisyRttMs"] = spiMaster.getLastPingMs();
     doc["daisyVoices"] = spiMaster.getActiveVoices();
     doc["daisyCpu"] = spiMaster.getCpuLoad();
     doc["daisyMasterPeak"] = spiMaster.getMasterPeak();
@@ -1663,11 +1588,8 @@ void WebInterface::update() {
   if (now - lastAudioLevels >= 100 && ws->count() > 0) {
     lastAudioLevels = now;
 
-    static unsigned long lastPeakPoll = 0;
-    if (now - lastPeakPoll >= 120) {
-      spiMaster.requestPeaks();
-      lastPeakPoll = now;
-    }
+    // Peak data is polled by SPIMaster::process() on Core1 —
+    // we just read the cached values here (zero SPI blocking).
 
     if (ESP.getFreeHeap() >= 20000) {
       uint8_t levelBuf[18];
@@ -1692,7 +1614,7 @@ void WebInterface::update() {
   
   // Broadcast LFO scope data every 50ms (20fps) — binary protocol
   static unsigned long lastLfoScope = 0;
-  if (now - lastLfoScope >= 50 && ws->count() > 0) {
+  if (now - lastLfoScope >= 50 && ws->count() > 0 && ESP.getFreeHeap() >= 25000) {
     lastLfoScope = now;
     LfoScopeData scope;
     lfoEngine.getScopeData(scope);
@@ -1714,9 +1636,10 @@ void WebInterface::update() {
   }
   
   // Limpiar WebSocket clients desconectados cada 2 segundos
+  // Limpiar WebSocket clients desconectados cada segundo
   static unsigned long lastWsCleanup = 0;
-  if (now - lastWsCleanup > 2000) {
-    ws->cleanupClients(3);  // Match max client limit
+  if (now - lastWsCleanup > 1000) {
+    ws->cleanupClients(3);  // máx 3 clientes, cerrar el resto
     lastWsCleanup = now;
   }
 
@@ -1741,40 +1664,17 @@ void WebInterface::update() {
   static unsigned long lastWifiCheck = 0;
   if (now - lastWifiCheck > 30000) {
     lastWifiCheck = now;
-    
-    if (WiFi.getMode() == WIFI_AP_STA) {
-      // ── Modo STA: verificar conexión al router ──
-      if (WiFi.status() != WL_CONNECTED) {
-        _staConnected = false;
-        WiFi.reconnect();
-      } else {
-        _staConnected = true;
-        static int lastRSSI = 0;
-        int rssi = WiFi.RSSI();
-        if (abs(rssi - lastRSSI) > 5) {
-          lastRSSI = rssi;
-        }
-      }
-    } else {
-      // ── Modo AP: verificar que siga activo ──
-      if (WiFi.getMode() != WIFI_AP) {
-        WiFi.mode(WIFI_AP);
-        WiFi.softAP("RED808", "red808esp32", 1, 0, 4);
-        WiFi.setSleep(false);
-      }
-      int stations = WiFi.softAPgetStationNum();
-      static int lastStationCount = 0;
-      if (stations != lastStationCount) {
-        lastStationCount = stations;
-      }
+
+    // ── Modo AP: verificar que siga activo ──
+    if (WiFi.getMode() != WIFI_AP) {
+      WiFi.mode(WIFI_AP);
+      WiFi.softAP("RED808", "red808esp32", 1, 0, 4);
+      WiFi.setSleep(false);
     }
   }
 }
 
 String WebInterface::getIP() {
-  if (_staConnected && WiFi.status() == WL_CONNECTED) {
-    return WiFi.localIP().toString();
-  }
   return WiFi.softAPIP().toString();
 }
 
@@ -1788,7 +1688,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   String cmd = doc["cmd"];
 
   static unsigned long lastMasterFxCmdMs = 0;
-  static unsigned long lastTrackFxCmdMs = 0;
+  static unsigned long lastTrackFxCmdMs[24] = {};
   static unsigned long lastPadFxCmdMs = 0;
   static unsigned long lastVolumeCmdMs = 0;
   const unsigned long nowCmdMs = millis();
@@ -1840,8 +1740,11 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     if (nowCmdMs - lastMasterFxCmdMs < kFastMasterCmdMinMs) return;
     lastMasterFxCmdMs = nowCmdMs;
   } else if (isTrackFxFast) {
-    if (nowCmdMs - lastTrackFxCmdMs < kFastTrackCmdMinMs) return;
-    lastTrackFxCmdMs = nowCmdMs;
+    int tIdx = doc.containsKey("track") ? (int)doc["track"] : -1;
+    if (tIdx >= 0 && tIdx < 24) {
+      if (nowCmdMs - lastTrackFxCmdMs[tIdx] < kFastTrackCmdMinMs) return;
+      lastTrackFxCmdMs[tIdx] = nowCmdMs;
+    }
   } else if (isPadFxFast) {
     if (nowCmdMs - lastPadFxCmdMs < kFastPadCmdMinMs) return;
     lastPadFxCmdMs = nowCmdMs;
@@ -4462,7 +4365,8 @@ void WebInterface::broadcastUploadComplete(int pad, bool success, const String& 
 }
 
 void WebInterface::broadcastRaw(const char* json) {
-  if (!initialized || !ws) return;
+  if (!initialized || !ws || ws->count() == 0) return;
+  if (ESP.getFreeHeap() < 20000) return;   // drop if heap critical
   ws->textAll(json);
 }
 
