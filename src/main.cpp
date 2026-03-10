@@ -349,6 +349,7 @@ static void applyProfessionalMixBaseline() {
 }
 
 void setup() {
+    Serial.begin(115200);
     rgbLed.begin();
     rgbLed.setBrightness(255);
     showBootLED();

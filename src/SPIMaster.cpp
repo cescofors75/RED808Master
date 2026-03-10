@@ -343,6 +343,12 @@ void SPIMaster::process() {
         if (stm32Connected) {
             requestStatus();
             drainEvents();
+            // Also refresh SD status cache
+            SdStatusResponse sdTmp;
+            if (sendAndReceive(CMD_SD_STATUS, nullptr, 0, &sdTmp, sizeof(sdTmp))) {
+                cachedSdStatus = sdTmp;
+                cachedSdStatusValid = true;
+            }
         }
         lastStatusPoll = millis();
     }

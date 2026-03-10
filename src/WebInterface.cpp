@@ -151,7 +151,7 @@ static void sendWebAsset(AsyncWebServerRequest *request,
 
 static void populateStateDocument(DynamicJsonDocument& doc) {
   SdStatusResponse sdStat = {};
-  bool sdOk = spiMaster.sdGetStatus(sdStat);
+  bool sdOk = spiMaster.getCachedSdStatus(sdStat);  // Non-blocking: reads cache updated by Core1
   uint32_t sdLoadedMask = sdOk ? sdStat.samplesLoaded : 0;
   if (sdOk) {
     clearDaisyPadFilesNotInMask(sdLoadedMask);
@@ -3741,7 +3741,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "sdGetStatus") {
     SdStatusResponse sdStat;
-    if (spiMaster.sdGetStatus(sdStat)) {
+    if (spiMaster.getCachedSdStatus(sdStat)) {
       clearDaisyPadFilesNotInMask(sdStat.samplesLoaded);
       int loadedCount = 0;
       for (int i = 0; i < MAX_PADS; i++) {

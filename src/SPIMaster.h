@@ -379,6 +379,7 @@ public:
     bool isConnected() const { return stm32Connected; }
     uint32_t getSPIErrors() const { return spiErrorCount; }
     float getLastPingMs() const { return lastPingRttMs; }
+    bool getCachedSdStatus(SdStatusResponse& out) const { if (!cachedSdStatusValid) return false; out = cachedSdStatus; return true; }
 
     // ══════════════════════════════════════════════════
     // SPI LOG CALLBACK (WebSocket diagnostics)
@@ -424,6 +425,10 @@ private:
 
     // Status cache (54 bytes V2)
     StatusResponse cachedStatus;
+
+    // SD status cache (polled periodically on Core1)
+    SdStatusResponse cachedSdStatus;
+    bool cachedSdStatusValid = false;
 
     // Synth engine active mask (0x0F = all active by default)
     uint8_t cachedSynthActiveMask;
