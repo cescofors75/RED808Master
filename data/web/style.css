@@ -2818,21 +2818,21 @@ body:not(.mono-mode) .pad.tremolo-active {
 
 .pads-xtra-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+    gap: 12px;
 }
 
 /* Pad Add Button (grey +) */
 .pad-xtra-add {
     width: 100%;
     aspect-ratio: 1;
-    min-height: 80px;
-    max-height: 120px;
+    min-height: 112px;
+    max-height: 156px;
     border: 2px dashed rgba(255, 255, 255, 0.2);
-    border-radius: 12px;
+    border-radius: 16px;
     background: rgba(60, 60, 70, 0.35);
     color: rgba(255, 255, 255, 0.35);
-    font-size: 36px;
+    font-size: 42px;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -2852,18 +2852,18 @@ body:not(.mono-mode) .pad.tremolo-active {
     position: relative;
     width: 100%;
     aspect-ratio: 1;
-    min-height: 80px;
-    max-height: 120px;
+    min-height: 112px;
+    max-height: 156px;
     border: 2px solid rgba(255, 152, 0, 0.5);
-    border-radius: 12px;
+    border-radius: 16px;
     background: linear-gradient(145deg, rgba(255, 152, 0, 0.12) 0%, rgba(30, 30, 40, 0.8) 100%);
     cursor: pointer;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 2px;
-    padding: 6px;
+    gap: 6px;
+    padding: 10px 10px 44px;
     transition: all 0.15s;
     overflow: hidden;
 }
@@ -2875,7 +2875,7 @@ body:not(.mono-mode) .pad.tremolo-active {
 }
 
 .pad-xtra .pad-xtra-name {
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
     color: #fff;
     text-align: center;
@@ -2886,7 +2886,7 @@ body:not(.mono-mode) .pad.tremolo-active {
 }
 
 .pad-xtra .pad-xtra-sample {
-    font-size: 8px;
+    font-size: 10px;
     color: rgba(255, 255, 255, 0.5);
     text-align: center;
     overflow: hidden;
@@ -2897,22 +2897,23 @@ body:not(.mono-mode) .pad.tremolo-active {
 
 .pad-xtra-controls {
     display: flex;
-    gap: 2px;
+    gap: 6px;
     position: absolute;
-    bottom: 3px;
-    left: 3px;
-    right: 3px;
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
     justify-content: center;
+    z-index: 2;
 }
 
 .pad-xtra-btn {
-    width: 22px;
-    height: 18px;
+    width: 28px;
+    height: 24px;
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.5);
     color: #ccc;
-    font-size: 9px;
+    font-size: 11px;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -2966,6 +2967,49 @@ body:not(.mono-mode) .pad.tremolo-active {
     background: rgba(255, 50, 50, 0.4);
     color: #ff6666;
     border-color: #ff6666;
+}
+
+.pad-xtra.xtra-loading {
+    border-color: rgba(255, 183, 77, 0.9);
+    box-shadow: 0 0 24px rgba(255, 152, 0, 0.22);
+}
+
+.pad-xtra.xtra-loading .pad-xtra-controls,
+.pad-xtra.xtra-loading .pad-xtra-name,
+.pad-xtra.xtra-loading .pad-xtra-sample {
+    opacity: 0.3;
+}
+
+.xtra-transfer-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 14px;
+    background: linear-gradient(180deg, rgba(10, 10, 10, 0.45), rgba(10, 10, 10, 0.88));
+    backdrop-filter: blur(3px);
+    z-index: 4;
+    text-align: center;
+    color: #ffd199;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.xtra-transfer-spinner {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 3px solid rgba(255, 180, 90, 0.25);
+    border-top-color: #ff9800;
+    animation: xtraTransferSpin 0.75s linear infinite;
+}
+
+@keyframes xtraTransferSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 
 
@@ -4536,14 +4580,19 @@ body.mono-mode .info-item {
 .sample-modal-content {
     background: linear-gradient(135deg, #1a1a1a, #2a2a2a);
     border: 3px solid var(--red-primary);
-    border-radius: 12px;
-    padding: 30px;
-    max-width: 500px;
-    width: 90%;
-    max-height: 80vh;
+    border-radius: 16px;
+    padding: 34px;
+    max-width: 760px;
+    width: min(92vw, 760px);
+    max-height: 88vh;
     overflow-y: auto;
     box-shadow: 0 10px 50px rgba(255, 0, 0, 0.5);
     animation: slideUp 0.3s ease-out;
+}
+
+.xtra-picker-modal {
+    max-width: 720px;
+    width: min(92vw, 720px);
 }
 
 @keyframes slideUp {
@@ -12192,10 +12241,10 @@ body.embed-mode .tab-content:not(.active) { display: none !important; }
 .synth-modal {
     background: linear-gradient(135deg, #1a1c2e 0%, #0d0f1a 100%);
     border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 16px;
-    width: 90vw;
-    max-width: 640px;
-    max-height: 90vh;
+    border-radius: 18px;
+    width: 94vw;
+    max-width: 860px;
+    max-height: 94vh;
     overflow-y: auto;
     box-shadow: 0 20px 80px rgba(0,0,0,0.8), 0 0 40px rgba(100,100,255,0.08);
     animation: synthModalIn 0.3s ease;
@@ -12288,18 +12337,18 @@ body.embed-mode .tab-content:not(.active) { display: none !important; }
 }
 .synth-modal-waveform-wrap canvas {
     width: 100%;
-    max-width: 600px;
-    height: 120px;
+    max-width: 820px;
+    height: 148px;
     border-radius: 10px;
     border: 1px solid rgba(255,255,255,0.08);
 }
 
 /* Parameter rows */
 .synth-modal-params {
-    padding: 12px 20px 8px;
+    padding: 14px 24px 10px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
 }
 
 /* Modal footer — Save / Cancel / Test */
@@ -12476,8 +12525,14 @@ body.embed-mode .tab-content:not(.active) { display: none !important; }
 
 /* Mobile */
 @media (max-width: 520px) {
-    .synth-modal {
+    .sample-modal-content {
         width: 96vw;
+        max-height: 92vh;
+        padding: 22px 18px;
+        border-radius: 14px;
+    }
+    .synth-modal {
+        width: 98vw;
         max-height: 95vh;
         border-radius: 12px;
     }
@@ -12496,6 +12551,14 @@ body.embed-mode .tab-content:not(.active) { display: none !important; }
     .synth-param-value {
         min-width: 42px;
         font-size: 10px;
+    }
+    .pads-xtra-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+    .pad-xtra,
+    .pad-xtra-add {
+        min-height: 104px;
     }
     .synth-overlay {
         right: 28px;

@@ -758,7 +758,7 @@ function _injectWtModalCss() {
     const s = document.createElement('style');
     s.id = 'wt-modal-css';
     s.textContent = `
-.wt-osc-modal { max-width:640px; width:96vw; display:flex; flex-direction:column; gap:10px; }
+ .wt-osc-modal { max-width:1040px; width:min(96vw, 1040px); display:flex; flex-direction:column; gap:14px; }
 .wt-section-label { font-size:10px; font-weight:700; letter-spacing:2px; color:#e67e22aa; text-transform:uppercase; margin-bottom:2px; }
 .wt-wave-grid { display:grid; grid-template-columns:repeat(8,1fr); gap:5px; }
 .wt-wave-cell { display:flex; flex-direction:column; align-items:center; gap:2px; cursor:pointer; border-radius:6px; padding:4px 2px; border:1.5px solid #333; background:#111; transition:all .15s; }
@@ -793,6 +793,7 @@ function _injectWtModalCss() {
 .wt-note-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .wt-note-btn { padding:3px 8px; border-radius:4px; border:1px solid #333; background:#111; color:#888; cursor:pointer; font-size:10px; }
 .wt-note-btn.active { border-color:${WT_COLOR}; color:${WT_COLOR}; }
+@media (max-width: 900px) { .wt-wave-grid { grid-template-columns:repeat(4,1fr); } .wt-params-grid { grid-template-columns:1fr; } }
 `;
     document.head.appendChild(s);
 }

@@ -329,6 +329,13 @@ function handleWebSocketMessage(data) {
             if (typeof SampleWaveform !== 'undefined' && data.pad !== undefined) {
                 SampleWaveform.clearCache(data.pad);
             }
+            if (typeof data.pad === 'number' && data.pad >= 16 && data.pad < 24) {
+                const cleanLabel = (data.filename || '').replace(/\.(wav|raw)$/i, '') || `XTRA ${data.pad - 15}`;
+                _setXtraPadTransferState(data.pad, false, {
+                    label: cleanLabel,
+                    filename: data.filename || ''
+                });
+            }
             break;
 
         case 'xtraTransferring':
@@ -6982,6 +6989,8 @@ window.updateTrackVolume = updateTrackVolume;
 const xtraPads = []; // Array of { id, padIndex, family, filename, element }
 let xtraPadCounter = 0;
 const xtraTremoloIntervals = {};
+const xtraTransferTimers = new Map();
+const XTRA_TRANSFER_TIMEOUT_MS = 15000;
 
 function initLivePadsX() {
     const grid = document.getElementById('padsXtraGrid');
@@ -7024,7 +7033,7 @@ function showXtraPadPicker() {
     const modal = document.createElement('div');
     modal.className = 'sample-modal';
     modal.innerHTML = `
-        <div class="sample-modal-content" style="max-width:440px;">
+        <div class="sample-modal-content xtra-picker-modal">
             <h3 style="margin:0 0 8px;">🎲 XTRA Pad — Slot ${freeSlot - 15}/8</h3>
             <p style="color:#aaa;margin:0 0 14px;font-size:11px;">Pads independientes (no Sequencer). Elige sample de la librería o sube un WAV.</p>
             
@@ -7034,13 +7043,13 @@ function showXtraPadPicker() {
                     <span style="color:#ff6600;font-weight:bold;font-size:13px;">📚 LIBRERÍA XTRA</span>
                     <button id="xtraRefreshBtn" style="background:#333;border:1px solid #555;color:#aaa;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:11px;">🔄</button>
                 </div>
-                <div id="xtraLibraryList" style="max-height:180px;overflow-y:auto;border:1px solid #333;border-radius:8px;background:#111;padding:4px;">
+                <div id="xtraLibraryList" style="max-height:260px;overflow-y:auto;border:1px solid #333;border-radius:8px;background:#111;padding:4px;">
                     <div style="text-align:center;color:#666;padding:16px;font-size:12px;">⏳ Cargando samples...</div>
                 </div>
             </div>
             
             <!-- Upload Zone -->
-            <div id="xtraUploadZone" style="border:2px dashed #ff6600;border-radius:10px;padding:18px 16px;text-align:center;cursor:pointer;transition:all .2s;">
+            <div id="xtraUploadZone" style="border:2px dashed #ff6600;border-radius:12px;padding:24px 18px;text-align:center;cursor:pointer;transition:all .2s;">
                 <div style="font-size:28px;margin-bottom:4px;">📤</div>
                 <div style="color:#ff6600;font-weight:bold;font-size:13px;" id="xtraUploadMsg">Click para subir WAV</div>
                 <div style="color:#666;font-size:10px;margin-top:4px;">Max 2MB · WAV format</div>
@@ -7167,12 +7176,96 @@ function showXtraPadPicker() {
     document.body.appendChild(modal);
 }
 
+function _getXtraPadEntry(padIndex) {
+    return xtraPads.find(p => p.padIndex === padIndex) || null;
+}
+
+function _clearXtraPadTransferTimeout(padIndex) {
+    const timeoutId = xtraTransferTimers.get(padIndex);
+    if (timeoutId) {
+        clearTimeout(timeoutId);
+        xtraTransferTimers.delete(padIndex);
+    }
+}
+
+function _scheduleXtraPadTransferTimeout(padIndex) {
+    _clearXtraPadTransferTimeout(padIndex);
+    const timeoutId = setTimeout(() => {
+        _setXtraPadTransferState(padIndex, false);
+    }, XTRA_TRANSFER_TIMEOUT_MS);
+    xtraTransferTimers.set(padIndex, timeoutId);
+}
+
+function _syncXtraPadDisplay(padIndex, label, filename = '') {
+    const xtraEntry = _getXtraPadEntry(padIndex);
+    if (!xtraEntry || !xtraEntry.element) return;
+
+    const cleanLabel = label || `XTRA ${padIndex - 15}`;
+    xtraEntry.label = cleanLabel;
+
+    const nameEl = xtraEntry.element.querySelector('.pad-xtra-name');
+    const sampleEl = xtraEntry.element.querySelector('.pad-xtra-sample');
+    const sampleText = filename || `Slot ${padIndex - 15}`;
+
+    if (nameEl) {
+        nameEl.textContent = cleanLabel;
+        nameEl.title = cleanLabel;
+    }
+    if (sampleEl) {
+        sampleEl.textContent = sampleText;
+        sampleEl.title = sampleText;
+    }
+}
+
+function _ensureXtraTransferOverlay(padEl, message = 'Cargando a Daisy...') {
+    let overlay = padEl.querySelector('.xtra-transfer-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'xtra-transfer-overlay';
+        overlay.innerHTML = '<span class="xtra-transfer-spinner"></span><span class="xtra-transfer-text"></span>';
+        padEl.appendChild(overlay);
+    }
+    const textEl = overlay.querySelector('.xtra-transfer-text');
+    if (textEl) textEl.textContent = message;
+    return overlay;
+}
+
+function _setXtraPadTransferState(padIndex, isLoading, options = {}) {
+    const xtraEntry = _getXtraPadEntry(padIndex);
+    if (!xtraEntry || !xtraEntry.element) return;
+
+    if (options.label || options.filename) {
+        _syncXtraPadDisplay(padIndex, options.label, options.filename);
+    }
+
+    const padEl = xtraEntry.element;
+    padEl.classList.toggle('xtra-loading', isLoading);
+
+    if (isLoading) {
+        _ensureXtraTransferOverlay(padEl, options.message || 'Cargando a Daisy...');
+        _scheduleXtraPadTransferTimeout(padIndex);
+        return;
+    }
+
+    _clearXtraPadTransferTimeout(padIndex);
+    const overlay = padEl.querySelector('.xtra-transfer-overlay');
+    if (overlay) overlay.remove();
+}
+
 function createXtraPad(padIndex, label, showLoading = false) {
     const grid = document.getElementById('padsXtraGrid');
     if (!grid) return;
 
-    const id = ++xtraPadCounter;
     const displayName = label || `XTRA ${padIndex - 15}`;
+    const existingEntry = _getXtraPadEntry(padIndex);
+
+    if (existingEntry && existingEntry.element) {
+        _syncXtraPadDisplay(padIndex, displayName);
+        _setXtraPadTransferState(padIndex, showLoading, { label: displayName });
+        return existingEntry.element;
+    }
+
+    const id = ++xtraPadCounter;
 
     const padEl = document.createElement('div');
     padEl.className = 'pad-xtra' + (showLoading ? ' xtra-loading' : '');
@@ -7239,12 +7332,20 @@ function createXtraPad(padIndex, label, showLoading = false) {
     // Insert before "+" button
     const addBtn = grid.querySelector('.pad-xtra-add');
     grid.insertBefore(padEl, addBtn);
+
+    _syncXtraPadDisplay(padIndex, displayName);
+    if (showLoading) {
+        _setXtraPadTransferState(padIndex, true, { label: displayName });
+    }
+
+    return padEl;
 }
 
 function removeXtraPad(id) {
     const idx = xtraPads.findIndex(p => p.id === id);
     if (idx === -1) return;
     const pad = xtraPads[idx];
+    _clearXtraPadTransferTimeout(pad.padIndex);
     stopXtraTremolo(id, pad.element);
     pad.element.remove();
     xtraPads.splice(idx, 1);
