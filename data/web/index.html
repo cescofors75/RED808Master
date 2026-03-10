@@ -96,7 +96,6 @@
             <button class="tab-btn" data-tab="fx">🔊 FX</button>
             <button class="tab-btn" data-tab="midi">🎹 MIDI</button>
             <button class="tab-btn" data-tab="daisy-sd">💾 SD</button>
-            <button class="tab-btn" data-tab="lfo">〰️ LFO</button>
             <button class="tab-btn" data-tab="info">📊 INFO</button>
             <a href="/multiview.html" class="tab-btn tab-btn-multiview" title="Ver múltiples secciones a la vez">🖥 MULTIVIEW</a>
         </nav>
@@ -1464,25 +1463,6 @@
             </div>
 
             <div class="sd-log" id="sdLog"></div>
-        </section>
-        </div>
-
-        <!-- TAB: LFO (Per-Pad Modulation) -->
-        <div id="tab-lfo" class="tab-content">
-        <section class="section">
-            <h2 class="section-title">〰️ LFO — Organic Modulation</h2>
-            <div class="lfo-toolbar">
-                <button class="btn btn-small" id="lfoResetAll" onclick="lfoResetAll()">⟲ Reset All</button>
-                <span class="lfo-active-count">Active: <strong id="lfoActiveCount">0</strong>/24</span>
-            </div>
-
-            <div class="lfo-grid" id="lfoGrid"></div>
-
-            <!-- LFO Scope Visualizer -->
-            <div class="lfo-scope-section">
-                <h3 class="section-subtitle">Oscilloscopes</h3>
-                <div class="lfo-scopes" id="lfoScopes"></div>
-            </div>
         </section>
         </div>
 

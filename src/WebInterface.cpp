@@ -7,7 +7,6 @@
 #include "SPIMaster.h"
 #include "Sequencer.h"
 #include "SampleManager.h"
-#include "LFOEngine.h"
 #include <esp_wifi.h>
 
 #ifndef ENABLE_PHYSICAL_BUTTONS
@@ -44,7 +43,6 @@ static void dsqSyncParamLock(int pat, int track, int step) {
         ce, ch, re, rv, ve, vl);
 }
 extern SampleManager sampleManager;
-extern LFOEngine lfoEngine;
 extern void triggerPadWithLED(int track, uint8_t velocity);  // Función que enciende LED
 extern void setLedMonoMode(bool enabled);
 extern int8_t gTrackSynthEngine[16];
@@ -251,12 +249,7 @@ static void populateStateDocument(DynamicJsonDocument& doc) {
     doc["sdLoadedMask"] = 0;
   }
   
-  // LFO active count
-  int lfoCount = 0;
-  for (int i = 0; i < 24; i++) {
-    if (lfoEngine.isActive(i)) lfoCount++;
-  }
-  doc["lfoActive"] = lfoCount;
+  doc["lfoActive"] = 0;
 }
 
 static bool isClientReady(AsyncWebSocketClient* client) {
@@ -380,7 +373,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   server->addHandler(ws);
   
   // Servir archivos grandes con gzip explícito para máximo rendimiento
-  server->on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+  server->on("/", HTTP_GET, [this](AsyncWebServerRequest *request){
     // Pause periodic broadcasts during page transition to free TCP/Core0
     pageTransitionMs = millis();
     if (ws) ws->cleanupClients(0);  // close all old WS clients immediately
@@ -429,7 +422,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   });
   
   // Patchbay page
-  server->on("/patchbay", HTTP_GET, [](AsyncWebServerRequest *request){
+  server->on("/patchbay", HTTP_GET, [this](AsyncWebServerRequest *request){
     pageTransitionMs = millis();
     if (ws) ws->cleanupClients(0);
     sendWebAsset(request, "/patchbay.html", "text/html");
@@ -458,6 +451,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   
   server->on("/multiview.js", HTTP_GET, [](AsyncWebServerRequest *request){
     sendWebAsset(request, "/multiview.js", "application/javascript", "max-age=86400");
+  });
 
   // Admin page
   server->on("/adm", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -1622,29 +1616,6 @@ void WebInterface::update() {
       levelBuf[17] = (uint8_t)(mp * 255.0f);
 
       ws->binaryAll(levelBuf, 18);
-    }
-  }
-  
-  // Broadcast LFO scope data every 50ms (20fps) — binary protocol
-  static unsigned long lastLfoScope = 0;
-  if (!pageLoading && now - lastLfoScope >= 50 && ws->count() > 0 && ESP.getFreeHeap() >= 25000) {
-    lastLfoScope = now;
-    LfoScopeData scope;
-    lfoEngine.getScopeData(scope);
-    // Only send if at least one LFO is active
-    if (scope.activeMask[0] || scope.activeMask[1] || scope.activeMask[2]) {
-      // Binary protocol: [0xBB][mask0][mask1][mask2][24 × int8 value] = 28 bytes
-      uint8_t lfoBuf[28];
-      lfoBuf[0] = 0xBB;  // Magic byte: LFO scope
-      lfoBuf[1] = scope.activeMask[0];
-      lfoBuf[2] = scope.activeMask[1];
-      lfoBuf[3] = scope.activeMask[2];
-      for (int i = 0; i < 24; i++) {
-        // Convert -1..+1 float to -127..+127 int8
-        int8_t v = (int8_t)(scope.values[i] * 127.0f);
-        lfoBuf[4 + i] = (uint8_t)v;
-      }
-      ws->binaryAll(lfoBuf, 28);
     }
   }
   
@@ -3782,95 +3753,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     serializeJson(resp, output);
     if (ws) ws->textAll(output);
   }
-  // ══════════════════════════════════════════════════════
-  // PER-PAD LFO COMMANDS
-  // ══════════════════════════════════════════════════════
-  else if (cmd == "lfoSetActive") {
-    int pad = doc["pad"];
-    bool on = doc["active"];
-    if (pad >= 0 && pad < 24) {
-      lfoEngine.setActive(pad, on);
-    }
-  }
-  else if (cmd == "lfoSetWave") {
-    int pad = doc["pad"];
-    int wave = doc["wave"];  // 0=sin 1=tri 2=sq 3=saw 4=s&h
-    if (pad >= 0 && pad < 24 && wave >= 0 && wave <= 4) {
-      lfoEngine.setWaveform(pad, (LfoWaveform)wave);
-    }
-  }
-  else if (cmd == "lfoSetRate") {
-    int pad = doc["pad"];
-    int div = doc["division"];  // 0=1/4 1=1/8 2=1/16 3=1/32 4=free
-    if (pad >= 0 && pad < 24 && div >= 0 && div <= 4) {
-      lfoEngine.setDivision(pad, (LfoDivision)div);
-    }
-  }
-  else if (cmd == "lfoSetDepth") {
-    int pad = doc["pad"];
-    int depth = doc["depth"];  // 0-100
-    if (pad >= 0 && pad < 24) {
-      lfoEngine.setDepth(pad, depth);
-    }
-  }
-  else if (cmd == "lfoSetTarget") {
-    int pad = doc["pad"];
-    int tgt = doc["target"];  // 0=pitch 1=decay 2=filter 3=pan 4=vol
-    if (pad >= 0 && pad < 24 && tgt >= 0 && tgt <= 4) {
-      lfoEngine.setTarget(pad, (LfoTarget)tgt);
-    }
-  }
-  else if (cmd == "lfoSetFreeHz") {
-    int pad = doc["pad"];
-    float hz = doc["hz"];  // 0.1-20.0
-    if (pad >= 0 && pad < 24) {
-      lfoEngine.setFreeHz(pad, hz);
-    }
-  }
-  else if (cmd == "lfoSetPhase") {
-    int pad = doc["pad"];
-    int phase = doc["phase"];  // 0-255
-    if (pad >= 0 && pad < 24) {
-      lfoEngine.setPhaseOffset(pad, phase);
-    }
-  }
-  else if (cmd == "lfoSetRetrigger") {
-    int pad = doc["pad"];
-    bool on = doc["retrigger"];
-    if (pad >= 0 && pad < 24) {
-      lfoEngine.setRetrigger(pad, on);
-    }
-  }
-  else if (cmd == "lfoGetState") {
-    // Send full LFO state for all pads to requesting client
-    DynamicJsonDocument resp(4096);
-    resp["type"] = "lfoState";
-    JsonArray pads = resp.createNestedArray("pads");
-    for (int i = 0; i < 24; i++) {
-      const PadLFO& lfo = lfoEngine.getPadLFO(i);
-      JsonObject p = pads.createNestedObject();
-      p["active"]   = lfo.active;
-      p["wave"]     = (int)lfo.waveform;
-      p["div"]      = (int)lfo.division;
-      p["target"]   = (int)lfo.target;
-      p["depth"]    = lfo.depth;
-      p["freeHz"]   = lfo.freeHz;
-      p["retrig"]   = lfo.retrigger;
-      p["phase"]    = lfo.startPhase;
-    }
-    String output;
-    serializeJson(resp, output);
-    if (ws) ws->textAll(output);
-  }
-  else if (cmd == "lfoReset") {
-    lfoEngine.resetAll();
-    StaticJsonDocument<64> resp;
-    resp["type"] = "lfoResetAck";
-    String output;
-    serializeJson(resp, output);
-    if (ws) ws->textAll(output);
-  }
-
   // ══════════════════════════════════════════════════════
   // SYNTH ENGINES — TR-808/909/505 + TB-303 + WTOSC + SH-101 + FM2Op
   // ══════════════════════════════════════════════════════

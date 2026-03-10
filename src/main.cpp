@@ -8,7 +8,6 @@
 #include "Sequencer.h"
 #include "WebInterface.h"
 #include "MIDIController.h"
-#include "LFOEngine.h"
 #if ENABLE_PHYSICAL_BUTTONS
 #include "PhysControlButtons.h"
 #endif
@@ -45,7 +44,6 @@
 SPIMaster spiMaster;
 SampleManager sampleManager;
 Sequencer sequencer;
-LFOEngine lfoEngine;
 WebInterface webInterface;
 MIDIController midiController;
 Adafruit_NeoPixel rgbLed(RGB_LED_NUM, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -228,7 +226,6 @@ void spiAudioTask(void *pvParameters) {
 
     while (true) {
         sequencer.update();   // Mantiene internos del secuenciador (beat UI, song mode)
-        lfoEngine.update(sequencer.getTempo(), spiMaster);
         spiMaster.process();
         esp_task_wdt_reset();
         vTaskDelay(pdMS_TO_TICKS(1));
@@ -296,8 +293,6 @@ void triggerPadWithLED(int track, uint8_t velocity) {
     } else {
         spiMaster.triggerSampleLive(track, velocity);
     }
-    lfoEngine.onPadTrigger(track);  // LFO retrigger
-    
     // Iluminar LED RGB con color del instrumento (solo pads principales 0-15)
     if (track >= 0 && track < 16) {
         uint32_t color = ledMonoMode ? 0xFF0000 : instrumentColors[track];
