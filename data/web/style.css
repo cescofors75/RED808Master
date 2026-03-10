@@ -1167,7 +1167,7 @@ body.mono-mode .pad.sync-flash {
 .loop-btn {
     position: absolute;
     top: 5px;
-    right: 37px;
+    right: 54px;
     width: 22px;
     height: 22px;
     min-width: 44px;
@@ -1511,7 +1511,7 @@ body:not(.mono-mode) .pad.tremolo-active {
     z-index: 100 !important;
     position: absolute !important;
     bottom: 6px !important;
-    right: 34px !important;
+    right: 54px !important;
     top: auto !important;
     left: auto !important;
     pointer-events: auto !important;
@@ -1782,7 +1782,7 @@ body:not(.mono-mode) .pad.tremolo-active {
     transform: translateY(-50%);
     text-align: center;
     width: 100%;
-    padding: 0 78px 0 50px;
+    padding: 0 150px 0 50px;
     z-index: 2;
 }
 
@@ -3840,7 +3840,7 @@ body.mono-mode .info-item {
     
     .loop-btn {
         top: 4px !important;
-        right: 36px !important;
+        right: 52px !important;
         left: auto !important;
     }
     
@@ -3933,7 +3933,7 @@ body.mono-mode .info-item {
     
     .loop-btn {
         top: 4px !important;
-        right: 36px !important;
+        right: 52px !important;
         left: auto !important;
         font-size: 10px !important;
     }
@@ -8132,7 +8132,7 @@ body.midi-dialog-open .midi-import-overlay * {
     z-index: 100 !important;
     position: absolute !important;
     bottom: 6px !important;
-    right: 62px !important;
+    right: 102px !important;
     top: auto !important;
     left: auto !important;
     pointer-events: auto !important;
@@ -8629,7 +8629,7 @@ body.midi-dialog-open .midi-import-overlay * {
 /* ============= RESPONSIVE for new elements ============= */
 @media (max-width: 600px) {
     .pad-fx-btn {
-        right: 52px !important;
+        right: 100px !important;
         min-width: 36px;
         min-height: 36px;
         font-size: 0.65em;

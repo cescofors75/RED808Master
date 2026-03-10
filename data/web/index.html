@@ -158,6 +158,40 @@
         <div id="tab-sequencer" class="tab-content">
             <!-- Sequencer Section -->
             <section id="section-sequencer" class="sequencer-section" data-section="sequencer" data-title="Sequencer">
+                <div class="sequencer-header">
+                    <div class="sequencer-controls">
+                        <button id="playBtn" class="seq-btn seq-btn-play" title="Play/Pause">
+                            <span class="seq-btn-bg"></span>
+                            <span class="seq-btn-icon">▶</span>
+                            <span class="seq-btn-label">PLAY</span>
+                        </button>
+                        <button id="stopBtn" class="seq-btn seq-btn-stop" title="Stop">
+                            <span class="seq-btn-bg"></span>
+                            <span class="seq-btn-icon">⬛</span>
+                            <span class="seq-btn-label">STOP</span>
+                        </button>
+                        <button id="clearBtn" class="seq-btn seq-btn-clear" title="Clear Pattern">
+                            <span class="seq-btn-bg"></span>
+                            <span class="seq-btn-icon">⚡</span>
+                            <span class="seq-btn-label">CLEAR</span>
+                        </button>
+                        <button id="viewModeBtn" class="seq-btn seq-btn-view-mode" title="Cambiar vista: Grid / Circular">
+                            <span class="seq-btn-bg"></span>
+                            <span class="seq-btn-icon">⭘</span>
+                            <span class="seq-btn-label">CIRCULAR</span>
+                        </button>
+                        <button id="midiImportBtn" class="seq-btn seq-btn-midi-import" title="Importar archivo MIDI" onclick="showMidiImportDialog()">
+                            <span class="seq-btn-bg"></span>
+                            <span class="seq-btn-icon">📂</span>
+                            <span class="seq-btn-label">MIDI</span>
+                        </button>
+                        <button id="exportBtn" class="seq-btn seq-btn-export" title="Exportar patrón (MIDI/WAV/JSON)" onclick="showExportDialog()">
+                            <span class="seq-btn-bg"></span>
+                            <span class="seq-btn-icon">💾</span>
+                            <span class="seq-btn-label">EXPORT</span>
+                        </button>
+                        <button id="patchbayBtn" class="seq-btn seq-btn-patchbay" title="Patchbay — Signal Routing" onclick="window.location.href='/patchbay'">
+                            <span class="seq-btn-bg"></span>
                             <span class="seq-btn-icon">🔌</span>
                             <span class="seq-btn-label">PATCH</span>
                         </button>
@@ -283,46 +317,6 @@
         <div id="tab-volumes" class="tab-content">
             <!-- Volumes Section -->
             <section id="section-volumes" class="volumes-section" data-section="volumes" data-title="Controles de Volumen">
-                <div class="volumes-header">
-                    <h2>🎚️ CONTROLES DE VOLUMEN</h2>
-                    <p class="volumes-description">Control individual de volúmenes en tiempo real</p>
-                    <div class="vol-layout-selector">
-                        <span class="layout-sel-label">COLS</span>
-                        <button class="vls-btn" data-cols="4">4</button>
-                        <button class="vls-btn" data-cols="8">8</button>
-                        <button class="vls-btn active" data-cols="16">16</button>
-                    </div>
-                </div>
-
-                <!-- Master Volumes -->
-                <div class="master-volumes">
-                    <div class="volume-card sequencer-volume">
-                        <div class="volume-card-header">
-                            <span class="volume-icon">🎵</span>
-                            <h3>VOLUMEN SEQUENCER</h3>
-                        </div>
-                        <div class="volume-display">
-                            <div class="volume-value-display" id="displaySequencerVolume">100%</div>
-                            <div class="volume-bar-container">
-                                <div class="volume-bar sequencer" id="barSequencerVolume" style="width: 100%;"></div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="volume-card pads-volume">
-                        <div class="volume-card-header">
-                            <span class="volume-icon">🎹</span>
-                            <h3>VOLUMEN PADS</h3>
-                        </div>
-                        <div class="volume-display">
-                            <div class="volume-value-display" id="displayPadsVolume">100%</div>
-                            <div class="volume-bar-container">
-                                <div class="volume-bar pads" id="barPadsVolume" style="width: 100%;"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- Track Volumes -->
                 <div class="track-volumes">
                     <div class="track-volumes-grid" id="trackVolumesGrid">
