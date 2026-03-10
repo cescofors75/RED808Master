@@ -4,12 +4,17 @@
 #include <Adafruit_NeoPixel.h>
 #include "SPIMaster.h"
 #include "SampleManager.h"
-#include "KitManager.h"
 #include "Sequencer.h"
 #include "WebInterface.h"
 #include "MIDIController.h"
 #include "LFOEngine.h"
+#if ENABLE_PHYSICAL_BUTTONS
 #include "PhysControlButtons.h"
+#endif
+
+#ifndef ENABLE_PHYSICAL_BUTTONS
+#define ENABLE_PHYSICAL_BUTTONS 1
+#endif
 
 // LED RGB integrado ESP32-S3
 #define RGB_LED_PIN  48
@@ -38,13 +43,13 @@
 // via ps_calloc() inside the Sequencer constructor — see Sequencer.cpp.
 SPIMaster spiMaster;
 SampleManager sampleManager;
-KitManager kitManager;
 Sequencer sequencer;
 LFOEngine lfoEngine;
 WebInterface webInterface;
 MIDIController midiController;
 Adafruit_NeoPixel rgbLed(RGB_LED_NUM, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);
 
+#if ENABLE_PHYSICAL_BUTTONS
 // ── Botones físicos con LED RGB ──────────────────────────────────
 PhysControlButtons ctrlButtons;
 bool gMultiviewActive = false;   // estado actual del panel multiview
@@ -58,6 +63,7 @@ bool gCompActive     = false;
 bool gTremoloActive  = false;
 bool gLimiterActive  = true;
 bool gDistActive     = false;
+#endif
 // Track synth engine map for sequencer tracks:
 // -1 = sample, 0 = 808, 1 = 909, 2 = 505, 3 = 303
 int8_t gTrackSynthEngine[16] = {
@@ -229,16 +235,21 @@ void spiAudioTask(void *pvParameters) {
 void systemTask(void *pvParameters) {
     
     uint32_t lastLedUpdate = 0;
+#if ENABLE_PHYSICAL_BUTTONS
     uint32_t lastBtnUpdate  = 0;
+#endif
     
     while (true) {
+        midiController.update();
         webInterface.update();
         webInterface.handleUdp();
+#if ENABLE_PHYSICAL_BUTTONS
         // Botones físicos — Core 0 (mismo que rgbLed para evitar conflicto RMT)
         if (millis() - lastBtnUpdate >= 5) {
             lastBtnUpdate = millis();
             ctrlButtons.update();
         }
+#endif
         // Fade out del LED después de trigger
         if (ledFading && millis() - lastLedUpdate > 20) {
             lastLedUpdate = millis();
@@ -763,6 +774,22 @@ void setup() {
         delay(500);
     }
 
+    webInterface.setMIDIController(&midiController);
+    midiController.setMessageCallback([](const MIDIMessage& msg) {
+        webInterface.broadcastMIDIMessage(msg);
+        if (msg.type == MIDI_NOTE_ON && msg.data2 > 0) {
+            int8_t pad = midiController.getMappedPad(msg.data1);
+            if (pad >= 0) {
+                triggerPadWithLED(pad, msg.data2);
+            }
+        }
+    });
+    midiController.setDeviceCallback([](bool connected, const MIDIDeviceInfo& info) {
+        webInterface.broadcastMIDIDeviceStatus(connected, info);
+    });
+    midiController.begin();
+
+#if ENABLE_PHYSICAL_BUTTONS
     // Callback: WebInterface notifica cuando llega POST /api/buttons
     // Aplica nueva config en tiempo real sin reiniciar
     webInterface.setBtnConfigCallback([](const String& json) {
@@ -968,6 +995,7 @@ void setup() {
             }
         }
     };
+#endif
 
     // --- SD EVENT CALLBACK (Daisy → WebSocket) ---
     spiMaster.setEventCallback([](const NotifyEvent& evt, void* /*ud*/) {

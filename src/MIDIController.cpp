@@ -2,6 +2,7 @@
 
 // Static callback wrapper
 static MIDIController* s_midiInstance = nullptr;
+static bool s_transferSubmitted = false;
 
 // Transfer callback — se llama cuando USB Host completa una lectura
 static void transferCallback(usb_transfer_t* transfer) {
@@ -267,6 +268,7 @@ void MIDIController::notifyDeviceChange(bool connected) {
 }
 
 bool MIDIController::openMidiDevice(uint8_t deviceAddress) {
+  s_transferSubmitted = false;
   
   // Close previous device if exists
   if (deviceHandle) {
@@ -424,6 +426,7 @@ bool MIDIController::openMidiDevice(uint8_t deviceAddress) {
 }
 
 void MIDIController::closeMidiDevice() {
+  s_transferSubmitted = false;
   
   if (midiTransfer) {
     usb_host_transfer_free(midiTransfer);
@@ -453,8 +456,7 @@ void MIDIController::readMidiData() {
 
   // Solo enviar si el transfer NO está ya en vuelo
   // (el callback se encarga de re-submitear automáticamente)
-  static bool transferSubmitted = false;
-  if (transferSubmitted) return;
+  if (s_transferSubmitted) return;
 
   midiTransfer->device_handle    = deviceHandle;
   midiTransfer->bEndpointAddress = midiEndpointAddress;
@@ -465,7 +467,7 @@ void MIDIController::readMidiData() {
 
   esp_err_t err = usb_host_transfer_submit(midiTransfer);
   if (err == ESP_OK) {
-    transferSubmitted = true;
+    s_transferSubmitted = true;
   } else {
   }
 }

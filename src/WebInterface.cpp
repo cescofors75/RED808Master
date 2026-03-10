@@ -6,10 +6,13 @@
 #include "WebInterface.h"
 #include "SPIMaster.h"
 #include "Sequencer.h"
-#include "KitManager.h"
 #include "SampleManager.h"
 #include "LFOEngine.h"
 #include <esp_wifi.h>
+
+#ifndef ENABLE_PHYSICAL_BUTTONS
+#define ENABLE_PHYSICAL_BUTTONS 1
+#endif
 
 // Timeout para clientes UDP (30 segundos sin actividad)
 #define UDP_CLIENT_TIMEOUT 30000
@@ -37,7 +40,6 @@ static void dsqSyncParamLock(int pat, int track, int step) {
     spiMaster.dsqSetParamLock((uint8_t)pat, (uint8_t)track, (uint8_t)step,
         ce, ch, re, rv, ve, vl);
 }
-extern KitManager kitManager;
 extern SampleManager sampleManager;
 extern LFOEngine lfoEngine;
 extern void triggerPadWithLED(int track, uint8_t velocity);  // Función que enciende LED
@@ -45,7 +47,6 @@ extern void setLedMonoMode(bool enabled);
 extern int8_t gTrackSynthEngine[16];
 extern void setTrackSynthEngine(int track, int8_t engine);
 extern void setAllTrackSynthEngines(int8_t engine);
-static constexpr bool kStrictProtocolBoundary = true;
 static String gDaisyPadFiles[MAX_PADS];
 
 static void clearTrackLoopStateForSynth(int track, AsyncWebSocket* ws) {
@@ -72,14 +73,6 @@ static void clearTrackLoopStateForSynth(int track, AsyncWebSocket* ws) {
     serializeJson(responseDoc, output);
     ws->textAll(output);
   }
-}
-
-// ── SPI log broadcast bridge ───────────────────────────────────────────────
-// g_wsSpiLog points to the AsyncWebSocket instance once begin() creates it.
-// spiLogDispatch is registered with SPIMaster as a plain-function callback.
-static AsyncWebSocket* g_wsSpiLog = nullptr;
-static void spiLogDispatch(const char* json) {
-    if (g_wsSpiLog) g_wsSpiLog->textAll(json);
 }
 
 static void setDaisyPadFile(int padIndex, const String& fileName) {
@@ -427,10 +420,6 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   server = new AsyncWebServer(80);
   ws = new AsyncWebSocket("/ws");
 
-  // SPI log desactivado — causaba agotamiento de heap
-  // g_wsSpiLog = ws;
-  // spiMaster.setSpiLogCallback(spiLogDispatch);
-  
   // WebSocket handler
   ws->onEvent([this](AsyncWebSocket *server, AsyncWebSocketClient *client, 
                      AwsEventType type, void *arg, uint8_t *data, size_t len) {
@@ -441,103 +430,40 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   
   // Servir archivos grandes con gzip explícito para máximo rendimiento
   server->on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (LittleFS.exists("/web/index.html.gz")) {
-      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/index.html.gz", "text/html");
-      response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      request->send(response);
-    } else {
-      request->send(LittleFS, "/web/index.html", "text/html");
-    }
+    sendWebAsset(request, "/index.html", "text/html", "no-cache, no-store, must-revalidate");
   });
 
   
   server->on("/index.html", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (LittleFS.exists("/web/index.html.gz")) {
-      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/index.html.gz", "text/html");
-      response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      request->send(response);
-    } else {
-      request->send(LittleFS, "/web/index.html", "text/html");
-    }
+    sendWebAsset(request, "/index.html", "text/html", "no-cache, no-store, must-revalidate");
   });
   
   server->on("/app.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (LittleFS.exists("/web/app.js.gz")) {
-      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/app.js.gz", "application/javascript");
-      response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      request->send(response);
-    } else {
-      request->send(LittleFS, "/web/app.js", "application/javascript");
-    }
+    sendWebAsset(request, "/app.js", "application/javascript", "no-cache, no-store, must-revalidate");
   });
   
   server->on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (LittleFS.exists("/web/style.css.gz")) {
-      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/style.css.gz", "text/css");
-      response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      request->send(response);
-    } else {
-      request->send(LittleFS, "/web/style.css", "text/css");
-    }
+    sendWebAsset(request, "/style.css", "text/css", "no-cache, no-store, must-revalidate");
   });
   
   server->on("/keyboard-controls.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (LittleFS.exists("/web/keyboard-controls.js.gz")) {
-      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/keyboard-controls.js.gz", "application/javascript");
-      response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      request->send(response);
-    } else {
-      request->send(LittleFS, "/web/keyboard-controls.js", "application/javascript");
-    }
+    sendWebAsset(request, "/keyboard-controls.js", "application/javascript", "no-cache, no-store, must-revalidate");
   });
   
   server->on("/keyboard-styles.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (LittleFS.exists("/web/keyboard-styles.css.gz")) {
-      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/keyboard-styles.css.gz", "text/css");
-      response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      request->send(response);
-    } else {
-      request->send(LittleFS, "/web/keyboard-styles.css", "text/css");
-    }
+    sendWebAsset(request, "/keyboard-styles.css", "text/css", "no-cache, no-store, must-revalidate");
   });
   
   server->on("/midi-import.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (LittleFS.exists("/web/midi-import.js.gz")) {
-      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/midi-import.js.gz", "application/javascript");
-      response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      request->send(response);
-    } else {
-      request->send(LittleFS, "/web/midi-import.js", "application/javascript");
-    }
+    sendWebAsset(request, "/midi-import.js", "application/javascript", "no-cache, no-store, must-revalidate");
   });
   
   server->on("/chat-agent.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (LittleFS.exists("/web/chat-agent.js.gz")) {
-      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/chat-agent.js.gz", "application/javascript");
-      response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "no-cache");
-      request->send(response);
-    } else {
-      request->send(LittleFS, "/web/chat-agent.js", "application/javascript");
-    }
+    sendWebAsset(request, "/chat-agent.js", "application/javascript");
   });
   
   server->on("/waveform-visualizer.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (LittleFS.exists("/web/waveform-visualizer.js.gz")) {
-      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/waveform-visualizer.js.gz", "application/javascript");
-      response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "no-cache");
-      request->send(response);
-    } else {
-      request->send(LittleFS, "/web/waveform-visualizer.js", "application/javascript");
-    }
+    sendWebAsset(request, "/waveform-visualizer.js", "application/javascript");
   });
 
   server->on("/synth-editor.js", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -550,36 +476,15 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   
   // Patchbay page
   server->on("/patchbay", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (LittleFS.exists("/web/patchbay.html.gz")) {
-      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/patchbay.html.gz", "text/html");
-      response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "no-cache");
-      request->send(response);
-    } else {
-      request->send(LittleFS, "/web/patchbay.html", "text/html");
-    }
+    sendWebAsset(request, "/patchbay.html", "text/html");
   });
   
   server->on("/patchbay.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (LittleFS.exists("/web/patchbay.css.gz")) {
-      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/patchbay.css.gz", "text/css");
-      response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "no-cache");
-      request->send(response);
-    } else {
-      request->send(LittleFS, "/web/patchbay.css", "text/css");
-    }
+    sendWebAsset(request, "/patchbay.css", "text/css");
   });
   
   server->on("/patchbay.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (LittleFS.exists("/web/patchbay.js.gz")) {
-      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/patchbay.js.gz", "application/javascript");
-      response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "no-cache");
-      request->send(response);
-    } else {
-      request->send(LittleFS, "/web/patchbay.js", "application/javascript");
-    }
+    sendWebAsset(request, "/patchbay.js", "application/javascript");
   });
 
   // Multiview page — redirect to .html served by serveStatic (avoids AsyncFileResponse 500 edge case)
@@ -592,37 +497,20 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   });
 
   server->on("/multiview.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (LittleFS.exists("/web/multiview.css.gz")) {
-      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/multiview.css.gz", "text/css");
-      response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "no-cache");
-      request->send(response);
-    } else {
-      request->send(LittleFS, "/web/multiview.css", "text/css");
-    }
+    sendWebAsset(request, "/multiview.css", "text/css");
   });
 
   server->on("/multiview.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (LittleFS.exists("/web/multiview.js.gz")) {
-      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/multiview.js.gz", "application/javascript");
-      response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "no-cache");
-      request->send(response);
-    } else {
-      request->send(LittleFS, "/web/multiview.js", "application/javascript");
-    }
+    sendWebAsset(request, "/multiview.js", "application/javascript");
   });
 
   // Admin page
   server->on("/adm", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (LittleFS.exists("/web/admin.html.gz")) {
-      AsyncWebServerResponse *response = request->beginResponse(LittleFS, "/web/admin.html.gz", "text/html");
-      response->addHeader("Content-Encoding", "gzip");
-      response->addHeader("Cache-Control", "max-age=600");
-      request->send(response);
-    } else {
-      request->send(LittleFS, "/web/admin.html", "text/html");
-    }
+    sendWebAsset(request, "/admin.html", "text/html", "max-age=600");
+  });
+
+  server->on("/admin.css", HTTP_GET, [](AsyncWebServerRequest *request){
+    sendWebAsset(request, "/admin.css", "text/css", "max-age=600");
   });
 
   server->on("/admin.js", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -887,6 +775,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     }
   );
   
+  #if ENABLE_PHYSICAL_BUTTONS
   // ── GET /api/buttons — devuelve configuración guardada ─────────────────
   server->on("/api/buttons", HTTP_GET, [](AsyncWebServerRequest *request) {
     if (LittleFS.exists("/buttons.json")) {
@@ -935,6 +824,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
       request->send(200, "application/json", "{\"success\":true}");
     }
   );
+  #endif
 
   // Endpoint para obtener forma de onda de un sample cargado (para visualizador)
   server->on("/api/waveform", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -1590,10 +1480,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             responseDoc["family"] = family;
             responseDoc["pad"] = padIndex;
 
-            // LittleFS should already be mounted at startup; begin(false) just
-            // returns true if already active. If it truly fails, send empty list
-            // so the UI shows the modal (not a silent no-op).
-            if (!family || !LittleFS.begin(false)) {
+            if (!family) {
               responseDoc.createNestedArray("samples");
               String emptyOut;
               serializeJson(responseDoc, emptyOut);

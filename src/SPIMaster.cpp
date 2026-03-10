@@ -1624,12 +1624,12 @@ bool SPIMaster::dsqSetLength(uint8_t length) {
 }
 
 bool SPIMaster::dsqSetMute(uint8_t track, bool muted) {
-    uint8_t buf[2] = { (uint8_t)(track & 15), muted ? 1u : 0u };
+    uint8_t buf[2] = { (uint8_t)(track & 15), static_cast<uint8_t>(muted ? 1u : 0u) };
     return sendCommand(CMD_DSQ_SET_MUTE, buf, 2);
 }
 
 bool SPIMaster::dsqSetSwing(uint8_t amount) {
-    uint8_t buf[1] = { amount > 100 ? 100u : amount };
+    uint8_t buf[1] = { static_cast<uint8_t>(amount > 100 ? 100u : amount) };
     return sendCommand(CMD_DSQ_SET_SWING, buf, 1);
 }
 
