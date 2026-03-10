@@ -1205,16 +1205,19 @@ function createPads() {
         synthStrip.className = 'pad-synth-strip';
         synthStrip.dataset.pad = i;
         synthStrip.innerHTML = `
-            <button class="synth-btn synth-btn-left" data-pad="${i}" data-engine="4" title="Wavetable OSC">WT</button>
-            <button class="synth-btn synth-btn-right" data-pad="${i}" data-engine="0" title="TR-808 synth engine">808</button>
-            <button class="synth-btn synth-btn-left" data-pad="${i}" data-engine="5" title="SH-101 monosynth">SH</button>
-            <button class="synth-btn synth-btn-right" data-pad="${i}" data-engine="1" title="TR-909 synth engine">909</button>
-            <button class="synth-btn synth-btn-left" data-pad="${i}" data-engine="6" title="FM 2-Op synth">FM</button>
-            <button class="synth-btn synth-btn-right" data-pad="${i}" data-engine="2" title="TR-505 synth engine">505</button>
-            <span class="synth-btn synth-btn-placeholder" aria-hidden="true"></span>
-            <button class="synth-btn synth-btn-right" data-pad="${i}" data-engine="3" title="TB-303 bass synth">303</button>
+            <div class="pad-synth-column pad-synth-column-left">
+                <button class="synth-btn" data-pad="${i}" data-engine="4" title="Wavetable OSC">WT</button>
+                <button class="synth-btn" data-pad="${i}" data-engine="5" title="SH-101 monosynth">SH</button>
+                <button class="synth-btn" data-pad="${i}" data-engine="6" title="FM 2-Op synth">FM</button>
+            </div>
+            <div class="pad-synth-column pad-synth-column-right">
+                <button class="synth-btn" data-pad="${i}" data-engine="0" title="TR-808 synth engine">808</button>
+                <button class="synth-btn" data-pad="${i}" data-engine="1" title="TR-909 synth engine">909</button>
+                <button class="synth-btn" data-pad="${i}" data-engine="2" title="TR-505 synth engine">505</button>
+                <button class="synth-btn" data-pad="${i}" data-engine="3" title="TB-303 bass synth">303</button>
+            </div>
         `;
-        synthStrip.querySelectorAll('.synth-btn').forEach(btn => {
+        synthStrip.querySelectorAll('button.synth-btn').forEach(btn => {
             const stopEvt = (e) => { e.stopPropagation(); };
             btn.addEventListener('touchstart', stopEvt);
             btn.addEventListener('mousedown', stopEvt);
