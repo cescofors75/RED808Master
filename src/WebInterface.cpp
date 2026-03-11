@@ -138,16 +138,19 @@ static void sendWebAsset(AsyncWebServerRequest *request,
   String fsPath = "/web";
   fsPath += routePath;
 
-  String gzPath = fsPath + ".gz";
-  if (LittleFS.exists(gzPath)) {
-    AsyncWebServerResponse *response = request->beginResponse(LittleFS, gzPath, contentType);
-    response->addHeader("Content-Encoding", "gzip");
-    response->addHeader("Cache-Control", cacheControl);
-    request->send(response);
+  // Pasamos la ruta SIN .gz para que AsyncFileResponse use su detección automática:
+  // si fsPath no existe pero fsPath+".gz" sí (caso normal en data_gz/web), la librería
+  // abre el .gz y establece Content-Encoding: gzip, _sendContentLength=true, _chunked=false,
+  // garantizando un Content-Length correcto y el header Content-Disposition sin extensión .gz.
+  if (!LittleFS.exists(fsPath) && !LittleFS.exists(fsPath + ".gz")) {
+    request->send(404, "text/plain", "Not found");
     return;
   }
 
-  request->send(LittleFS, fsPath, contentType);
+  AsyncWebServerResponse *response = request->beginResponse(LittleFS, fsPath, contentType);
+  response->addHeader("Cache-Control", cacheControl);
+  response->addHeader("Vary", "Accept-Encoding");
+  request->send(response);
 }
 
 static void populateStateDocument(DynamicJsonDocument& doc) {
@@ -386,39 +389,39 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   });
   
   server->on("/app.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/app.js", "application/javascript", "max-age=86400");
+    sendWebAsset(request, "/app.js", "application/javascript", "max-age=86400, immutable");
   });
   
   server->on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/style.css", "text/css", "max-age=86400");
+    sendWebAsset(request, "/style.css", "text/css", "max-age=86400, immutable");
   });
   
   server->on("/keyboard-controls.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/keyboard-controls.js", "application/javascript", "max-age=86400");
+    sendWebAsset(request, "/keyboard-controls.js", "application/javascript", "max-age=86400, immutable");
   });
   
   server->on("/keyboard-styles.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/keyboard-styles.css", "text/css", "max-age=86400");
+    sendWebAsset(request, "/keyboard-styles.css", "text/css", "max-age=86400, immutable");
   });
   
   server->on("/midi-import.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/midi-import.js", "application/javascript", "max-age=86400");
+    sendWebAsset(request, "/midi-import.js", "application/javascript", "max-age=86400, immutable");
   });
   
   server->on("/chat-agent.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/chat-agent.js", "application/javascript", "max-age=86400");
+    sendWebAsset(request, "/chat-agent.js", "application/javascript", "max-age=86400, immutable");
   });
   
   server->on("/waveform-visualizer.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/waveform-visualizer.js", "application/javascript", "max-age=86400");
+    sendWebAsset(request, "/waveform-visualizer.js", "application/javascript", "max-age=86400, immutable");
   });
 
   server->on("/synth-editor.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/synth-editor.js", "application/javascript", "max-age=86400");
+    sendWebAsset(request, "/synth-editor.js", "application/javascript", "max-age=86400, immutable");
   });
 
   server->on("/export-pattern.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/export-pattern.js", "application/javascript", "max-age=86400");
+    sendWebAsset(request, "/export-pattern.js", "application/javascript", "max-age=86400, immutable");
   });
   
   // Patchbay page
@@ -429,11 +432,11 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   });
   
   server->on("/patchbay.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/patchbay.css", "text/css", "max-age=86400");
+    sendWebAsset(request, "/patchbay.css", "text/css", "max-age=86400, immutable");
   });
   
   server->on("/patchbay.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/patchbay.js", "application/javascript", "max-age=86400");
+    sendWebAsset(request, "/patchbay.js", "application/javascript", "max-age=86400, immutable");
   });
 
   // Multiview page — redirect to .html served by serveStatic (avoids AsyncFileResponse 500 edge case)
@@ -446,11 +449,11 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   });
 
   server->on("/multiview.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/multiview.css", "text/css", "max-age=86400");
+    sendWebAsset(request, "/multiview.css", "text/css", "max-age=86400, immutable");
   });
   
   server->on("/multiview.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/multiview.js", "application/javascript", "max-age=86400");
+    sendWebAsset(request, "/multiview.js", "application/javascript", "max-age=86400, immutable");
   });
 
   // Admin page
@@ -459,16 +462,21 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   });
 
   server->on("/admin.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/admin.css", "text/css", "max-age=600");
+    sendWebAsset(request, "/admin.css", "text/css", "max-age=86400, immutable");
   });
 
   server->on("/admin.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/admin.js", "application/javascript", "max-age=600");
+    sendWebAsset(request, "/admin.js", "application/javascript", "max-age=86400, immutable");
   });
-  
-  // Fallback para otros archivos estáticos (favicon, etc)
-  server->serveStatic("/", LittleFS, "/web/")
-    .setCacheControl("max-age=86400");
+
+  server->on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest *request){
+    sendWebAsset(request, "/favicon.ico", "image/x-icon", "max-age=86400, immutable");
+  });
+
+  // 404 para rutas desconocidas: evita que el navegador quede bloqueado esperando respuesta
+  server->onNotFound([](AsyncWebServerRequest *request){
+    request->send(404, "text/plain", "Not found");
+  });
   
   // API REST
   server->on("/api/trigger", HTTP_POST, [](AsyncWebServerRequest *request){
