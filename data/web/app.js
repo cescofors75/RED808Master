@@ -1098,7 +1098,7 @@ function createPads() {
             <button class="loop-btn" data-pad="${i}" title="Toggle Loop">🔁</button>
             <div class="pad-content">
                 <div class="pad-name">${padNames[i]}</div>
-                <div class="pad-sample-info" id="sampleInfo-${i}"><span class="sample-file">...</span><span class="sample-quality">44.1k•16b•M</span></div>
+                <div class="pad-sample-info" id="sampleInfo-${i}"><span class="sample-file">—</span><span class="sample-quality"></span></div>
                 <span class="pad-filter-indicator" data-pad="${i}" style="display:none;"></span>
             </div>
             <div class="pad-corona" aria-hidden="true"></div>
