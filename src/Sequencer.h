@@ -139,6 +139,19 @@ public:
   bool isSongMode();
   void setSongLength(int length);
   int getSongLength();
+
+  // Song Chain mode (pattern chain with repeats)
+  static constexpr int SONG_CHAIN_MAX = 32;
+  struct SongChainEntry { uint8_t pattern; uint8_t repeats; };
+  void songChainUpload(const SongChainEntry* entries, uint8_t count);
+  void songChainPlay();
+  void songChainStop();
+  void songChainReset();
+  bool isSongChainActive() const { return songChainActive; }
+  uint8_t getSongChainIdx() const { return songChainIdx; }
+  uint8_t getSongChainRepeatCnt() const { return songChainRepeatCnt; }
+  uint8_t getSongChainCount() const { return songChainCount; }
+  const SongChainEntry* getSongChain() const { return songChain; }
   
   // Playback
   int getCurrentStep();
@@ -191,6 +204,13 @@ private:
   // Song mode
   bool songMode;
   int songLength; // 1-16 pattern count for song
+
+  // Song Chain mode
+  bool songChainActive;
+  uint8_t songChainCount;     // number of entries (0-32)
+  uint8_t songChainIdx;       // current index in chain
+  uint8_t songChainRepeatCnt; // current repeat count for current entry
+  SongChainEntry songChain[SONG_CHAIN_MAX];
   
   // Loop system
   bool loopActive[MAX_TRACKS];

@@ -107,24 +107,106 @@ const FILTER_TYPES = [
     { icon: '⛰️', name: 'PEAKING' },
     { icon: '🔊', name: 'LOW SHELF' },
     { icon: '🌟', name: 'HIGH SHELF' },
-    { icon: '⚡', name: 'RESONANT' }
+    { icon: '⚡', name: 'RESONANT' },
+    { icon: '🎚️', name: 'LADDER' },
+    { icon: '🌊', name: 'SVF LP' },
+    { icon: '💎', name: 'SVF HP' },
+    { icon: '🎯', name: 'SVF BP' },
+    { icon: '🪗', name: 'COMB' }
 ];
 window.FILTER_TYPES = FILTER_TYPES;
 
 function getFilterDefaults(filterType) {
     const defaults = {
-        1: { cutoff: 350, resonance: 6.0 },
-        2: { cutoff: 3500, resonance: 6.0 },
-        3: { cutoff: 1200, resonance: 8.0 },
-        4: { cutoff: 1200, resonance: 8.0 },
-        5: { cutoff: 1400, resonance: 1.5 },
-        6: { cutoff: 1500, resonance: 5.0, gain: 10.0 },
-        7: { cutoff: 220, resonance: 1.0, gain: 10.0 },
-        8: { cutoff: 5200, resonance: 1.0, gain: 10.0 },
-        9: { cutoff: 700, resonance: 14.0 }
+        1:  { cutoff: 350, resonance: 6.0 },
+        2:  { cutoff: 3500, resonance: 6.0 },
+        3:  { cutoff: 1200, resonance: 8.0 },
+        4:  { cutoff: 1200, resonance: 8.0 },
+        5:  { cutoff: 1400, resonance: 1.5 },
+        6:  { cutoff: 1500, resonance: 5.0, gain: 10.0 },
+        7:  { cutoff: 220, resonance: 1.0, gain: 10.0 },
+        8:  { cutoff: 5200, resonance: 1.0, gain: 10.0 },
+        9:  { cutoff: 700, resonance: 14.0 },
+        10: { cutoff: 400, resonance: 8.0 },
+        11: { cutoff: 500, resonance: 5.0 },
+        12: { cutoff: 4000, resonance: 5.0 },
+        13: { cutoff: 1500, resonance: 6.0 },
+        14: { cutoff: 800, resonance: 4.0 }
     };
     return defaults[filterType] || null;
 }
+
+// ── Base Track Filter Panel (overridden by keyboard-controls.js when loaded) ──
+let _filterPanelTrack = null;
+
+function _baseShowTrackFilterPanel(track) {
+    _filterPanelTrack = track;
+    const old = document.querySelector('.track-filter-backdrop');
+    if (old) old.remove();
+    let panel = document.getElementById('track-filter-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'track-filter-panel';
+        panel.className = 'track-filter-panel';
+        panel.innerHTML = `
+            <div class="track-filter-header">
+                <span id="track-filter-title">Filtro Track</span>
+                <button class="filter-close-btn" onclick="window.hideTrackFilterPanel()">×</button>
+            </div>
+            <div class="track-filter-content">
+                <div class="filter-grid">
+                    ${FILTER_TYPES.map((f, i) => `
+                        <button class="filter-btn" data-filter="${i}" onclick="window.applyTrackFilterFromPanel(${i})" title="F${i+1}">
+                            <span class="filter-icon">${f.icon}</span>
+                            <span class="filter-name">${f.name}</span>
+                        </button>
+                    `).join('')}
+                </div>
+            </div>`;
+        document.body.appendChild(panel);
+        panel.addEventListener('click', e => e.stopPropagation());
+    }
+    const trackNames = ['BD','SD','CH','OH','CP','RS','CL','CY','T9','T10','T11','T12','T13','T14','T15','T16'];
+    panel.querySelector('#track-filter-title').textContent = `🎛️ Track ${track+1} — ${trackNames[track]||'?'}`;
+    const cur = (trackFilterState && trackFilterState[track]) || 0;
+    panel.querySelectorAll('.filter-btn').forEach((b,i) => b.classList.toggle('active-filter', i===cur));
+    const backdrop = document.createElement('div');
+    backdrop.className = 'track-filter-backdrop';
+    backdrop.addEventListener('click', () => window.hideTrackFilterPanel());
+    document.body.appendChild(backdrop);
+    panel.style.display = 'block';
+    panel.style.left = '';
+    panel.style.top = '';
+    requestAnimationFrame(() => panel.classList.add('visible'));
+}
+
+function _baseHideTrackFilterPanel() {
+    const p = document.getElementById('track-filter-panel');
+    if (p) { p.classList.remove('visible'); setTimeout(() => { p.style.display='none'; }, 250); }
+    const b = document.querySelector('.track-filter-backdrop');
+    if (b) b.remove();
+    _filterPanelTrack = null;
+}
+
+function _baseApplyTrackFilterFromPanel(filterType) {
+    if (_filterPanelTrack === null) return;
+    const track = _filterPanelTrack;
+    const cmd = { cmd: filterType === 0 ? 'clearTrackFilter' : 'setTrackFilter', track: track };
+    if (filterType !== 0) {
+        cmd.filterType = filterType;
+        const d = getFilterDefaults(filterType);
+        if (d) { if (d.cutoff!==undefined) cmd.cutoff=d.cutoff; if (d.resonance!==undefined) cmd.resonance=d.resonance; if (d.gain!==undefined) cmd.gain=d.gain; }
+    }
+    sendWebSocket(cmd);
+    if (trackFilterState) trackFilterState[track] = filterType;
+    if (window.padSeqSyncEnabled && window.syncFilterToPad) window.syncFilterToPad(track, filterType);
+    setTimeout(() => window.hideTrackFilterPanel(), 100);
+}
+
+window.showTrackFilterPanel = _baseShowTrackFilterPanel;
+window.hideTrackFilterPanel = _baseHideTrackFilterPanel;
+window.applyTrackFilterFromPanel = _baseApplyTrackFilterFromPanel;
+window.getFilterDefaults = getFilterDefaults;
 
 const instrumentPalette = [
     '#ff0000', '#ffa500', '#ffff00', '#00ffff',
@@ -146,6 +228,37 @@ let sampleRetryTimer = null;
 // Simple notification function (stub)
 function showNotification(message) {}
 
+// ── Lazy module loader ──────────────────────────────────
+// ESP32 WiFi AP can only handle ~2 concurrent HTTP transfers reliably.
+// Loading all scripts at once (8 files, ~178KB gzipped) causes TCP congestion.
+// Instead, we load feature modules sequentially AFTER the page renders.
+function _loadScript(src) {
+    return new Promise(resolve => {
+        const s = document.createElement('script');
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = () => { console.warn('[Loader] Failed:', src); resolve(); };
+        document.body.appendChild(s);
+    });
+}
+
+async function loadDeferredModules() {
+    const modules = [
+        'keyboard-controls.js',
+        'waveform-visualizer.js',
+        'synth-editor.js',
+        'midi-import.js',
+        'export-pattern.js'
+    ];
+    for (const src of modules) {
+        await _loadScript(src);
+    }
+    // Initialize modules that need explicit init
+    if (window.initKeyboardControls) window.initKeyboardControls();
+    if (typeof initSynthEditor === 'function') initSynthEditor();
+    console.log('[Loader] All deferred modules loaded');
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     initWebSocket();
@@ -156,23 +269,15 @@ document.addEventListener('DOMContentLoaded', () => {
     initVolumesSection();
     initLivePadsX();
     initFxSubtabs();
-    
-    // Sync FX state from patchbay (if available)
     syncFxFromPatchbay();
-    
-    // Initialize keyboard system from keyboard-controls.js first
-    if (window.initKeyboardControls) {
-        window.initKeyboardControls();
-    }
-    
-    setupKeyboardControls(); // Then setup pad handlers in app.js
+    setupKeyboardControls();
     initSampleBrowser();
     initInstrumentTabs();
-    initTabSystem(); // Tab navigation system
-    initSyncLeds(); // Sync LEDs toggle
+    initTabSystem();
+    initSyncLeds();
     initGlobalKitControls();
-    if (typeof initSynthEditor === 'function') initSynthEditor();
-    // initAiToggle(); // AI Chat DISABLED
+    // Load feature modules sequentially after core UI is ready
+    setTimeout(loadDeferredModules, 200);
 });
 
 // WebSocket Connection

@@ -72,6 +72,7 @@ typedef struct __attribute__((packed)) {
 #define CMD_FILTER_DISTORTION 0x24  // Global distortion amount
 #define CMD_FILTER_DIST_MODE  0x25  // Distortion mode (soft/hard/tube/fuzz)
 #define CMD_FILTER_SR_REDUCE  0x26  // Sample rate reduction
+#define CMD_MASTER_FX_ROUTE   0x27  // Master FX routing: [fxId(1), connected(1)]
 
 // ═══════════════════════════════════════════════════════
 // COMMANDS: MASTER EFFECTS (0x30 - 0x4F)
@@ -155,6 +156,7 @@ typedef struct __attribute__((packed)) {
 #define CMD_TRACK_EQ_LOW      0x63  // Per-track 3-band EQ low  (-12..+12 dB)
 #define CMD_TRACK_EQ_MID      0x64  // Per-track 3-band EQ mid  (-12..+12 dB)
 #define CMD_TRACK_EQ_HIGH     0x65  // Per-track 3-band EQ high (-12..+12 dB)
+#define CMD_TRACK_LFO_CONFIG  0x67  // Per-track LFO config (7 bytes)
 
 // ═══════════════════════════════════════════════════════
 // COMMANDS: PER-PAD FX (0x70 - 0x7F)
@@ -196,13 +198,26 @@ typedef struct __attribute__((packed)) {
 #define CMD_SIDECHAIN_CLEAR   0x91  // Deactivate sidechain
 
 // ═══════════════════════════════════════════════════════
-// COMMANDS: SAMPLE TRANSFER (0xA0 - 0xAF)
+// COMMANDS: SAMPLE TRANSFER & NEW MASTER FX (0xA0 - 0xAF)
 // ═══════════════════════════════════════════════════════
 #define CMD_SAMPLE_BEGIN      0xA0  // Begin sample transfer
 #define CMD_SAMPLE_DATA       0xA1  // Sample data chunk
 #define CMD_SAMPLE_END        0xA2  // End sample transfer
 #define CMD_SAMPLE_UNLOAD     0xA3  // Unload one sample
 #define CMD_SAMPLE_UNLOAD_ALL 0xA4  // Unload all samples
+
+// New master FX commands (0xA5 - 0xAF)
+#define CMD_AUTOWAH_ACTIVE    0xA5  // Auto-Wah on/off
+#define CMD_AUTOWAH_LEVEL     0xA6  // Auto-Wah sensitivity 0-127
+#define CMD_AUTOWAH_MIX       0xA7  // Auto-Wah wet/dry 0-100
+#define CMD_STEREO_WIDTH      0xA8  // Stereo width 0-200
+#define CMD_TAPE_STOP         0xA9  // Tape stop/start effect
+#define CMD_BEAT_REPEAT       0xAA  // Beat repeat division
+#define CMD_DELAY_STEREO      0xAB  // Delay stereo mode (0=mono, 1=ping-pong)
+#define CMD_CHORUS_STEREO     0xAC  // Chorus stereo mode (0=mono, 1=stereo)
+#define CMD_EARLY_REF_ACTIVE  0xAD  // Early reflections on/off
+#define CMD_EARLY_REF_MIX     0xAE  // Early reflections mix 0-100
+#define CMD_CHOKE_GROUP       0xAF  // Choke groups: [pad(1), group(1)]
 
 // ═══════════════════════════════════════════════════════
 // COMMANDS: DAISY SD FILE SYSTEM (0xB0 - 0xBF)
@@ -234,7 +249,7 @@ typedef struct __attribute__((packed)) {
 #define CMD_SYNTH_NOTE_ON    0xC2  // TB-303 note on (MIDI note + accent/slide)
 #define CMD_SYNTH_NOTE_OFF   0xC3  // TB-303 note off (no payload)
 #define CMD_SYNTH_303_PARAM  0xC4  // TB-303 global parameter
-#define CMD_SYNTH_ACTIVE     0xC5  // Engine active mask (bit0=808, bit1=909, bit2=505, bit3=303, bit4=WT, bit5=SH101, bit6=FM2Op)
+#define CMD_SYNTH_ACTIVE     0xC5  // Engine active mask (1 or 2 bytes)
 #define CMD_SYNTH_PRESET     0xC6  // Apply factory preset [engine(1), preset(1)]
 
 // Synth engine IDs
@@ -245,6 +260,9 @@ typedef struct __attribute__((packed)) {
 #define SYNTH_ENGINE_WTOSC 4  // Wavetable Oscillator
 #define SYNTH_ENGINE_SH101 5  // I1: Roland SH-101 monosynth
 #define SYNTH_ENGINE_FM2OP 6  // I2: 2-operator FM Yamaha-style
+#define SYNTH_ENGINE_PHYS  7  // Physical modeling (ModalVoice/StringVoice)
+#define SYNTH_ENGINE_NOISE 8  // Noise/particle textures
+#define SYNTH_ENGINE_COUNT 9
 
 // TR-808 instrument IDs (engine=0)
 #define SYNTH_808_KICK     0
@@ -315,9 +333,15 @@ typedef struct __attribute__((packed)) {
     float    value;       // IEEE 754 little-endian
 } Synth303ParamPayload;
 
-// CMD_SYNTH_ACTIVE (0xC5) — 1 byte
+// CMD_SYNTH_ACTIVE (0xC5) — 1 or 2 bytes
 typedef struct __attribute__((packed)) {
-    uint8_t  engineMask;  // bit0=808, bit1=909, bit2=505, bit3=303, bit4=WT, bit5=SH101, bit6=FM2Op
+    uint8_t  maskLo;      // bits 0-7 (engines 0-7)
+    uint8_t  maskHi;      // bit 0 = engine 8 (NOISE)
+} SynthActivePayload16;
+
+// Legacy 1-byte variant (kept for backward compat)
+typedef struct __attribute__((packed)) {
+    uint8_t  engineMask;  // bit0=808..bit6=FM2Op
 } SynthActivePayload;
 
 // CMD_SYNTH_PRESET (0xC6) — 2 bytes
@@ -414,6 +438,9 @@ typedef struct __attribute__((packed)) {
 // ═══════════════════════════════════════════════════════
 #define CMD_BULK_TRIGGERS     0xF0  // Multiple triggers in one packet
 #define CMD_BULK_FX           0xF1  // Multiple FX changes
+#define CMD_SONG_UPLOAD       0xF2  // Song chain upload: [count(1), {pattern(1), repeats(1)}×count]
+#define CMD_SONG_CONTROL      0xF3  // Song control: [action(1)] 0=stop, 1=play, 2=reset
+#define CMD_SONG_GET_POS      0xF4  // Song position query → 4 bytes response
 
 // ═══════════════════════════════════════════════════════
 // PAYLOAD STRUCTURES
@@ -908,11 +935,17 @@ typedef struct __attribute__((packed)) {
 #define FTYPE_LOWSHELF     7
 #define FTYPE_HIGHSHELF    8
 #define FTYPE_RESONANT     9
-#define FTYPE_SCRATCH      10
-#define FTYPE_TURNTABLISM  11
-#define FTYPE_REVERSE      12
-#define FTYPE_HALFSPEED    13
-#define FTYPE_STUTTER      14
+#define FTYPE_LADDER       10  // Moog Ladder 24dB/oct
+#define FTYPE_SVF_LP       11  // State Variable Filter LP
+#define FTYPE_SVF_HP       12  // State Variable Filter HP
+#define FTYPE_SVF_BP       13  // State Variable Filter BP
+#define FTYPE_COMB         14  // Comb filter resonator
+// Legacy pad-FX pseudo-filter IDs (>=15)
+#define FTYPE_SCRATCH      15
+#define FTYPE_TURNTABLISM  16
+#define FTYPE_REVERSE      17
+#define FTYPE_HALFSPEED    18
+#define FTYPE_STUTTER      19
 
 // Distortion modes
 #define DMODE_SOFT   0
@@ -928,5 +961,77 @@ typedef struct {
     float gain;
     const char* name;
 } FilterPresetInfo;
+
+// ═══════════════════════════════════════════════════════
+// MASTER FX ROUTE IDs (CMD_MASTER_FX_ROUTE 0x27)
+// ═══════════════════════════════════════════════════════
+enum MasterFxRouteId : uint8_t {
+    MASTER_FX_ROUTE_FILTER     = 0,
+    MASTER_FX_ROUTE_DELAY      = 1,
+    MASTER_FX_ROUTE_PHASER     = 2,
+    MASTER_FX_ROUTE_FLANGER    = 3,
+    MASTER_FX_ROUTE_COMP       = 4,
+    MASTER_FX_ROUTE_REVERB     = 5,
+    MASTER_FX_ROUTE_CHORUS     = 6,
+    MASTER_FX_ROUTE_TREMOLO    = 7,
+    MASTER_FX_ROUTE_WAVEFOLDER = 8,
+    MASTER_FX_ROUTE_LIMITER    = 9,
+    MASTER_FX_ROUTE_AUTOWAH    = 10,
+    MASTER_FX_ROUTE_EARLY_REF  = 11,
+};
+
+typedef struct __attribute__((packed)) {
+    uint8_t  fxId;       // MasterFxRouteId
+    uint8_t  connected;  // 0=bypass, 1=connected
+} MasterFxRoutePayload;
+
+// ═══════════════════════════════════════════════════════
+// NEW MASTER FX PAYLOADS
+// ═══════════════════════════════════════════════════════
+
+// CMD_CHOKE_GROUP (0xAF) — 2 bytes
+typedef struct __attribute__((packed)) {
+    uint8_t  pad;        // 0-15
+    uint8_t  group;      // 0=none, 1-8=group
+} ChokeGroupPayload;
+
+// CMD_SONG_UPLOAD (0xF2)
+#define SONG_MAX_ENTRIES  32
+typedef struct __attribute__((packed)) {
+    uint8_t  pattern;    // 0-7
+    uint8_t  repeats;    // 1-255 (0 treated as 1)
+} SongEntry;
+
+// CMD_SONG_GET_POS (0xF4) response
+typedef struct __attribute__((packed)) {
+    uint8_t  songIdx;       // position in chain
+    uint8_t  currentPattern;
+    uint8_t  songRepeatCnt;
+    uint8_t  reserved;
+} SongPosResponse;
+
+// CMD_TRACK_LFO_CONFIG (0x67) — 7 bytes
+typedef struct __attribute__((packed)) {
+    uint8_t  track;      // 0-15
+    uint8_t  wave;       // 0=sine, 1=triangle, 2=sample&hold
+    uint8_t  target;     // 0-8 (TrackLfoTargetEx)
+    uint8_t  rateHi;     // rate >> 8
+    uint8_t  rateLo;     // rate & 0xFF
+    uint8_t  depthHi;    // depth >> 8
+    uint8_t  depthLo;    // depth & 0xFF
+} TrackLfoConfigPayload;
+
+// LFO target IDs (expanded for per-track LFO)
+enum TrackLfoTargetEx : uint8_t {
+    TLFO_TGT_GAIN       = 0,
+    TLFO_TGT_PAN        = 1,
+    TLFO_TGT_FILTER     = 2,
+    TLFO_TGT_PITCH      = 3,
+    TLFO_TGT_ECHO_TIME  = 4,
+    TLFO_TGT_DIST_DRIVE = 5,
+    TLFO_TGT_CRUSH      = 6,
+    TLFO_TGT_SEND_REV   = 7,
+    TLFO_TGT_SEND_DEL   = 8,
+};
 
 #endif // PROTOCOL_H

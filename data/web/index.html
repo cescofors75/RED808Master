@@ -6,7 +6,7 @@
     <title>RED808 Drum Machine</title>
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="keyboard-styles.css">
+    <link rel="stylesheet" href="keyboard-styles.css" media="print" onload="this.media='all'">
 </head>
 <body>
     <div class="container">
@@ -1433,12 +1433,7 @@
         </footer>
     </div>
 
-    <script src="waveform-visualizer.js" defer></script>
-    <script src="synth-editor.js" defer></script>
-    <script src="midi-import.js" defer></script>
-    <script src="export-pattern.js" defer></script>
-    <!-- <script src="chat-agent.js?v=2" defer></script> -->
+    <!-- Feature modules loaded sequentially by app.js to avoid TCP congestion on ESP32 AP -->
     <script src="app.js" defer></script>
-    <script src="keyboard-controls.js" defer></script>
 </body>
 </html>

@@ -59,11 +59,17 @@ enum FilterType {
     FILTER_LOWSHELF = 7,
     FILTER_HIGHSHELF = 8,
     FILTER_RESONANT = 9,
-    FILTER_SCRATCH = 10,
-    FILTER_TURNTABLISM = 11,
-    FILTER_REVERSE = 12,
-    FILTER_HALFSPEED = 13,
-    FILTER_STUTTER = 14
+    FILTER_LADDER = 10,       // Moog Ladder 24dB/oct
+    FILTER_SVF_LP = 11,       // State Variable LP
+    FILTER_SVF_HP = 12,       // State Variable HP
+    FILTER_SVF_BP = 13,       // State Variable BP
+    FILTER_COMB = 14,         // Comb filter resonator
+    // Legacy pad-FX pseudo-filter IDs
+    FILTER_SCRATCH = 15,
+    FILTER_TURNTABLISM = 16,
+    FILTER_REVERSE = 17,
+    FILTER_HALFSPEED = 18,
+    FILTER_STUTTER = 19
 };
 
 // Distortion modes
@@ -249,6 +255,45 @@ public:
     bool isLimiterActive() const { return cachedLimiterActive; }
 
     // ══════════════════════════════════════════════════
+    // MASTER FX ROUTING
+    // ══════════════════════════════════════════════════
+    void setMasterFxRoute(uint8_t fxId, bool connected);
+
+    // ══════════════════════════════════════════════════
+    // NEW MASTER FX — Auto-Wah, Stereo Width, Tape Stop,
+    //   Beat Repeat, Delay Stereo, Chorus Stereo, Early Ref
+    // ══════════════════════════════════════════════════
+    void setAutoWahActive(bool active);
+    void setAutoWahLevel(uint8_t level);      // 0-127
+    void setAutoWahMix(uint8_t mix);          // 0-100
+    void setStereoWidth(uint8_t width);       // 0-200
+    void setTapeStop(uint8_t mode);           // 0=off, 1=stop, 2=start
+    void setBeatRepeat(uint8_t division);     // 0=off, 1,2,4,8,16,32
+    void setDelayStereo(uint8_t mode);        // 0=mono, 1=ping-pong
+    void setChorusStereo(uint8_t mode);       // 0=mono, 1=stereo
+    void setEarlyRefActive(bool active);
+    void setEarlyRefMix(uint8_t mix);         // 0-100
+
+    // ══════════════════════════════════════════════════
+    // CHOKE GROUPS
+    // ══════════════════════════════════════════════════
+    void setChokeGroup(uint8_t pad, uint8_t group); // pad=0-15, group=0-8
+    uint8_t getChokeGroup(uint8_t pad) const { return pad < MAX_AUDIO_TRACKS ? cachedChokeGroup[pad] : 0; }
+
+    // ══════════════════════════════════════════════════
+    // SONG MODE (chain upload + control)
+    // ══════════════════════════════════════════════════
+    bool songUpload(const SongEntry* entries, uint8_t count);
+    bool songControl(uint8_t action);         // 0=stop, 1=play, 2=reset
+    bool songGetPos(uint8_t& outIdx, uint8_t& outPattern, uint8_t& outRepeat);
+
+    // ══════════════════════════════════════════════════
+    // PER-TRACK LFO CONFIG (sent to Daisy)
+    // ══════════════════════════════════════════════════
+    void setTrackLfoConfig(uint8_t track, uint8_t wave, uint8_t target,
+                           uint16_t rateCentiHz, uint16_t depthMilli);
+
+    // ══════════════════════════════════════════════════
     // SIDECHAIN
     // ══════════════════════════════════════════════════
     void setSidechain(bool active, int sourceTrack, uint16_t destinationMask,
@@ -337,8 +382,10 @@ public:
     void synth303NoteOff();
     void synth303Param(uint8_t paramId, float value);
     void synthSetActive(uint8_t engineMask);
+    void synthSetActive16(uint16_t engineMask16); // 2-byte mask for 9 engines
     void synthPreset(uint8_t engine, uint8_t preset);
-    uint8_t getSynthActiveMask() const { return cachedSynthActiveMask; }
+    uint16_t getSynthActiveMask16() const { return cachedSynthActiveMask16; }
+    uint8_t getSynthActiveMask() const { return (uint8_t)(cachedSynthActiveMask16 & 0xFF); }
 
     // ══════════════════════════════════════════════════
     // DAISY SEQUENCER (sequencer runs on Daisy Seed)
@@ -423,6 +470,17 @@ private:
     float cachedWaveFolderGain;
     bool  cachedLimiterActive;
 
+    // New FX cached state
+    bool    cachedAutoWahActive;
+    uint8_t cachedAutoWahLevel;
+    uint8_t cachedAutoWahMix;
+    uint8_t cachedStereoWidth;
+    bool    cachedEarlyRefActive;
+    uint8_t cachedEarlyRefMix;
+    uint8_t cachedDelayStereoMode;
+    uint8_t cachedChorusStereoMode;
+    uint8_t cachedChokeGroup[MAX_AUDIO_TRACKS]; // group per pad (0=none, 1-8)
+
     // Status cache (54 bytes V2)
     StatusResponse cachedStatus;
 
@@ -430,8 +488,8 @@ private:
     SdStatusResponse cachedSdStatus;
     bool cachedSdStatusValid = false;
 
-    // Synth engine active mask (0x0F = all active by default)
-    uint8_t cachedSynthActiveMask;
+    // Synth engine active mask — 16-bit for 9 engines
+    uint16_t cachedSynthActiveMask16;
     
     // Per-track/pad cached filter state
     FilterType cachedTrackFilter[MAX_AUDIO_TRACKS];

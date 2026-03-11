@@ -60,8 +60,17 @@ SPIMaster::SPIMaster() : seqNumber(0), spiErrorCount(0), stm32Connected(false), 
     cachedTremoloDepth = 0.7f;
     cachedWaveFolderGain = 1.0f;
     cachedLimiterActive = false;
+    cachedAutoWahActive = false;
+    cachedAutoWahLevel = 80;
+    cachedAutoWahMix = 50;
+    cachedStereoWidth = 100;
+    cachedEarlyRefActive = false;
+    cachedEarlyRefMix = 30;
+    cachedDelayStereoMode = 0;
+    cachedChorusStereoMode = 0;
+    memset(cachedChokeGroup, 0, sizeof(cachedChokeGroup));
     memset(&cachedStatus, 0, sizeof(cachedStatus));
-    cachedSynthActiveMask = 0x7B;
+    cachedSynthActiveMask16 = 0x01FF; // all 9 engines
     
     for (int i = 0; i < MAX_AUDIO_TRACKS; i++) {
         cachedTrackFilter[i] = FILTER_NONE;
@@ -1451,6 +1460,124 @@ void SPIMaster::setLimiterActive(bool active) {
 }
 
 // ═══════════════════════════════════════════════════════
+// MASTER FX ROUTING
+// ═══════════════════════════════════════════════════════
+
+void SPIMaster::setMasterFxRoute(uint8_t fxId, bool connected) {
+    MasterFxRoutePayload p = { fxId, (uint8_t)(connected ? 1 : 0) };
+    sendCommand(CMD_MASTER_FX_ROUTE, &p, sizeof(p));
+}
+
+// ═══════════════════════════════════════════════════════
+// NEW MASTER FX — Auto-Wah, Stereo Width, Tape Stop,
+//   Beat Repeat, Delay Stereo, Chorus Stereo, Early Ref
+// ═══════════════════════════════════════════════════════
+
+void SPIMaster::setAutoWahActive(bool active) {
+    cachedAutoWahActive = active;
+    uint8_t v = active ? 1 : 0;
+    sendCommand(CMD_AUTOWAH_ACTIVE, &v, 1);
+}
+
+void SPIMaster::setAutoWahLevel(uint8_t level) {
+    cachedAutoWahLevel = level;
+    sendCommand(CMD_AUTOWAH_LEVEL, &level, 1);
+}
+
+void SPIMaster::setAutoWahMix(uint8_t mix) {
+    cachedAutoWahMix = mix;
+    sendCommand(CMD_AUTOWAH_MIX, &mix, 1);
+}
+
+void SPIMaster::setStereoWidth(uint8_t width) {
+    cachedStereoWidth = width;
+    sendCommand(CMD_STEREO_WIDTH, &width, 1);
+}
+
+void SPIMaster::setTapeStop(uint8_t mode) {
+    sendCommand(CMD_TAPE_STOP, &mode, 1);
+}
+
+void SPIMaster::setBeatRepeat(uint8_t division) {
+    sendCommand(CMD_BEAT_REPEAT, &division, 1);
+}
+
+void SPIMaster::setDelayStereo(uint8_t mode) {
+    cachedDelayStereoMode = mode;
+    sendCommand(CMD_DELAY_STEREO, &mode, 1);
+}
+
+void SPIMaster::setChorusStereo(uint8_t mode) {
+    cachedChorusStereoMode = mode;
+    sendCommand(CMD_CHORUS_STEREO, &mode, 1);
+}
+
+void SPIMaster::setEarlyRefActive(bool active) {
+    cachedEarlyRefActive = active;
+    uint8_t v = active ? 1 : 0;
+    sendCommand(CMD_EARLY_REF_ACTIVE, &v, 1);
+}
+
+void SPIMaster::setEarlyRefMix(uint8_t mix) {
+    cachedEarlyRefMix = mix;
+    sendCommand(CMD_EARLY_REF_MIX, &mix, 1);
+}
+
+// ═══════════════════════════════════════════════════════
+// CHOKE GROUPS
+// ═══════════════════════════════════════════════════════
+
+void SPIMaster::setChokeGroup(uint8_t pad, uint8_t group) {
+    if (pad < MAX_AUDIO_TRACKS) cachedChokeGroup[pad] = group;
+    ChokeGroupPayload p = { pad, group };
+    sendCommand(CMD_CHOKE_GROUP, &p, sizeof(p));
+}
+
+// ═══════════════════════════════════════════════════════
+// SONG MODE (chain upload + control)
+// ═══════════════════════════════════════════════════════
+
+bool SPIMaster::songUpload(const SongEntry* entries, uint8_t count) {
+    if (!entries || count == 0 || count > SONG_MAX_ENTRIES) return false;
+    uint8_t buf[1 + 2 * SONG_MAX_ENTRIES];
+    buf[0] = count;
+    memcpy(buf + 1, entries, count * sizeof(SongEntry));
+    return sendCommand(CMD_SONG_UPLOAD, buf, 1 + count * 2);
+}
+
+bool SPIMaster::songControl(uint8_t action) {
+    return sendCommand(CMD_SONG_CONTROL, &action, 1);
+}
+
+bool SPIMaster::songGetPos(uint8_t& outIdx, uint8_t& outPattern, uint8_t& outRepeat) {
+    SongPosResponse resp = {};
+    if (sendAndReceive(CMD_SONG_GET_POS, nullptr, 0, &resp, sizeof(resp))) {
+        outIdx = resp.songIdx;
+        outPattern = resp.currentPattern;
+        outRepeat = resp.songRepeatCnt;
+        return true;
+    }
+    return false;
+}
+
+// ═══════════════════════════════════════════════════════
+// PER-TRACK LFO CONFIG (sent to Daisy)
+// ═══════════════════════════════════════════════════════
+
+void SPIMaster::setTrackLfoConfig(uint8_t track, uint8_t wave, uint8_t target,
+                                   uint16_t rateCentiHz, uint16_t depthMilli) {
+    TrackLfoConfigPayload p;
+    p.track   = track;
+    p.wave    = wave;
+    p.target  = target;
+    p.rateHi  = (uint8_t)(rateCentiHz >> 8);
+    p.rateLo  = (uint8_t)(rateCentiHz & 0xFF);
+    p.depthHi = (uint8_t)(depthMilli >> 8);
+    p.depthLo = (uint8_t)(depthMilli & 0xFF);
+    sendCommand(CMD_TRACK_LFO_CONFIG, &p, sizeof(p));
+}
+
+// ═══════════════════════════════════════════════════════
 // STATUS QUERIES — SPI round-trips
 // ═══════════════════════════════════════════════════════
 
@@ -1576,10 +1703,20 @@ void SPIMaster::synth303Param(uint8_t paramId, float value) {
 }
 
 void SPIMaster::synthSetActive(uint8_t engineMask) {
+    // Legacy 1-byte: store in low byte of 16-bit mask
     SynthActivePayload p;
     p.engineMask = engineMask;
     if (sendCommand(CMD_SYNTH_ACTIVE, &p, sizeof(p))) {
-        cachedSynthActiveMask = engineMask;
+        cachedSynthActiveMask16 = (cachedSynthActiveMask16 & 0xFF00) | engineMask;
+    }
+}
+
+void SPIMaster::synthSetActive16(uint16_t engineMask16) {
+    SynthActivePayload16 p;
+    p.maskLo = (uint8_t)(engineMask16 & 0xFF);
+    p.maskHi = (uint8_t)((engineMask16 >> 8) & 0xFF);
+    if (sendCommand(CMD_SYNTH_ACTIVE, &p, sizeof(p))) {
+        cachedSynthActiveMask16 = engineMask16;
     }
 }
 

@@ -268,6 +268,38 @@ void LFOEngine::applyModulation(uint8_t pad, SPIMaster& spi) {
             // No SPI send; the value is read by the sequencer callback
             break;
         }
+        case LFO_TGT_ECHO_TIME: {
+            // Modulate echo time: base 100ms, ±40%
+            float ms = 100.0f * (1.0f + v * 0.4f);
+            ms = constrain(ms, 10.0f, 200.0f);
+            spi.setTrackEcho(pad, true, ms, 40.0f, 50.0f);
+            break;
+        }
+        case LFO_TGT_DIST_DRIVE: {
+            // Modulate distortion drive: base 50%, ±80%
+            float amount = 50.0f * (1.0f + v * 0.8f);
+            amount = constrain(amount, 0.0f, 100.0f);
+            spi.setTrackDistortion(pad, amount);
+            break;
+        }
+        case LFO_TGT_CRUSH: {
+            // Modulate bitcrush: base 10 bits, ±6 bits
+            uint8_t bits = (uint8_t)constrain((int)(10.0f + v * 6.0f), 1, 16);
+            spi.setTrackBitCrush(pad, bits);
+            break;
+        }
+        case LFO_TGT_SEND_REV: {
+            // Modulate reverb send: base 50, ±50%
+            uint8_t send = (uint8_t)constrain((int)(50.0f + v * 25.0f), 0, 100);
+            spi.setTrackReverbSend(pad, send);
+            break;
+        }
+        case LFO_TGT_SEND_DEL: {
+            // Modulate delay send: base 50, ±50%
+            uint8_t send = (uint8_t)constrain((int)(50.0f + v * 25.0f), 0, 100);
+            spi.setTrackDelaySend(pad, send);
+            break;
+        }
         default:
             break;
     }

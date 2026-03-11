@@ -8,6 +8,7 @@
 #include "Sequencer.h"
 #include "SampleManager.h"
 #include <esp_wifi.h>
+#include <esp_heap_caps.h>
 
 #ifndef ENABLE_PHYSICAL_BUTTONS
 #define ENABLE_PHYSICAL_BUTTONS 1
@@ -23,6 +24,31 @@ static constexpr unsigned long kFastMasterCmdMinMs = 8;
 static constexpr unsigned long kFastTrackCmdMinMs = 8;
 static constexpr unsigned long kFastPadCmdMinMs = 8;
 static constexpr unsigned long kFastVolumeCmdMinMs = 8;
+
+// ── Pre-allocated broadcast buffer in PSRAM to avoid heap fragmentation ──
+// broadcastSequencerState() was the #1 cause of heap fragmentation:
+// DynamicJsonDocument(8192) + String serialization = ~13KB alloc/free every cycle.
+// Using static PSRAM buffers eliminates this churn entirely.
+static char* _stateBuf = nullptr;
+static constexpr size_t kStateBufSize = 8192;  // serialized JSON fits in ~5-6KB
+
+// PSRAM allocator for ArduinoJson — documents allocated here never touch internal heap
+struct PsramAllocator {
+  void* allocate(size_t size) {
+    return ps_malloc(size);
+  }
+  void deallocate(void* ptr) {
+    free(ptr);
+  }
+  void* reallocate(void* ptr, size_t new_size) {
+    return ps_realloc(ptr, new_size);
+  }
+};
+using PsramJsonDocument = BasicJsonDocument<PsramAllocator>;
+
+// Persistent JSON document in PSRAM — reused for every state broadcast.
+// Allocated once in begin(), never freed. clear() between uses.
+static PsramJsonDocument* _stateDoc = nullptr;
 
 extern SPIMaster spiMaster;
 extern Sequencer sequencer;
@@ -153,7 +179,7 @@ static void sendWebAsset(AsyncWebServerRequest *request,
   request->send(response);
 }
 
-static void populateStateDocument(DynamicJsonDocument& doc) {
+static void populateStateDocument(JsonDocument& doc) {
   SdStatusResponse sdStat = {};
   bool sdOk = spiMaster.getCachedSdStatus(sdStat);  // Non-blocking: reads cache updated by Core1
   uint32_t sdLoadedMask = sdOk ? sdStat.samplesLoaded : 0;
@@ -253,6 +279,21 @@ static void populateStateDocument(DynamicJsonDocument& doc) {
   }
   
   doc["lfoActive"] = 0;
+
+  // New state: synth engine mask (16-bit for 9 engines)
+  doc["synthActiveMask"] = spiMaster.getSynthActiveMask16();
+
+  // Song Chain state
+  doc["songChainActive"] = sequencer.isSongChainActive();
+  doc["songChainIdx"] = sequencer.getSongChainIdx();
+  doc["songChainRepeat"] = sequencer.getSongChainRepeatCnt();
+  doc["songChainCount"] = sequencer.getSongChainCount();
+
+  // Choke groups
+  JsonArray chokeArr = doc.createNestedArray("chokeGroups");
+  for (int i = 0; i < 16; i++) {
+    chokeArr.add(spiMaster.getChokeGroup(i));
+  }
 }
 
 static bool isClientReady(AsyncWebSocketClient* client) {
@@ -1061,7 +1102,16 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   });
   
   server->begin();
-  
+
+  // Pre-allocate state broadcast buffer in PSRAM (one-time, never freed)
+  if (!_stateBuf) {
+    _stateBuf = (char*)ps_malloc(kStateBufSize);
+  }
+  // Pre-allocate JSON document in PSRAM (one-time, reused via clear())
+  if (!_stateDoc) {
+    _stateDoc = new PsramJsonDocument(8192);
+  }
+
   // Iniciar servidor UDP
   if (udp.begin(UDP_PORT)) {
   } else {
@@ -1073,6 +1123,12 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
 
 void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, 
                                      AwsEventType type, void *arg, uint8_t *data, size_t len) {
+  // Static reassembly buffer — declared at function level so both
+  // WS_EVT_DISCONNECT and WS_EVT_DATA can access them.
+  static uint8_t* _wsReassemblyBuf = nullptr;
+  static size_t   _wsReassemblySize = 0;
+  static uint32_t _wsReassemblyClientId = 0xFFFFFFFF;
+
   if (type == WS_EVT_CONNECT) {
     // ⚠️ LÍMITE DE 3 CLIENTES para estabilidad
     if (ws->count() > 3) {
@@ -1088,14 +1144,20 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
     basicState["pattern"] = sequencer.getCurrentPattern();
     basicState["clientId"] = client->id();
     
-    String output;
-    serializeJson(basicState, output);
-    
-    if (isClientReady(client)) {
-      client->text(output);
+    // Serialize to stack buffer — avoid heap String
+    char connectBuf[256];
+    size_t cLen = serializeJson(basicState, connectBuf, sizeof(connectBuf));
+    if (isClientReady(client) && cLen > 0) {
+      client->text(connectBuf, cLen);
     }
   } else if (type == WS_EVT_DISCONNECT) {
-    unsigned int remaining = ws->count();
+    // Free any orphaned reassembly buffer owned by this client
+    // (prevents 24KB leak if client disconnects mid-fragment)
+    if (_wsReassemblyBuf && _wsReassemblyClientId == client->id()) {
+      free(_wsReassemblyBuf);
+      _wsReassemblyBuf = nullptr;
+      _wsReassemblyClientId = 0xFFFFFFFF;
+    }
   } else if (type == WS_EVT_DATA) {
     AwsFrameInfo *info = (AwsFrameInfo*)arg;
 
@@ -1108,11 +1170,9 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
     }
     
     // --- Frame reassembly for fragmented WebSocket messages ---
-    // NOTE: static vars are per-task (single network task on ESP32), but we track
-    // the client id to detect cross-client fragment interleaving and discard safely.
-    static uint8_t* _wsReassemblyBuf = nullptr;
-    static size_t   _wsReassemblySize = 0;
-    static uint32_t _wsReassemblyClientId = 0xFFFFFFFF;
+    // NOTE: static vars are at function level (see top of onWebSocketEvent).
+    // We track client id to detect cross-client fragment interleaving.
+
     bool _wsFreeAfter = false;
     
     // Safe buffer variables (used for WS_TEXT to avoid data[len]=0 overflow)
@@ -1373,31 +1433,19 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
           }
           else if (cmd == "init") {
             // Cliente solicita inicialización completa
-            
-            // Only send state if we have enough heap
-            if (ESP.getFreeHeap() > 30000 && isClientReady(client)) {
+            // State doc lives in PSRAM — safe to send regardless of heap
+            if (isClientReady(client)) {
               sendSequencerStateToClient(client);
-            } else {
-              // Send minimal state
-              StaticJsonDocument<256> mini;
-              mini["type"] = "state";
-              mini["playing"] = sequencer.isPlaying();
-              mini["tempo"] = sequencer.getTempo();
-              mini["pattern"] = sequencer.getCurrentPattern();
-              mini["samplesLoaded"] = sampleManager.getLoadedSamplesCount();
-              String miniOut;
-              serializeJson(mini, miniOut);
-              if (isClientReady(client)) client->text(miniOut);
             }
 
-            // Enviar estado de MIDI scan
+            // Enviar estado de MIDI scan (stack buffer, no heap)
             if (midiController && isClientReady(client)) {
               StaticJsonDocument<128> midiScanDoc;
               midiScanDoc["type"] = "midiScan";
               midiScanDoc["enabled"] = midiController->isScanEnabled();
-              String midiOut;
-              serializeJson(midiScanDoc, midiOut);
-              if (isClientReady(client)) client->text(midiOut);
+              char midiBuf[64];
+              size_t mLen = serializeJson(midiScanDoc, midiBuf, sizeof(midiBuf));
+              if (mLen > 0) client->text(midiBuf, mLen);
             }
           }
           else if (cmd == "getSampleCounts") {
@@ -1515,48 +1563,39 @@ void WebInterface::broadcastSequencerState() {
   if (now - lastBroadcast < 500) return;
   lastBroadcast = now;
   
-  // Protect against low heap — state doc + string need ~12KB total
-  if (ESP.getFreeHeap() < 30000) {
-    return;
+  // All memory lives in PSRAM — zero heap allocation in this path
+  if (_stateDoc && _stateBuf) {
+    _stateDoc->clear();
+    populateStateDocument(*_stateDoc);
+    size_t len = serializeJson(*_stateDoc, _stateBuf, kStateBufSize);
+    if (len > 0 && len < kStateBufSize) {
+      ws->textAll(_stateBuf, len);
+    }
   }
-  
-  DynamicJsonDocument doc(8192);
-  populateStateDocument(doc);
-  
-  String output;
-  serializeJson(doc, output);
-  ws->textAll(output);
 }
 
 void WebInterface::sendSequencerStateToClient(AsyncWebSocketClient* client) {
   if (!initialized || !ws || !isClientReady(client)) return;
   
-  // Protect against low heap — state doc needs ~6KB
-  if (ESP.getFreeHeap() < 30000) {
-    return;
+  // All memory in PSRAM — zero heap allocation
+  if (_stateDoc && _stateBuf) {
+    _stateDoc->clear();
+    populateStateDocument(*_stateDoc);
+    size_t len = serializeJson(*_stateDoc, _stateBuf, kStateBufSize);
+    if (len > 0 && len < kStateBufSize) {
+      client->text(_stateBuf, len);
+    }
   }
-  
-  DynamicJsonDocument doc(8192);
-  populateStateDocument(doc);
-  
-  String output;
-  serializeJson(doc, output);
-  client->text(output);
 }
 
 void WebInterface::broadcastPadTrigger(int pad) {
   if (!initialized || !ws || ws->count() == 0) return;
-  
-  // Skip broadcast if heap is low
   if (ESP.getFreeHeap() < 20000) return;
   
-  StaticJsonDocument<128> doc;
-  doc["type"] = "pad";
-  doc["pad"] = pad;
-  
-  String output;
-  serializeJson(doc, output);
-  ws->textAll(output);
+  // Stack buffer — zero heap allocation
+  char buf[48];
+  int len = snprintf(buf, sizeof(buf), "{\"type\":\"pad\",\"pad\":%d}", pad);
+  ws->textAll(buf, len);
 }
 
 void WebInterface::broadcastStep(int step) {
@@ -1635,14 +1674,34 @@ void WebInterface::update() {
     lastWsCleanup = now;
   }
 
+  // Broadcast estado periódico (15s) — red de seguridad para sample info.
+  // Reducido de 5s a 15s para minimizar heap churn (~13KB por llamada).
+  static unsigned long lastPeriodicState = 0;
+  if (!pageLoading && ws->count() > 0 && now - lastPeriodicState >= 15000) {
+    lastPeriodicState = now;
+    broadcastSequencerState();
+  }
+
   // ── Heap monitor: log cada 10s para diagnosticar fugas ──
   static unsigned long lastHeapLog = 0;
   static uint32_t minHeapSeen = 0xFFFFFFFF;
+  static uint8_t lowHeapStrikes = 0;
   if (now - lastHeapLog > 10000) {
     lastHeapLog = now;
     uint32_t h = ESP.getFreeHeap();
-    uint32_t hMin = ESP.getMinFreeHeap();
+    size_t maxBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
     if (h < minHeapSeen) minHeapSeen = h;
+    
+    // Safety net: if largest contiguous block stays critically low for
+    // 3 consecutive checks (30s), gracefully restart to avoid total lockup
+    if (maxBlock < 8000) {
+      lowHeapStrikes++;
+      if (lowHeapStrikes >= 3) {
+        ESP.restart();
+      }
+    } else {
+      lowHeapStrikes = 0;
+    }
   }
   
   // Limpiar clientes UDP inactivos cada 30 segundos
@@ -3813,9 +3872,14 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
 
   // {"cmd":"synthActive","mask":123}   (bit0=808, bit1=909, bit2=505, bit3=303, bit4=WT, bit5=SH101, bit6=FM2Op)
+  // {"cmd":"synthActive","mask":511}   (9 engines, 16-bit)
   else if (cmd == "synthActive") {
-    uint8_t mask = doc["mask"] | 0x7B;
-    spiMaster.synthSetActive(mask);
+    uint16_t mask = doc["mask"] | 0x01FF;
+    if (mask > 0xFF) {
+      spiMaster.synthSetActive16(mask);
+    } else {
+      spiMaster.synthSetActive((uint8_t)mask);
+    }
     StaticJsonDocument<64> resp;
     resp["type"] = "synthActiveAck";
     resp["mask"] = mask;
@@ -3837,6 +3901,153 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     String output;
     serializeJson(resp, output);
     if (ws) ws->textAll(output);
+  }
+
+  // ═══════════════════════════════════════════════════
+  // NEW MASTER FX
+  // ═══════════════════════════════════════════════════
+
+  // {"cmd":"setMasterFxRoute","fxId":10,"connected":true}
+  else if (cmd == "setMasterFxRoute") {
+    uint8_t fxId = doc["fxId"] | 0;
+    bool connected = doc["connected"] | false;
+    spiMaster.setMasterFxRoute(fxId, connected);
+  }
+
+  // {"cmd":"setAutoWahActive","active":true}
+  else if (cmd == "setAutoWahActive") {
+    bool active = doc["active"] | false;
+    spiMaster.setAutoWahActive(active);
+  }
+  // {"cmd":"setAutoWahLevel","level":80}
+  else if (cmd == "setAutoWahLevel") {
+    uint8_t level = doc["level"] | 80;
+    spiMaster.setAutoWahLevel(level);
+  }
+  // {"cmd":"setAutoWahMix","mix":50}
+  else if (cmd == "setAutoWahMix") {
+    uint8_t mix = doc["mix"] | 50;
+    spiMaster.setAutoWahMix(mix);
+  }
+
+  // {"cmd":"setStereoWidth","width":100}
+  else if (cmd == "setStereoWidth") {
+    uint8_t width = doc["width"] | 100;
+    spiMaster.setStereoWidth(width);
+  }
+
+  // {"cmd":"setTapeStop","mode":1}
+  else if (cmd == "setTapeStop") {
+    uint8_t mode = doc["mode"] | 0;
+    spiMaster.setTapeStop(mode);
+  }
+
+  // {"cmd":"setBeatRepeat","division":8}
+  else if (cmd == "setBeatRepeat") {
+    uint8_t division = doc["division"] | 0;
+    spiMaster.setBeatRepeat(division);
+  }
+
+  // {"cmd":"setDelayStereo","mode":1}
+  else if (cmd == "setDelayStereo") {
+    uint8_t mode = doc["mode"] | 0;
+    spiMaster.setDelayStereo(mode);
+  }
+
+  // {"cmd":"setChorusStereo","mode":1}
+  else if (cmd == "setChorusStereo") {
+    uint8_t mode = doc["mode"] | 0;
+    spiMaster.setChorusStereo(mode);
+  }
+
+  // {"cmd":"setEarlyRefActive","active":true}
+  else if (cmd == "setEarlyRefActive") {
+    bool active = doc["active"] | false;
+    spiMaster.setEarlyRefActive(active);
+  }
+  // {"cmd":"setEarlyRefMix","mix":30}
+  else if (cmd == "setEarlyRefMix") {
+    uint8_t mix = doc["mix"] | 30;
+    spiMaster.setEarlyRefMix(mix);
+  }
+
+  // ═══════════════════════════════════════════════════
+  // CHOKE GROUPS
+  // ═══════════════════════════════════════════════════
+
+  // {"cmd":"setChokeGroup","pad":6,"group":1}
+  else if (cmd == "setChokeGroup") {
+    uint8_t pad = doc["pad"] | 0;
+    uint8_t group = doc["group"] | 0;
+    spiMaster.setChokeGroup(pad, group);
+  }
+
+  // ═══════════════════════════════════════════════════
+  // SONG CHAIN MODE
+  // ═══════════════════════════════════════════════════
+
+  // {"cmd":"songChainUpload","chain":[{"pattern":0,"repeats":4},{"pattern":1,"repeats":2}]}
+  else if (cmd == "songChainUpload") {
+    JsonArrayConst arr = doc["chain"].as<JsonArrayConst>();
+    if (!arr.isNull() && arr.size() > 0) {
+      uint8_t count = min((int)arr.size(), (int)Sequencer::SONG_CHAIN_MAX);
+      Sequencer::SongChainEntry entries[Sequencer::SONG_CHAIN_MAX];
+      for (uint8_t i = 0; i < count; i++) {
+        entries[i].pattern = arr[i]["pattern"] | 0;
+        entries[i].repeats = arr[i]["repeats"] | 1;
+      }
+      sequencer.songChainUpload(entries, count);
+      // Also upload to Daisy via SPI
+      SongEntry spiEntries[SONG_MAX_ENTRIES];
+      for (uint8_t i = 0; i < count; i++) {
+        spiEntries[i].pattern = entries[i].pattern;
+        spiEntries[i].repeats = entries[i].repeats;
+      }
+      spiMaster.songUpload(spiEntries, count);
+    }
+  }
+
+  // {"cmd":"songChainControl","action":1}  0=stop, 1=play, 2=reset
+  else if (cmd == "songChainControl") {
+    uint8_t action = doc["action"] | 0;
+    if (action == 1) {
+      sequencer.songChainPlay();
+      spiMaster.songControl(1);
+    } else if (action == 0) {
+      sequencer.songChainStop();
+      spiMaster.songControl(0);
+    } else if (action == 2) {
+      sequencer.songChainReset();
+      spiMaster.songControl(2);
+    }
+    broadcastSequencerState();
+  }
+
+  // {"cmd":"songGetPos"}
+  else if (cmd == "songGetPos") {
+    StaticJsonDocument<128> resp;
+    resp["type"] = "songPos";
+    resp["idx"] = sequencer.getSongChainIdx();
+    resp["pattern"] = sequencer.getCurrentPattern();
+    resp["repeat"] = sequencer.getSongChainRepeatCnt();
+    resp["active"] = sequencer.isSongChainActive();
+    String output;
+    serializeJson(resp, output);
+    if (ws) ws->textAll(output);
+  }
+
+  // ═══════════════════════════════════════════════════
+  // PER-TRACK LFO CONFIG (Daisy-side)
+  // ═══════════════════════════════════════════════════
+
+  // {"cmd":"setTrackLfo","track":0,"wave":0,"target":3,"rate":100,"depth":500}
+  else if (cmd == "setTrackLfo") {
+    uint8_t track = doc["track"] | 0;
+    uint8_t wave = doc["wave"] | 0;
+    uint8_t target = doc["target"] | 0;
+    uint16_t rate = doc["rate"] | 100;     // centésimas de Hz
+    uint16_t depth = doc["depth"] | 500;   // milésimas
+    spiMaster.setTrackLfoConfig(track, wave, target, rate, depth);
   }
 }
 

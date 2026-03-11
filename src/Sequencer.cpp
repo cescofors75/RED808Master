@@ -21,7 +21,13 @@ Sequencer::Sequencer() :
   patternChangeCallback(nullptr),
   songMode(false),
   songLength(1),
+  songChainActive(false),
+  songChainCount(0),
+  songChainIdx(0),
+  songChainRepeatCnt(0),
   patternLength(16) {
+
+  memset(songChain, 0, sizeof(songChain));
 
   // ── Allocate pattern storage in PSRAM (~229 KB) ──────────────────────────
   // ps_calloc → PSRAM heap (8 MB OPI).  Fallback to internal heap if PSRAM
@@ -126,8 +132,28 @@ void Sequencer::update() {
     if (currentStep >= patternLength) {
       currentStep = 0;
       
-      // Song mode: auto-advance to next pattern
-      if (songMode && songLength > 1) {
+      // Song Chain mode: custom pattern chain with repeats
+      if (songChainActive && songChainCount > 0) {
+        songChainRepeatCnt++;
+        uint8_t needed = songChain[songChainIdx].repeats;
+        if (needed == 0) needed = 1;
+        if (songChainRepeatCnt >= needed) {
+          // Advance to next entry in chain
+          songChainIdx++;
+          songChainRepeatCnt = 0;
+          if (songChainIdx >= songChainCount) {
+            // Chain ended — stop song chain
+            songChainActive = false;
+          } else {
+            currentPattern = songChain[songChainIdx].pattern & 7;
+            if (patternChangeCallback) {
+              patternChangeCallback(currentPattern, songChainCount);
+            }
+          }
+        }
+      }
+      // Legacy song mode: linear pattern advance
+      else if (songMode && songLength > 1) {
         int nextPattern = currentPattern + 1;
         if (nextPattern >= songLength) {
           nextPattern = 0; // Loop back to start
@@ -718,6 +744,42 @@ void Sequencer::processLoops() {
       
       loopStepCounter[track] = (loopStepCounter[track] + 1) % patternLength;
     }
+  }
+}
+
+// ============= SONG CHAIN MODE =============
+
+void Sequencer::songChainUpload(const SongChainEntry* entries, uint8_t count) {
+  if (!entries || count == 0) { songChainCount = 0; return; }
+  if (count > SONG_CHAIN_MAX) count = SONG_CHAIN_MAX;
+  memcpy(songChain, entries, count * sizeof(SongChainEntry));
+  songChainCount = count;
+  songChainIdx = 0;
+  songChainRepeatCnt = 0;
+}
+
+void Sequencer::songChainPlay() {
+  if (songChainCount == 0) return;
+  songChainActive = true;
+  songChainIdx = 0;
+  songChainRepeatCnt = 0;
+  currentPattern = songChain[0].pattern & 7;
+  currentStep = 0;
+  if (!playing) start();
+  if (patternChangeCallback) {
+    patternChangeCallback(currentPattern, songChainCount);
+  }
+}
+
+void Sequencer::songChainStop() {
+  songChainActive = false;
+}
+
+void Sequencer::songChainReset() {
+  songChainIdx = 0;
+  songChainRepeatCnt = 0;
+  if (songChainCount > 0) {
+    currentPattern = songChain[0].pattern & 7;
   }
 }
 

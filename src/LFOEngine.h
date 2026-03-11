@@ -52,11 +52,16 @@ enum LfoDivision : uint8_t {
 // LFO Modulation target
 // ═══════════════════════════════════════════════════════
 enum LfoTarget : uint8_t {
-    LFO_TGT_PITCH   = 0,   // ±1200 cents
-    LFO_TGT_DECAY   = 1,   // maxSamples multiplier
-    LFO_TGT_FILTER  = 2,   // Filter cutoff Hz
-    LFO_TGT_PAN     = 3,   // -100..+100
-    LFO_TGT_VOLUME  = 4    // 0-150 track volume
+    LFO_TGT_PITCH      = 0,   // ±1200 cents
+    LFO_TGT_DECAY      = 1,   // maxSamples multiplier
+    LFO_TGT_FILTER     = 2,   // Filter cutoff Hz
+    LFO_TGT_PAN        = 3,   // -100..+100
+    LFO_TGT_VOLUME     = 4,   // 0-150 track volume
+    LFO_TGT_ECHO_TIME  = 5,   // Modulate echo time ±40%
+    LFO_TGT_DIST_DRIVE = 6,   // Modulate distortion drive ±80%
+    LFO_TGT_CRUSH      = 7,   // Modulate bitcrush ±6 bits
+    LFO_TGT_SEND_REV   = 8,   // Modulate reverb send ±50%
+    LFO_TGT_SEND_DEL   = 9    // Modulate delay send ±50%
 };
 
 // ═══════════════════════════════════════════════════════
