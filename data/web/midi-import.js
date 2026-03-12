@@ -1014,22 +1014,8 @@ function confirmMidiImport() {
         // Show progress overlay
         showImportProgress(midiFileName, barsToImport);
 
-        // Clear all patterns with throttling to avoid flooding ESP32
-        console.log(`[MIDI Import] Clearing ${barsToImport} patterns...`);
-        let clearIdx = 0;
-        function sendNextClear() {
-            if (clearIdx < barsToImport) {
-                sendWebSocket({ cmd: 'clearPattern', pattern: clearIdx });
-                clearIdx++;
-                // Send in batches of 4, then yield
-                if (clearIdx % 4 === 0) {
-                    setTimeout(sendNextClear, 20);
-                } else {
-                    sendNextClear();
-                }
-            }
-        }
-        sendNextClear();
+        // Bulk clear all patterns in one command (server handles the loop)
+        sendWebSocket({ cmd: 'clearPatterns', from: 0, to: barsToImport - 1 });
 
         // Pre-generate all pattern data
         const allPatterns = [];
@@ -1044,83 +1030,87 @@ function confirmMidiImport() {
             allPatterns.push(result);
         }
 
-        // Send patterns one at a time using setBulk (waits for ACK)
+        // ACK-driven sequential send: send 1, wait ACK, send next immediately.
+        // No artificial delays — limited only by ESP32 processing speed (~30-50ms each).
         let currentBar = 0;
         let acksReceived = 0;
-        let acksFailed = 0;
+        let ackTimer = null;
+        let finished = false;
 
-        function sendNextBulkPattern() {
-            if (currentBar < barsToImport) {
-                const barIdx = currentBar;
-                const result = allPatterns[barIdx];
-                
-                // Build compact arrays: s = steps (0/1), v = velocities
-                const s = [];
-                const v = [];
-                for (let t = 0; t < 16; t++) {
-                    const trackSteps = [];
-                    const trackVels = [];
-                    for (let step = 0; step < 16; step++) {
-                        trackSteps.push(result.pattern[t][step] ? 1 : 0);
-                        trackVels.push(result.velocities[t][step] || 127);
-                    }
-                    s.push(trackSteps);
-                    v.push(trackVels);
+        function buildBarMsg(idx) {
+            const result = allPatterns[idx];
+            const s = [], v = [];
+            for (let t = 0; t < 16; t++) {
+                const ts = [], tv = [];
+                for (let step = 0; step < 16; step++) {
+                    ts.push(result.pattern[t][step] ? 1 : 0);
+                    tv.push(result.velocities[t][step] || 127);
                 }
-
-                const bulkCmd = { cmd: 'setBulk', p: barIdx, s: s, v: v };
-                sendWebSocket(bulkCmd);
-                
-                // Update progress
-                const percent = Math.round(((barIdx + 1) / barsToImport) * 100);
-                updateImportProgress(percent, barIdx + 1, barsToImport);
-                
-                if (barIdx < 3 || barIdx === barsToImport - 1) {
-                    console.log(`[MIDI Import] Sent bulk pattern ${barIdx + 1}/${barsToImport} (${result.mappedNotes} notes)`);
-                }
-                currentBar++;
-                
-                // Wait for ACK or timeout, then send next
-                const ackTimeout = setTimeout(() => {
-                    acksFailed++;
-                    console.warn(`[MIDI Import] No ACK for pattern ${barIdx} (timeout ${acksFailed})`);
-                    sendNextBulkPattern();
-                }, 1200); // 1200ms timeout per pattern (increased for stability)
-                
-                // Store handler to be called when ACK arrives
-                window._bulkAckCallback = (ackPattern) => {
-                    clearTimeout(ackTimeout);
-                    acksReceived++;
-                    window._bulkAckCallback = null;
-                    // Small delay between patterns for ESP32 stability
-                    setTimeout(sendNextBulkPattern, 30);
-                };
-            } else {
-                // All patterns sent, finalize
-                window._bulkAckCallback = null;
-                
-                // Enable song mode and select first pattern
-                sendWebSocket({ cmd: 'setSongMode', enabled: true, length: barsToImport });
-                setTimeout(() => {
-                    sendWebSocket({ cmd: 'selectPattern', index: 0 });
-                }, 100);
-                
-                // Refresh pattern display
-                setTimeout(() => {
-                    sendWebSocket({ cmd: 'getPattern' });
-                    if (typeof window.onSongModeActivated === 'function') {
-                        window.onSongModeActivated(barsToImport, midiFileName);
-                    }
-                    completeImportProgress(midiFileName, barsToImport, totalMapped);
-                }, 500);
-                console.log(`[MIDI Import] BULK song imported: ${barsToImport} bars, ${totalMapped} total notes, ACKs: ${acksReceived}/${barsToImport}, timeouts: ${acksFailed}`);
+                s.push(ts);
+                v.push(tv);
             }
+            return { cmd: 'setBulk', p: idx, s: s, v: v };
         }
 
-        // Start sending after delay (let clearPattern commands process)
-        // Delay scales with number of patterns to clear
-        const clearDelay = Math.max(300, barsToImport * 30);
-        setTimeout(() => sendNextBulkPattern(), clearDelay);
+        function sendNextBar() {
+            if (currentBar >= barsToImport) return;
+            sendWebSocket(buildBarMsg(currentBar));
+            currentBar++;
+            // Safety: if no ACK within 500ms, move on anyway
+            ackTimer = setTimeout(() => {
+                console.warn(`[MIDI Import] ACK timeout bar ${currentBar - 1}, continuing`);
+                if (currentBar < barsToImport) {
+                    sendNextBar();
+                } else if (!finished) {
+                    finalizeSongImport();
+                }
+            }, 500);
+        }
+
+        window._bulkAckCallback = (ackPattern) => {
+            acksReceived++;
+            clearTimeout(ackTimer);
+            const percent = Math.round((acksReceived / barsToImport) * 100);
+            updateImportProgress(percent, acksReceived, barsToImport);
+            if (acksReceived >= barsToImport) {
+                clearTimeout(totalTimeout);
+                finalizeSongImport();
+            } else {
+                // Immediately send next — no delay
+                sendNextBar();
+            }
+        };
+
+        function finalizeSongImport() {
+            if (finished) return;
+            finished = true;
+            clearTimeout(ackTimer);
+            clearTimeout(totalTimeout);
+            window._bulkAckCallback = null;
+            sendWebSocket({ cmd: 'setSongMode', enabled: true, length: barsToImport });
+            setTimeout(() => {
+                sendWebSocket({ cmd: 'selectPattern', index: 0 });
+            }, 100);
+            setTimeout(() => {
+                sendWebSocket({ cmd: 'getPattern' });
+                if (typeof window.onSongModeActivated === 'function') {
+                    window.onSongModeActivated(barsToImport, midiFileName);
+                }
+                completeImportProgress(midiFileName, barsToImport, totalMapped);
+            }, 300);
+            console.log(`[MIDI Import] Song imported: ${barsToImport} bars, ${totalMapped} notes, ACKs: ${acksReceived}`);
+        }
+
+        // Global fallback timeout
+        const totalTimeout = setTimeout(() => {
+            if (!finished) {
+                console.warn(`[MIDI Import] Global timeout: ${acksReceived}/${barsToImport} ACKs, finalizing`);
+                finalizeSongImport();
+            }
+        }, barsToImport * 600 + 10000);
+
+        // Start sending after brief delay for clearPatterns to process
+        setTimeout(sendNextBar, 200);
     } else {
         // === SINGLE BAR MODE: Import one bar into current pattern ===
         const result = midiToPattern(parsedMidiData, {

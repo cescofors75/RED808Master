@@ -970,6 +970,21 @@ function handleMasterFxUpdate(data) {
     else if (p === 'compressorRelease') { const sl = byId('compressorRelease'); if (sl) { sl.value = v; const vd = byId('compressorReleaseValue'); if (vd) vd.textContent = Math.round(v); } }
     else if (p === 'compressorMakeupGain') { const sl = byId('compressorMakeupGain'); if (sl) { sl.value = v; const vd = byId('compressorMakeupGainValue'); if (vd) vd.textContent = parseFloat(v).toFixed(1); } }
 
+    // --- Mega Upgrade FX sync ---
+    else if (p === 'autoWahActive') { const cb = byId('autoWahActive'); if (cb) cb.checked = !!v; }
+    else if (p === 'autoWahLevel') { const sl = byId('autoWahLevel'); if (sl) { sl.value = v; const vd = byId('autoWahLevelValue'); if (vd) vd.textContent = Math.round(v); } }
+    else if (p === 'autoWahMix') { const sl = byId('autoWahMix'); if (sl) { sl.value = v; const vd = byId('autoWahMixValue'); if (vd) vd.textContent = Math.round(v); } }
+    else if (p === 'stereoWidth') { const sl = byId('stereoWidth'); if (sl) { sl.value = v; const vd = byId('stereoWidthValue'); if (vd) vd.textContent = Math.round(v); } }
+    else if (p === 'earlyRefActive') { const cb = byId('earlyRefActive'); if (cb) cb.checked = !!v; }
+    else if (p === 'earlyRefMix') { const sl = byId('earlyRefMix'); if (sl) { sl.value = v; const vd = byId('earlyRefMixValue'); if (vd) vd.textContent = Math.round(v); } }
+    else if (p === 'tapeStop') { const sl = byId('tapeStop'); if (sl) { sl.value = v; const vd = byId('tapeStopValue'); if (vd) vd.textContent = Math.round(v); } }
+    else if (p === 'beatRepeat') { const sel = byId('beatRepeat'); if (sel) sel.value = v; }
+    else if (p === 'delayStereo') { const sel = byId('delayStereo'); if (sel) sel.value = v; }
+    else if (p === 'chorusStereo') { const sel = byId('chorusStereo'); if (sel) sel.value = v; }
+    else if (p === 'chokeGroups' && Array.isArray(v)) {
+        v.forEach((g, i) => { const sel = byId(`chokeGroup${i}`); if (sel) sel.value = g; });
+    }
+
     // --- Master Volume ---
     else if (p === 'volume') {
         const sl = byId('masterVolume'); if (sl) { sl.value = v; const vd = byId('masterVolumeValue'); if (vd) vd.textContent = v; }
@@ -4457,9 +4472,142 @@ function setupFXControls() {
     setupFxSlider('compressorAttack', 'compressorAttackValue', 'setCompressorAttack', 'ms', false);
     setupFxSlider('compressorRelease', 'compressorReleaseValue', 'setCompressorRelease', 'ms', false);
     setupFxSlider('compressorMakeup', 'compressorMakeupValue', 'setCompressorMakeupGain', 'dB', false);
+
+    // ============= NEW MEGA UPGRADE FX =============
+    // Auto-Wah
+    const autoWahActive = document.getElementById('autoWahActive');
+    if (autoWahActive) {
+        autoWahActive.addEventListener('change', (e) => {
+            sendWebSocket({ cmd: 'setAutoWahActive', active: e.target.checked });
+            toggleFxCard(e.target, e.target.checked);
+        });
+    }
+    setupFxSliderCustom('autoWahLevel', 'autoWahLevelValue', 'setAutoWahLevel', 'level', true);
+    setupFxSliderCustom('autoWahMix', 'autoWahMixValue', 'setAutoWahMix', 'mix', true);
+
+    // Stereo Width
+    setupFxSliderCustom('stereoWidth', 'stereoWidthValue', 'setStereoWidth', 'width', true);
+
+    // Tape Stop
+    setupFxSliderCustom('tapeStop', 'tapeStopValue', 'setTapeStop', 'mode', true);
+
+    // Beat Repeat (select dropdown)
+    const beatRepeatSel = document.getElementById('beatRepeat');
+    if (beatRepeatSel) {
+        beatRepeatSel.addEventListener('change', (e) => {
+            sendWebSocket({ cmd: 'setBeatRepeat', division: parseInt(e.target.value) });
+        });
+    }
+
+    // Delay Stereo (select dropdown)
+    const delayStereoSel = document.getElementById('delayStereo');
+    if (delayStereoSel) {
+        delayStereoSel.addEventListener('change', (e) => {
+            sendWebSocket({ cmd: 'setDelayStereo', mode: parseInt(e.target.value) });
+        });
+    }
+
+    // Chorus Stereo (select dropdown)
+    const chorusStereoSel = document.getElementById('chorusStereo');
+    if (chorusStereoSel) {
+        chorusStereoSel.addEventListener('change', (e) => {
+            sendWebSocket({ cmd: 'setChorusStereo', mode: parseInt(e.target.value) });
+        });
+    }
+
+    // Early Reflections
+    const earlyRefActive = document.getElementById('earlyRefActive');
+    if (earlyRefActive) {
+        earlyRefActive.addEventListener('change', (e) => {
+            sendWebSocket({ cmd: 'setEarlyRefActive', active: e.target.checked });
+            toggleFxCard(e.target, e.target.checked);
+        });
+    }
+    setupFxSliderCustom('earlyRefMix', 'earlyRefMixValue', 'setEarlyRefMix', 'mix', true);
+
+    // Choke Groups
+    initChokeGroupUI();
+
+    // Track LFO
+    const lfoApplyBtn = document.getElementById('lfoApplyBtn');
+    if (lfoApplyBtn) {
+        lfoApplyBtn.addEventListener('click', () => {
+            const track = parseInt(document.getElementById('lfoTrack').value);
+            const wave  = parseInt(document.getElementById('lfoWave').value);
+            const target= parseInt(document.getElementById('lfoTarget').value);
+            const rate  = parseInt(document.getElementById('lfoRate').value);
+            const depth = parseInt(document.getElementById('lfoDepth').value);
+            sendWebSocket({ cmd: 'setTrackLfo', track, wave, target, rate, depth });
+        });
+    }
+    const lfoRateSlider = document.getElementById('lfoRate');
+    if (lfoRateSlider) {
+        lfoRateSlider.addEventListener('input', (e) => {
+            const el = document.getElementById('lfoRateValue');
+            if (el) el.textContent = e.target.value;
+        });
+    }
+    const lfoDepthSlider = document.getElementById('lfoDepth');
+    if (lfoDepthSlider) {
+        lfoDepthSlider.addEventListener('input', (e) => {
+            const el = document.getElementById('lfoDepthValue');
+            if (el) el.textContent = e.target.value;
+        });
+    }
+
+    // Song Chain
+    const songChainUploadBtn = document.getElementById('songChainUploadBtn');
+    if (songChainUploadBtn) {
+        songChainUploadBtn.addEventListener('click', () => {
+            const input = document.getElementById('songChainInput').value.trim();
+            if (!input) return;
+            const entries = input.split(',').map(s => {
+                const parts = s.trim().split(':');
+                return { pattern: parseInt(parts[0]) || 0, repeats: parseInt(parts[1]) || 1 };
+            }).filter(e => !isNaN(e.pattern));
+            sendWebSocket({ cmd: 'songChainUpload', chain: entries });
+        });
+    }
+    const songChainPlayBtn = document.getElementById('songChainPlayBtn');
+    if (songChainPlayBtn) {
+        songChainPlayBtn.addEventListener('click', () => {
+            sendWebSocket({ cmd: 'songChainControl', action: 1 });
+        });
+    }
+    const songChainStopBtn = document.getElementById('songChainStopBtn');
+    if (songChainStopBtn) {
+        songChainStopBtn.addEventListener('click', () => {
+            sendWebSocket({ cmd: 'songChainControl', action: 0 });
+        });
+    }
 }
 
-// Helper: setup a slider -> WebSocket binding
+function initChokeGroupUI() {
+    const container = document.getElementById('chokeGroupControls');
+    if (!container) return;
+    const trackNames = ['BD','SD','CH','OH','CY','CP','RS','CB','LT','MT','HT','MA','CL','HC','MC','LC'];
+    let html = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">';
+    for (let i = 0; i < 16; i++) {
+        html += `<div class="ufx-param">
+            <label>${trackNames[i]}</label>
+            <select id="chokeGroup${i}" class="ufx-select" data-track="${i}">
+                <option value="0">OFF</option>
+                <option value="1">G1</option><option value="2">G2</option>
+                <option value="3">G3</option><option value="4">G4</option>
+            </select>
+        </div>`;
+    }
+    html += '</div>';
+    container.innerHTML = html;
+    for (let i = 0; i < 16; i++) {
+        const sel = document.getElementById(`chokeGroup${i}`);
+        if (sel) {
+            sel.addEventListener('change', (e) => {
+                sendWebSocket({ cmd: 'setChokeGroup', pad: i, group: parseInt(e.target.value) });
+            });
+        }
+    }
+}
 function setupFxSlider(sliderId, valueId, wsCmd, suffix, isInt) {
     const slider = document.getElementById(sliderId);
     const valueEl = document.getElementById(valueId);
@@ -4476,10 +4624,32 @@ function setupFxSlider(sliderId, valueId, wsCmd, suffix, isInt) {
     });
 }
 
+// Helper: slider with custom key name (for backend commands that don't use "value")
+function setupFxSliderCustom(sliderId, valueId, wsCmd, keyName, isInt) {
+    const slider = document.getElementById(sliderId);
+    const valueEl = document.getElementById(valueId);
+    if (!slider) return;
+    slider.addEventListener('input', (e) => {
+        const val = isInt ? parseInt(e.target.value) : parseFloat(e.target.value);
+        if (valueEl) valueEl.textContent = val;
+        const msg = { cmd: wsCmd };
+        msg[keyName] = val;
+        sendWebSocketThrottled(`fx:${wsCmd}`, msg);
+    });
+    slider.addEventListener('change', (e) => {
+        const val = isInt ? parseInt(e.target.value) : parseFloat(e.target.value);
+        if (valueEl) valueEl.textContent = val;
+        const msg = { cmd: wsCmd };
+        msg[keyName] = val;
+        sendWebSocket(msg);
+    });
+}
+
 // Helper: visual toggle for FX card active state
 function toggleFxCard(checkbox, active) {
-    const card = checkbox.closest('.fx-card');
+    const card = checkbox.closest('.ufx-card') || checkbox.closest('.fx-card');
     if (card) {
+        card.classList.toggle('ufx-card--active', active);
         card.classList.toggle('fx-card-active', active);
     }
 }
@@ -6574,7 +6744,7 @@ let selectedFxTrack = 0;
 
 function initTrackFx() {
     // Track selector buttons
-    const trackBtns = document.querySelectorAll('.track-fx-btn');
+    const trackBtns = document.querySelectorAll('.ufx-tsel, .track-fx-btn');
     trackBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             const track = parseInt(btn.dataset.track);
@@ -6591,7 +6761,7 @@ function selectFxTrack(trackIndex) {
     window.lastSelectedTrack = trackIndex;
     
     // Update selector buttons
-    document.querySelectorAll('.track-fx-btn').forEach(btn => {
+    document.querySelectorAll('.ufx-tsel, .track-fx-btn').forEach(btn => {
         btn.classList.toggle('active', parseInt(btn.dataset.track) === trackIndex);
     });
     
@@ -6745,7 +6915,7 @@ function setTrackFxStutter(intervalMs) {
 
 // Update the track selector buttons to show which have FX active
 function updateTrackFxBtnIndicators() {
-    document.querySelectorAll('.track-fx-btn').forEach(btn => {
+    document.querySelectorAll('.ufx-tsel, .track-fx-btn').forEach(btn => {
         const track = parseInt(btn.dataset.track);
         const fx = trackFxEffects[track];
         const hasFx = fx && (fx.reverse || fx.pitch !== 1.0 || fx.stutter);

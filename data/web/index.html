@@ -503,443 +503,531 @@
 
         <!-- TAB: FX -->
         <div id="tab-fx" class="tab-content">
-            <!-- FX Section -->
             <section id="section-fx" class="fx-section" data-section="fx" data-title="Sound FX">
-                <h2>🎛️ FILTROS & EFECTOS</h2>
-                
-                <!-- Sub-tab navigation for FILTERS / FX -->
+
+                <!-- Unified Sub-tab Navigation -->
                 <div class="fx-subtabs">
-                    <button class="fx-subtab-btn" data-fxtab="filters">🎚️ FILTERS</button>
-                    <button class="fx-subtab-btn active" data-fxtab="masterFx">🎸 FX</button>
+                    <button class="fx-subtab-btn" data-fxtab="filters">FILTERS</button>
+                    <button class="fx-subtab-btn active" data-fxtab="masterFx">EFFECTS</button>
+                    <button class="fx-subtab-btn" data-fxtab="newFx">ROUTING</button>
                 </div>
-                
-                <!-- SUB-TAB: Filters -->
+
+                <!-- ═══════════════ TAB 1: FILTERS ═══════════════ -->
                 <div class="fx-subtab-content" id="fxtab-filters">
-                <!-- Filter Library with presets -->
-                <div class="filter-library">
-                    <h3>📚 BIBLIOTECA DE FILTROS</h3>
-                    <p class="filter-description">Selecciona un track o pad primero, luego aplica un filtro. ¡Los presets tienen valores optimizados para que se noten!</p>
-                    
-                    <div class="filters-grid">
-                        <!-- 0: NONE -->
-                        <div class="filter-card filter-card-none" data-filter="0">
-                            <div class="filter-header">
-                                <span class="filter-icon">🚫</span>
-                                <span class="filter-title">OFF</span>
-                                <span class="filter-key">F1</span>
-                            </div>
-                            <p class="filter-desc">Quitar filtro. Restaura sonido original.</p>
-                        </div>
-                        
-                        <!-- 1: LOW PASS -->
-                        <div class="filter-card filter-card-warm" data-filter="1">
-                            <div class="filter-header">
-                                <span class="filter-icon">🔥</span>
-                                <span class="filter-title">LOW PASS</span>
-                                <span class="filter-key">F2</span>
-                            </div>
-                            <p class="filter-desc">Quita agudos. Sonido oscuro, profundo, tipo DJ.</p>
-                        </div>
-                        
-                        <!-- 2: HIGH PASS -->
-                        <div class="filter-card filter-card-bright" data-filter="2">
-                            <div class="filter-header">
-                                <span class="filter-icon">✨</span>
-                                <span class="filter-title">HIGH PASS</span>
-                                <span class="filter-key">F3</span>
-                            </div>
-                            <p class="filter-desc">Quita graves. Sonido fino, aéreo.</p>
-                        </div>
-                        
-                        <!-- 9: RESONANT -->
-                        <div class="filter-card filter-card-acid" data-filter="9">
-                            <div class="filter-header">
-                                <span class="filter-icon">⚡</span>
-                                <span class="filter-title">RESONANT</span>
-                                <span class="filter-key">F10</span>
-                            </div>
-                            <p class="filter-desc">Filtro ácido tipo TB-303. Resonancia extrema.</p>
-                        </div>
-                        
-                        <!-- 3: BAND PASS -->
-                        <div class="filter-card filter-card-creative" data-filter="3">
-                            <div class="filter-header">
-                                <span class="filter-icon">📞</span>
-                                <span class="filter-title">BAND PASS</span>
-                                <span class="filter-key">F4</span>
-                            </div>
-                            <p class="filter-desc">Solo un rango pasa. Efecto teléfono, lo-fi.</p>
-                        </div>
-                        
-                        <!-- 7: PEAKING EQ -->
-                        <div class="filter-card filter-card-boost" data-filter="7">
-                            <div class="filter-header">
-                                <span class="filter-icon">⛰️</span>
-                                <span class="filter-title">PEAK BOOST</span>
-                                <span class="filter-key">F8</span>
-                            </div>
-                            <p class="filter-desc">Realza una frecuencia. Da punch o brillo.</p>
-                        </div>
-                        
-                        <!-- 4: NOTCH -->
-                        <div class="filter-card filter-card-cut" data-filter="4">
-                            <div class="filter-header">
-                                <span class="filter-icon">🕳️</span>
-                                <span class="filter-title">NOTCH CUT</span>
-                                <span class="filter-key">F5</span>
-                            </div>
-                            <p class="filter-desc">Elimina una frecuencia. Efecto phaser.</p>
-                        </div>
-                        
-                        <!-- 5: LOW SHELF -->
-                        <div class="filter-card filter-card-boost" data-filter="5">
-                            <div class="filter-header">
-                                <span class="filter-icon">🔊</span>
-                                <span class="filter-title">BASS BOOST</span>
-                                <span class="filter-key">F6</span>
-                            </div>
-                            <p class="filter-desc">Sube los graves. Más pegada en bombo.</p>
-                        </div>
-                        
-                        <!-- 6: HIGH SHELF -->
-                        <div class="filter-card filter-card-bright" data-filter="6">
-                            <div class="filter-header">
-                                <span class="filter-icon">🌟</span>
-                                <span class="filter-title">TREBLE BOOST</span>
-                                <span class="filter-key">F7</span>
-                            </div>
-                            <p class="filter-desc">Sube los agudos. Más brillo y presencia.</p>
-                        </div>
-                        
-                        <!-- 8: ALL PASS -->
-                        <div class="filter-card filter-card-creative" data-filter="8">
-                            <div class="filter-header">
-                                <span class="filter-icon">🌀</span>
-                                <span class="filter-title">PHASE</span>
-                                <span class="filter-key">F9</span>
-                            </div>
-                            <p class="filter-desc">Cambia la fase. Efecto phaser sutil.</p>
-                        </div>
-                        
-
+                    <div class="ufx-section-head">
+                        <span class="ufx-section-icon">🎚</span>
+                        <span class="ufx-section-title">FILTER LIBRARY</span>
+                        <span class="ufx-section-hint">Selecciona un track, luego elige filtro (F1-F10)</span>
                     </div>
-                </div>
+                    <div class="ufx-filters-grid">
+                        <div class="ufx-fcard ufx-fcard--off" data-filter="0">
+                            <span class="ufx-fcard-icon">🚫</span>
+                            <span class="ufx-fcard-name">OFF</span>
+                            <span class="ufx-fcard-key">F1</span>
+                        </div>
+                        <div class="ufx-fcard ufx-fcard--warm" data-filter="1">
+                            <span class="ufx-fcard-icon">🔥</span>
+                            <span class="ufx-fcard-name">LOW PASS</span>
+                            <span class="ufx-fcard-key">F2</span>
+                        </div>
+                        <div class="ufx-fcard ufx-fcard--bright" data-filter="2">
+                            <span class="ufx-fcard-icon">✨</span>
+                            <span class="ufx-fcard-name">HIGH PASS</span>
+                            <span class="ufx-fcard-key">F3</span>
+                        </div>
+                        <div class="ufx-fcard ufx-fcard--acid" data-filter="9">
+                            <span class="ufx-fcard-icon">⚡</span>
+                            <span class="ufx-fcard-name">RESONANT</span>
+                            <span class="ufx-fcard-key">F10</span>
+                        </div>
+                        <div class="ufx-fcard ufx-fcard--creative" data-filter="3">
+                            <span class="ufx-fcard-icon">📞</span>
+                            <span class="ufx-fcard-name">BAND PASS</span>
+                            <span class="ufx-fcard-key">F4</span>
+                        </div>
+                        <div class="ufx-fcard ufx-fcard--boost" data-filter="7">
+                            <span class="ufx-fcard-icon">⛰️</span>
+                            <span class="ufx-fcard-name">PEAK BOOST</span>
+                            <span class="ufx-fcard-key">F8</span>
+                        </div>
+                        <div class="ufx-fcard ufx-fcard--cut" data-filter="4">
+                            <span class="ufx-fcard-icon">🕳️</span>
+                            <span class="ufx-fcard-name">NOTCH CUT</span>
+                            <span class="ufx-fcard-key">F5</span>
+                        </div>
+                        <div class="ufx-fcard ufx-fcard--boost" data-filter="5">
+                            <span class="ufx-fcard-icon">🔊</span>
+                            <span class="ufx-fcard-name">BASS BOOST</span>
+                            <span class="ufx-fcard-key">F6</span>
+                        </div>
+                        <div class="ufx-fcard ufx-fcard--bright" data-filter="6">
+                            <span class="ufx-fcard-icon">🌟</span>
+                            <span class="ufx-fcard-name">TREBLE BOOST</span>
+                            <span class="ufx-fcard-key">F7</span>
+                        </div>
+                        <div class="ufx-fcard ufx-fcard--creative" data-filter="8">
+                            <span class="ufx-fcard-icon">🌀</span>
+                            <span class="ufx-fcard-name">PHASE</span>
+                            <span class="ufx-fcard-key">F9</span>
+                        </div>
+                    </div>
+
+                    <!-- Active Filters Display -->
+                    <div class="ufx-active-section">
+                        <div class="ufx-active-group">
+                            <span class="ufx-active-label">TRACKS</span>
+                            <div id="activeTrackFilters" class="ufx-active-list">
+                                <span class="no-filters">Sin filtros</span>
+                            </div>
+                        </div>
+                        <div class="ufx-active-group">
+                            <span class="ufx-active-label">PADS</span>
+                            <div id="activePadFilters" class="ufx-active-list">
+                                <span class="no-filters">Sin filtros</span>
+                            </div>
+                        </div>
+                    </div>
                 </div><!-- end fxtab-filters -->
-                
-                <!-- SUB-TAB: Master FX -->
-                <div class="fx-subtab-content active" id="fxtab-masterFx">
-                
-                <!-- ============= TRACK FX Section ============= -->
-                <div class="track-fx-section">
-                    <h3>🎛️ TRACK FX <span class="fx-subtitle">Combinables en tiempo real</span></h3>
-                    <p class="track-fx-desc">Selecciona un track y activa/desactiva efectos. Se pueden combinar varios FX simultáneamente.</p>
-                    
-                    <!-- Track Selector -->
-                    <div class="track-fx-selector" id="trackFxSelector">
-                        <button class="track-fx-btn active" data-track="0">BD</button>
-                        <button class="track-fx-btn" data-track="1">SD</button>
-                        <button class="track-fx-btn" data-track="2">CH</button>
-                        <button class="track-fx-btn" data-track="3">OH</button>
-                        <button class="track-fx-btn" data-track="4">CY</button>
-                        <button class="track-fx-btn" data-track="5">CP</button>
-                        <button class="track-fx-btn" data-track="6">RS</button>
-                        <button class="track-fx-btn" data-track="7">CB</button>
-                        <button class="track-fx-btn" data-track="8">LT</button>
-                        <button class="track-fx-btn" data-track="9">MT</button>
-                        <button class="track-fx-btn" data-track="10">HT</button>
-                        <button class="track-fx-btn" data-track="11">MA</button>
-                        <button class="track-fx-btn" data-track="12">CL</button>
-                        <button class="track-fx-btn" data-track="13">HC</button>
-                        <button class="track-fx-btn" data-track="14">MC</button>
-                        <button class="track-fx-btn" data-track="15">LC</button>
-                    </div>
-                    
-                    <!-- FX Toggle Cards -->
-                    <div class="track-fx-cards">
-                        <!-- REVERSE -->
-                        <div class="track-fx-card" id="fxCardReverse">
-                            <div class="track-fx-card-header">
-                                <span class="track-fx-icon">⏪</span>
-                                <span class="track-fx-name">REVERSE</span>
-                                <label class="fx-toggle">
-                                    <input type="checkbox" id="fxReverseToggle" onchange="toggleTrackFx('reverse', this.checked)">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                            <p class="track-fx-card-desc">Invierte el sample. Reproduce al revés para buildups y efectos creativos.</p>
-                        </div>
-                        
-                        <!-- PITCH SHIFT -->
-                        <div class="track-fx-card" id="fxCardPitch">
-                            <div class="track-fx-card-header">
-                                <span class="track-fx-icon">🎵</span>
-                                <span class="track-fx-name">PITCH SHIFT</span>
-                                <label class="fx-toggle">
-                                    <input type="checkbox" id="fxPitchToggle" onchange="toggleTrackFx('pitch', this.checked)">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                            <p class="track-fx-card-desc">Cambia la velocidad/tono del sample.</p>
-                            <div class="track-fx-controls">
-                                <div class="pitch-presets">
-                                    <button class="pitch-preset-btn" onclick="setTrackFxPitch(0.25)">¼×</button>
-                                    <button class="pitch-preset-btn" onclick="setTrackFxPitch(0.5)">½×</button>
-                                    <button class="pitch-preset-btn" onclick="setTrackFxPitch(0.75)">¾×</button>
-                                    <button class="pitch-preset-btn active" onclick="setTrackFxPitch(1.0)">1×</button>
-                                    <button class="pitch-preset-btn" onclick="setTrackFxPitch(1.5)">1.5×</button>
-                                    <button class="pitch-preset-btn" onclick="setTrackFxPitch(2.0)">2×</button>
-                                    <button class="pitch-preset-btn" onclick="setTrackFxPitch(3.0)">3×</button>
-                                </div>
-                                <div class="fx-control">
-                                    <label>Speed <span id="fxPitchValue">1.00</span>×</label>
-                                    <input type="range" id="fxPitchSlider" min="25" max="400" value="100" class="fx-slider" oninput="setTrackFxPitch(this.value/100)">
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- STUTTER -->
-                        <div class="track-fx-card" id="fxCardStutter">
-                            <div class="track-fx-card-header">
-                                <span class="track-fx-icon">🔁</span>
-                                <span class="track-fx-name">STUTTER</span>
-                                <label class="fx-toggle">
-                                    <input type="checkbox" id="fxStutterToggle" onchange="toggleTrackFx('stutter', this.checked)">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                            <p class="track-fx-card-desc">Repite rápidamente el inicio del sample. Efecto glitch/IDM.</p>
-                            <div class="track-fx-controls">
-                                <div class="pitch-presets">
-                                    <button class="pitch-preset-btn" onclick="setTrackFxStutter(30)">30ms</button>
-                                    <button class="pitch-preset-btn" onclick="setTrackFxStutter(50)">50ms</button>
-                                    <button class="pitch-preset-btn active" onclick="setTrackFxStutter(100)">100ms</button>
-                                    <button class="pitch-preset-btn" onclick="setTrackFxStutter(150)">150ms</button>
-                                    <button class="pitch-preset-btn" onclick="setTrackFxStutter(200)">200ms</button>
-                                </div>
-                                <div class="fx-control">
-                                    <label>Interval <span id="fxStutterValue">100</span>ms</label>
-                                    <input type="range" id="fxStutterSlider" min="10" max="500" value="100" class="fx-slider" oninput="setTrackFxStutter(parseInt(this.value))">
-                                </div>
-                            </div>
-                        </div>
-                        
 
+                <!-- ═══════════════ TAB 2: EFFECTS ═══════════════ -->
+                <div class="fx-subtab-content active" id="fxtab-masterFx">
+
+                    <!-- ── TRACK FX ── -->
+                    <div class="ufx-section-head">
+                        <span class="ufx-section-icon">🎛</span>
+                        <span class="ufx-section-title">TRACK FX</span>
+                        <span class="ufx-section-hint">Per-track: Reverse, Pitch, Stutter</span>
                     </div>
-                    
-                    <!-- Active FX Status Grid -->
-                    <div class="track-fx-status" id="trackFxStatus">
-                        <!-- Dynamically populated -->
+
+                    <div class="ufx-track-selector" id="trackFxSelector">
+                        <button class="ufx-tsel active" data-track="0">BD</button>
+                        <button class="ufx-tsel" data-track="1">SD</button>
+                        <button class="ufx-tsel" data-track="2">CH</button>
+                        <button class="ufx-tsel" data-track="3">OH</button>
+                        <button class="ufx-tsel" data-track="4">CY</button>
+                        <button class="ufx-tsel" data-track="5">CP</button>
+                        <button class="ufx-tsel" data-track="6">RS</button>
+                        <button class="ufx-tsel" data-track="7">CB</button>
+                        <button class="ufx-tsel" data-track="8">LT</button>
+                        <button class="ufx-tsel" data-track="9">MT</button>
+                        <button class="ufx-tsel" data-track="10">HT</button>
+                        <button class="ufx-tsel" data-track="11">MA</button>
+                        <button class="ufx-tsel" data-track="12">CL</button>
+                        <button class="ufx-tsel" data-track="13">HC</button>
+                        <button class="ufx-tsel" data-track="14">MC</button>
+                        <button class="ufx-tsel" data-track="15">LC</button>
                     </div>
-                </div>
-                
-                <!-- ============= MASTER EFFECTS Section ============= -->
-                <div class="master-fx-section">
-                    <h3>🎚️ MASTER EFFECTS <span class="fx-subtitle">(inspired by torvalds/AudioNoise)</span></h3>
-                    
-                    <!-- Distortion (improved with modes) -->
-                    <div class="fx-card fx-card-distortion">
-                        <div class="fx-header">
-                            <span class="fx-icon">🎸</span>
-                            <span class="fx-title">DISTORTION</span>
-                        </div>
-                        <div class="fx-controls">
-                            <div class="fx-control">
-                                <label>Mode</label>
-                                <select id="distortionMode" class="fx-select">
-                                    <option value="0" selected>Soft Clip</option>
-                                    <option value="1">Hard Clip</option>
-                                    <option value="2">Tube</option>
-                                    <option value="3">Fuzz</option>
-                                </select>
-                            </div>
-                            <div class="fx-control">
-                                <label>Drive <span id="distortionValue">0</span>%</label>
-                                <input type="range" id="distortion" min="0" max="100" value="0" class="fx-slider">
+
+                    <div class="ufx-cards-row">
+                        <!-- REVERSE -->
+                        <div class="ufx-card" id="fxCardReverse" data-accent="#e94560">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">⏪</span>
+                                <span class="ufx-card-title">REVERSE</span>
+                                <label class="ufx-toggle"><input type="checkbox" id="fxReverseToggle" onchange="toggleTrackFx('reverse', this.checked)"><span class="ufx-toggle-rail"></span></label>
                             </div>
                         </div>
-                    </div>
-                    
-                    <!-- Delay/Echo -->
-                    <div class="fx-card fx-card-delay">
-                        <div class="fx-header">
-                            <span class="fx-icon">🔊</span>
-                            <span class="fx-title">DELAY / ECHO</span>
-                            <label class="fx-toggle">
-                                <input type="checkbox" id="delayActive">
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                        <div class="fx-controls">
-                            <div class="fx-control">
-                                <label>Time <span id="delayTimeValue">250</span>ms</label>
-                                <input type="range" id="delayTime" min="10" max="750" value="250" class="fx-slider">
+                        <!-- PITCH SHIFT -->
+                        <div class="ufx-card" id="fxCardPitch" data-accent="#a855f7">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">🎵</span>
+                                <span class="ufx-card-title">PITCH</span>
+                                <label class="ufx-toggle"><input type="checkbox" id="fxPitchToggle" onchange="toggleTrackFx('pitch', this.checked)"><span class="ufx-toggle-rail"></span></label>
                             </div>
-                            <div class="fx-control">
-                                <label>Feedback <span id="delayFeedbackValue">30</span>%</label>
-                                <input type="range" id="delayFeedback" min="0" max="95" value="30" class="fx-slider">
-                            </div>
-                            <div class="fx-control">
-                                <label>Mix <span id="delayMixValue">30</span>%</label>
-                                <input type="range" id="delayMix" min="0" max="100" value="30" class="fx-slider">
+                            <div class="ufx-card-body">
+                                <div class="ufx-presets">
+                                    <button class="ufx-preset-btn" onclick="setTrackFxPitch(0.5)">½×</button>
+                                    <button class="ufx-preset-btn" onclick="setTrackFxPitch(0.75)">¾×</button>
+                                    <button class="ufx-preset-btn active" onclick="setTrackFxPitch(1.0)">1×</button>
+                                    <button class="ufx-preset-btn" onclick="setTrackFxPitch(1.5)">1.5×</button>
+                                    <button class="ufx-preset-btn" onclick="setTrackFxPitch(2.0)">2×</button>
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Speed <span id="fxPitchValue">1.00</span>×</label>
+                                    <input type="range" id="fxPitchSlider" min="25" max="400" value="100" class="ufx-slider" oninput="setTrackFxPitch(this.value/100)">
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    
-                    <!-- Phaser -->
-                    <div class="fx-card fx-card-phaser">
-                        <div class="fx-header">
-                            <span class="fx-icon">🌀</span>
-                            <span class="fx-title">PHASER</span>
-                            <label class="fx-toggle">
-                                <input type="checkbox" id="phaserActive">
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                        <div class="fx-controls">
-                            <div class="fx-control">
-                                <label>Rate <span id="phaserRateValue">50</span></label>
-                                <input type="range" id="phaserRate" min="5" max="500" value="50" class="fx-slider">
+                        <!-- STUTTER -->
+                        <div class="ufx-card" id="fxCardStutter" data-accent="#06b6d4">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">🔁</span>
+                                <span class="ufx-card-title">STUTTER</span>
+                                <label class="ufx-toggle"><input type="checkbox" id="fxStutterToggle" onchange="toggleTrackFx('stutter', this.checked)"><span class="ufx-toggle-rail"></span></label>
                             </div>
-                            <div class="fx-control">
-                                <label>Depth <span id="phaserDepthValue">70</span>%</label>
-                                <input type="range" id="phaserDepth" min="0" max="100" value="70" class="fx-slider">
-                            </div>
-                            <div class="fx-control">
-                                <label>Feedback <span id="phaserFeedbackValue">30</span>%</label>
-                                <input type="range" id="phaserFeedback" min="-90" max="90" value="30" class="fx-slider">
+                            <div class="ufx-card-body">
+                                <div class="ufx-presets">
+                                    <button class="ufx-preset-btn" onclick="setTrackFxStutter(30)">30ms</button>
+                                    <button class="ufx-preset-btn" onclick="setTrackFxStutter(50)">50ms</button>
+                                    <button class="ufx-preset-btn active" onclick="setTrackFxStutter(100)">100ms</button>
+                                    <button class="ufx-preset-btn" onclick="setTrackFxStutter(150)">150ms</button>
+                                    <button class="ufx-preset-btn" onclick="setTrackFxStutter(200)">200ms</button>
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Interval <span id="fxStutterValue">100</span>ms</label>
+                                    <input type="range" id="fxStutterSlider" min="10" max="500" value="100" class="ufx-slider" oninput="setTrackFxStutter(parseInt(this.value))">
+                                </div>
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Flanger -->
-                    <div class="fx-card fx-card-flanger">
-                        <div class="fx-header">
-                            <span class="fx-icon">🌊</span>
-                            <span class="fx-title">FLANGER</span>
-                            <label class="fx-toggle">
-                                <input type="checkbox" id="flangerActive">
-                                <span class="toggle-slider"></span>
-                            </label>
+                    <div class="track-fx-status" id="trackFxStatus"></div>
+
+                    <!-- ── MASTER EFFECTS ── -->
+                    <div class="ufx-section-head" style="margin-top:24px">
+                        <span class="ufx-section-icon">🎚</span>
+                        <span class="ufx-section-title">MASTER EFFECTS</span>
+                    </div>
+
+                    <div class="ufx-cards-grid">
+                        <!-- DISTORTION -->
+                        <div class="ufx-card" data-accent="#e94560">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">🎸</span>
+                                <span class="ufx-card-title">DISTORTION</span>
+                            </div>
+                            <div class="ufx-card-body">
+                                <div class="ufx-param">
+                                    <label>Mode</label>
+                                    <select id="distortionMode" class="ufx-select">
+                                        <option value="0" selected>Soft Clip</option>
+                                        <option value="1">Hard Clip</option>
+                                        <option value="2">Tube</option>
+                                        <option value="3">Fuzz</option>
+                                    </select>
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Drive <span id="distortionValue">0</span>%</label>
+                                    <input type="range" id="distortion" min="0" max="100" value="0" class="ufx-slider">
+                                </div>
+                            </div>
                         </div>
-                        <div class="fx-controls">
-                            <div class="fx-control">
-                                <label>Rate <span id="flangerRateValue">30</span></label>
-                                <input type="range" id="flangerRate" min="5" max="500" value="30" class="fx-slider">
+                        <!-- DELAY -->
+                        <div class="ufx-card" data-accent="#00d4ff">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">🔊</span>
+                                <span class="ufx-card-title">DELAY / ECHO</span>
+                                <label class="ufx-toggle"><input type="checkbox" id="delayActive"><span class="ufx-toggle-rail"></span></label>
                             </div>
-                            <div class="fx-control">
-                                <label>Depth <span id="flangerDepthValue">50</span>%</label>
-                                <input type="range" id="flangerDepth" min="0" max="100" value="50" class="fx-slider">
+                            <div class="ufx-card-body">
+                                <div class="ufx-param">
+                                    <label>Time <span id="delayTimeValue">250</span>ms</label>
+                                    <input type="range" id="delayTime" min="10" max="750" value="250" class="ufx-slider">
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Feedback <span id="delayFeedbackValue">30</span>%</label>
+                                    <input type="range" id="delayFeedback" min="0" max="95" value="30" class="ufx-slider">
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Mix <span id="delayMixValue">30</span>%</label>
+                                    <input type="range" id="delayMix" min="0" max="100" value="30" class="ufx-slider">
+                                </div>
                             </div>
-                            <div class="fx-control">
-                                <label>Feedback <span id="flangerFeedbackValue">40</span>%</label>
-                                <input type="range" id="flangerFeedback" min="-90" max="90" value="40" class="fx-slider">
+                        </div>
+                        <!-- AUTO-WAH -->
+                        <div class="ufx-card" data-accent="#f59e0b">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">🎸</span>
+                                <span class="ufx-card-title">AUTO-WAH</span>
+                                <label class="ufx-toggle"><input type="checkbox" id="autoWahActive"><span class="ufx-toggle-rail"></span></label>
                             </div>
-                            <div class="fx-control">
-                                <label>Mix <span id="flangerMixValue">50</span>%</label>
-                                <input type="range" id="flangerMix" min="0" max="100" value="50" class="fx-slider">
+                            <div class="ufx-card-body">
+                                <div class="ufx-param">
+                                    <label>Sensitivity <span id="autoWahLevelValue">50</span>%</label>
+                                    <input type="range" id="autoWahLevel" min="0" max="100" value="50" class="ufx-slider">
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Mix <span id="autoWahMixValue">50</span>%</label>
+                                    <input type="range" id="autoWahMix" min="0" max="100" value="50" class="ufx-slider">
+                                </div>
+                            </div>
+                        </div>
+                        <!-- PHASER -->
+                        <div class="ufx-card" data-accent="#a855f7">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">🌀</span>
+                                <span class="ufx-card-title">PHASER</span>
+                                <label class="ufx-toggle"><input type="checkbox" id="phaserActive"><span class="ufx-toggle-rail"></span></label>
+                            </div>
+                            <div class="ufx-card-body">
+                                <div class="ufx-param">
+                                    <label>Rate <span id="phaserRateValue">50</span></label>
+                                    <input type="range" id="phaserRate" min="5" max="500" value="50" class="ufx-slider">
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Depth <span id="phaserDepthValue">70</span>%</label>
+                                    <input type="range" id="phaserDepth" min="0" max="100" value="70" class="ufx-slider">
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Feedback <span id="phaserFeedbackValue">30</span>%</label>
+                                    <input type="range" id="phaserFeedback" min="-90" max="90" value="30" class="ufx-slider">
+                                </div>
+                            </div>
+                        </div>
+                        <!-- FLANGER -->
+                        <div class="ufx-card" data-accent="#06b6d4">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">🌊</span>
+                                <span class="ufx-card-title">FLANGER</span>
+                                <label class="ufx-toggle"><input type="checkbox" id="flangerActive"><span class="ufx-toggle-rail"></span></label>
+                            </div>
+                            <div class="ufx-card-body">
+                                <div class="ufx-param">
+                                    <label>Rate <span id="flangerRateValue">30</span></label>
+                                    <input type="range" id="flangerRate" min="5" max="500" value="30" class="ufx-slider">
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Depth <span id="flangerDepthValue">50</span>%</label>
+                                    <input type="range" id="flangerDepth" min="0" max="100" value="50" class="ufx-slider">
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Feedback <span id="flangerFeedbackValue">40</span>%</label>
+                                    <input type="range" id="flangerFeedback" min="-90" max="90" value="40" class="ufx-slider">
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Mix <span id="flangerMixValue">50</span>%</label>
+                                    <input type="range" id="flangerMix" min="0" max="100" value="50" class="ufx-slider">
+                                </div>
+                            </div>
+                        </div>
+                        <!-- CHORUS STEREO -->
+                        <div class="ufx-card" data-accent="#8b5cf6">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">🎵</span>
+                                <span class="ufx-card-title">CHORUS</span>
+                            </div>
+                            <div class="ufx-card-body">
+                                <div class="ufx-param">
+                                    <label>Mode</label>
+                                    <select id="chorusStereo" class="ufx-select">
+                                        <option value="0">OFF</option>
+                                        <option value="1">Light</option>
+                                        <option value="2">Medium</option>
+                                        <option value="3">Deep</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- DELAY STEREO -->
+                        <div class="ufx-card" data-accent="#0ea5e9">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">🔉</span>
+                                <span class="ufx-card-title">DELAY STEREO</span>
+                            </div>
+                            <div class="ufx-card-body">
+                                <div class="ufx-param">
+                                    <label>Mode</label>
+                                    <select id="delayStereo" class="ufx-select">
+                                        <option value="0">OFF</option>
+                                        <option value="1">Ping Pong</option>
+                                        <option value="2">Wide</option>
+                                        <option value="3">Cross</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- EARLY REFLECTIONS -->
+                        <div class="ufx-card" data-accent="#0ea5e9">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">🏛️</span>
+                                <span class="ufx-card-title">EARLY REFLECTIONS</span>
+                                <label class="ufx-toggle"><input type="checkbox" id="earlyRefActive"><span class="ufx-toggle-rail"></span></label>
+                            </div>
+                            <div class="ufx-card-body">
+                                <div class="ufx-param">
+                                    <label>Mix <span id="earlyRefMixValue">30</span>%</label>
+                                    <input type="range" id="earlyRefMix" min="0" max="100" value="30" class="ufx-slider">
+                                </div>
+                            </div>
+                        </div>
+                        <!-- COMPRESSOR -->
+                        <div class="ufx-card" data-accent="#f59e0b">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">📊</span>
+                                <span class="ufx-card-title">COMPRESSOR</span>
+                                <label class="ufx-toggle"><input type="checkbox" id="compressorActive"><span class="ufx-toggle-rail"></span></label>
+                            </div>
+                            <div class="ufx-card-body">
+                                <div class="ufx-param">
+                                    <label>Threshold <span id="compressorThresholdValue">-12</span>dB</label>
+                                    <input type="range" id="compressorThreshold" min="-60" max="0" value="-12" class="ufx-slider">
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Ratio <span id="compressorRatioValue">4</span>:1</label>
+                                    <input type="range" id="compressorRatio" min="1" max="20" value="4" class="ufx-slider">
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Attack <span id="compressorAttackValue">10</span>ms</label>
+                                    <input type="range" id="compressorAttack" min="1" max="100" value="10" class="ufx-slider">
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Release <span id="compressorReleaseValue">100</span>ms</label>
+                                    <input type="range" id="compressorRelease" min="10" max="1000" value="100" step="10" class="ufx-slider">
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Makeup <span id="compressorMakeupValue">0</span>dB</label>
+                                    <input type="range" id="compressorMakeup" min="0" max="24" value="0" class="ufx-slider">
+                                </div>
+                            </div>
+                        </div>
+                        <!-- LO-FI -->
+                        <div class="ufx-card" data-accent="#6b7280">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">📼</span>
+                                <span class="ufx-card-title">LO-FI</span>
+                                <label class="ufx-toggle"><input type="checkbox" id="lofiActive"><span class="ufx-toggle-rail"></span></label>
+                            </div>
+                            <div class="ufx-card-body">
+                                <div class="ufx-param">
+                                    <label>Bit Crush <span id="bitCrushValue">16</span> bits</label>
+                                    <input type="range" id="bitCrush" min="4" max="16" value="16" class="ufx-slider">
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Sample Rate <span id="sampleRateValue">44100</span> Hz</label>
+                                    <input type="range" id="sampleRate" min="8000" max="44100" value="44100" step="100" class="ufx-slider">
+                                </div>
+                            </div>
+                        </div>
+                        <!-- STEREO WIDTH -->
+                        <div class="ufx-card" data-accent="#00d4ff">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">🔊</span>
+                                <span class="ufx-card-title">STEREO WIDTH</span>
+                            </div>
+                            <div class="ufx-card-body">
+                                <div class="ufx-param">
+                                    <label>Width <span id="stereoWidthValue">100</span>%</label>
+                                    <input type="range" id="stereoWidth" min="0" max="200" value="100" class="ufx-slider">
+                                </div>
+                            </div>
+                        </div>
+                        <!-- TAPE STOP -->
+                        <div class="ufx-card" data-accent="#a855f7">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">📼</span>
+                                <span class="ufx-card-title">TAPE STOP</span>
+                            </div>
+                            <div class="ufx-card-body">
+                                <div class="ufx-param">
+                                    <label>Speed <span id="tapeStopValue">50</span>%</label>
+                                    <input type="range" id="tapeStop" min="0" max="100" value="50" class="ufx-slider">
+                                </div>
+                            </div>
+                        </div>
+                        <!-- BEAT REPEAT -->
+                        <div class="ufx-card" data-accent="#ef4444">
+                            <div class="ufx-card-head">
+                                <span class="ufx-card-icon">🔁</span>
+                                <span class="ufx-card-title">BEAT REPEAT</span>
+                            </div>
+                            <div class="ufx-card-body">
+                                <div class="ufx-param">
+                                    <label>Division</label>
+                                    <select id="beatRepeat" class="ufx-select">
+                                        <option value="0">OFF</option>
+                                        <option value="1">1/2</option>
+                                        <option value="2">1/4</option>
+                                        <option value="3">1/8</option>
+                                        <option value="4">1/16</option>
+                                        <option value="5">1/32</option>
+                                        <option value="6">1/64</option>
+                                        <option value="7">Triplet</option>
+                                    </select>
+                                </div>
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Compressor/Limiter -->
-                    <div class="fx-card fx-card-compressor">
-                        <div class="fx-header">
-                            <span class="fx-icon">📊</span>
-                            <span class="fx-title">COMPRESSOR</span>
-                            <label class="fx-toggle">
-                                <input type="checkbox" id="compressorActive">
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                        <div class="fx-controls">
-                            <div class="fx-control">
-                                <label>Threshold <span id="compressorThresholdValue">-12</span>dB</label>
-                                <input type="range" id="compressorThreshold" min="-60" max="0" value="-12" class="fx-slider">
-                            </div>
-                            <div class="fx-control">
-                                <label>Ratio <span id="compressorRatioValue">4</span>:1</label>
-                                <input type="range" id="compressorRatio" min="1" max="20" value="4" class="fx-slider">
-                            </div>
-                            <div class="fx-control">
-                                <label>Attack <span id="compressorAttackValue">10</span>ms</label>
-                                <input type="range" id="compressorAttack" min="1" max="100" value="10" class="fx-slider">
-                            </div>
-                            <div class="fx-control">
-                                <label>Release <span id="compressorReleaseValue">100</span>ms</label>
-                                <input type="range" id="compressorRelease" min="10" max="1000" value="100" step="10" class="fx-slider">
-                            </div>
-                            <div class="fx-control">
-                                <label>Makeup <span id="compressorMakeupValue">0</span>dB</label>
-                                <input type="range" id="compressorMakeup" min="0" max="24" value="0" class="fx-slider">
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Lo-Fi Section -->
-                    <div class="fx-card fx-card-lofi">
-                        <div class="fx-header">
-                            <span class="fx-icon">📼</span>
-                            <span class="fx-title">LO-FI</span>
-                            <label class="fx-toggle">
-                                <input type="checkbox" id="lofiActive">
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                        <div class="fx-controls">
-                            <div class="fx-control">
-                                <label>Bit Crush <span id="bitCrushValue">16</span> bits</label>
-                                <input type="range" id="bitCrush" min="4" max="16" value="16" class="fx-slider">
-                            </div>
-                            <div class="fx-control">
-                                <label>Sample Rate <span id="sampleRateValue">44100</span> Hz</label>
-                                <input type="range" id="sampleRate" min="8000" max="44100" value="44100" step="100" class="fx-slider">
-                            </div>
-                        </div>
-                    </div>
-                </div>
                 </div><!-- end fxtab-masterFx -->
-                
-                <!-- Active Filters Display -->
-                <div class="active-filters-section">
-                    <h3>✨ FILTROS ACTIVOS</h3>
-                    <div class="active-filters-display">
-                        <div class="active-filter-group">
-                            <h4>🎵 TRACKS (F1-F10)</h4>
-                            <div id="activeTrackFilters" class="active-filter-list">
-                                <span class="no-filters">Ningún filtro aplicado a tracks</span>
-                            </div>
+
+                <!-- ═══════════════ TAB 3: ROUTING ═══════════════ -->
+                <div class="fx-subtab-content" id="fxtab-newFx">
+
+                    <!-- ── CHOKE GROUPS ── -->
+                    <div class="ufx-section-head">
+                        <span class="ufx-section-icon">✋</span>
+                        <span class="ufx-section-title">CHOKE GROUPS</span>
+                        <span class="ufx-section-hint">Tracks en el mismo grupo se silencian entre sí (ej. CH+OH)</span>
+                    </div>
+                    <div class="ufx-card" data-accent="#ec4899" style="margin-bottom:20px">
+                        <div class="ufx-card-body" id="chokeGroupControls">
+                            <!-- Generated dynamically by app.js -->
                         </div>
-                        <div class="active-filter-group">
-                            <h4>🎹 PADS (Shift+F1-F10)</h4>
-                            <div id="activePadFilters" class="active-filter-list">
-                                <span class="no-filters">Ningún filtro aplicado a pads</span>
+                    </div>
+
+                    <!-- ── TRACK LFO ── -->
+                    <div class="ufx-section-head">
+                        <span class="ufx-section-icon">〰️</span>
+                        <span class="ufx-section-title">TRACK LFO</span>
+                        <span class="ufx-section-hint">Modula un parámetro automáticamente por track</span>
+                    </div>
+                    <div class="ufx-card" data-accent="#14b8a6" style="margin-bottom:20px">
+                        <div class="ufx-card-body">
+                            <div class="ufx-lfo-grid">
+                                <div class="ufx-param">
+                                    <label>Track</label>
+                                    <select id="lfoTrack" class="ufx-select">
+                                        <option value="0">1-BD</option><option value="1">2-SD</option>
+                                        <option value="2">3-CH</option><option value="3">4-OH</option>
+                                        <option value="4">5-CY</option><option value="5">6-CP</option>
+                                        <option value="6">7-RS</option><option value="7">8-CB</option>
+                                        <option value="8">9-LT</option><option value="9">10-MT</option>
+                                        <option value="10">11-HT</option><option value="11">12-MA</option>
+                                        <option value="12">13-CL</option><option value="13">14-HC</option>
+                                        <option value="14">15-MC</option><option value="15">16-LC</option>
+                                    </select>
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Wave</label>
+                                    <select id="lfoWave" class="ufx-select">
+                                        <option value="0">Sine</option><option value="1">Triangle</option>
+                                        <option value="2">Square</option><option value="3">Saw Up</option>
+                                        <option value="4">Saw Down</option><option value="5">Random</option>
+                                    </select>
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Target</label>
+                                    <select id="lfoTarget" class="ufx-select">
+                                        <option value="0">Gain</option><option value="1">Pan</option>
+                                        <option value="2">Filter Cutoff</option><option value="3">Pitch</option>
+                                        <option value="4">Echo Feedback</option><option value="5">Echo Time</option>
+                                        <option value="6">Dist Drive</option><option value="7">BitCrush</option>
+                                        <option value="8">Reverb Send</option><option value="9">Delay Send</option>
+                                    </select>
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Rate <span id="lfoRateValue">100</span> cHz</label>
+                                    <input type="range" id="lfoRate" min="1" max="2000" value="100" class="ufx-slider">
+                                </div>
+                                <div class="ufx-param">
+                                    <label>Depth <span id="lfoDepthValue">500</span></label>
+                                    <input type="range" id="lfoDepth" min="0" max="1000" value="500" class="ufx-slider">
+                                </div>
+                                <div class="ufx-param" style="display:flex;align-items:flex-end">
+                                    <button class="ufx-action-btn" id="lfoApplyBtn">APPLY LFO</button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-                
-                <!-- Quick Reference -->
-                <div class="filter-reference">
-                    <h4>⌨️ GUÍA RÁPIDA</h4>
-                    <div class="reference-grid">
-                        <div class="reference-item">
-                            <strong>Filtro a Track:</strong>
-                            <p>1. Click en nombre track (BD, SD, etc.)<br>2. Presiona F1-F10</p>
-                        </div>
-                        <div class="reference-item">
-                            <strong>Filtro a Pad:</strong>
-                            <p>1. Click en pad en sección LIVE<br>2. Presiona Shift+F1-F10</p>
-                        </div>
-                        <div class="reference-item">
-                            <strong>Presets Rápidos:</strong>
-                            <p>Click en botones de presets<br>para aplicar frecuencias típicas</p>
-                        </div>
-                        <div class="reference-item">
-                            <strong>Ver Activos:</strong>
-                            <p>Los filtros activos se muestran<br>con badges en pads y tracks</p>
+
+                    <!-- ── SONG CHAIN ── -->
+                    <div class="ufx-section-head">
+                        <span class="ufx-section-icon">🔗</span>
+                        <span class="ufx-section-title">SONG CHAIN</span>
+                        <span class="ufx-section-hint">Encadena patrones: pattern:repeats</span>
+                    </div>
+                    <div class="ufx-card" data-accent="#f97316">
+                        <div class="ufx-card-body">
+                            <div class="ufx-param" style="margin-bottom:10px">
+                                <label>Chain</label>
+                                <input type="text" id="songChainInput" class="ufx-text-input" placeholder="0:4, 1:2, 2:4, 3:1">
+                            </div>
+                            <div class="ufx-btn-row">
+                                <button class="ufx-action-btn" id="songChainUploadBtn">UPLOAD</button>
+                                <button class="ufx-action-btn ufx-action-btn--play" id="songChainPlayBtn">▶ PLAY</button>
+                                <button class="ufx-action-btn ufx-action-btn--stop" id="songChainStopBtn">■ STOP</button>
+                            </div>
                         </div>
                     </div>
-                </div>
+                </div><!-- end fxtab-newFx -->
             </section>
         </div>
 

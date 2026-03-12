@@ -3,11 +3,13 @@
 #include <ArduinoJson.h>
 #include <Adafruit_NeoPixel.h>
 #include <esp_task_wdt.h>
+#include <esp_system.h>
 #include "SPIMaster.h"
 #include "SampleManager.h"
 #include "Sequencer.h"
 #include "WebInterface.h"
 #include "MIDIController.h"
+#include "SysLog.h"
 #if ENABLE_PHYSICAL_BUTTONS
 #include "PhysControlButtons.h"
 #endif
@@ -25,14 +27,15 @@
 // --- WiFi: Red Doméstica (modo STA) ---
 // Pon aquí tu SSID y contraseña WiFi de casa.
 // Si se deja vacío (""), usará solo modo AP (red propia RED808).
-#define HOME_WIFI_SSID     ""         // vacío = solo modo AP (RED808)
-#define HOME_WIFI_PASS     ""   
+#define HOME_WIFI_SSID     "MIWIFI_2G_yU2f"       // vacío = solo modo AP (RED808)
+#define HOME_WIFI_PASS     "M6LR7zHk"   
 
 #define HOME_WIFI_TIMEOUT  12000      // ms para intentar conectar (12s)
 
 // AP fallback (siempre disponible si STA falla)
 #define AP_SSID     "RED808"
 #define AP_PASSWORD "red808esp32"
+
 
 // Daisy-first workflow: no precarga de samples locales en boot de ESP32.
 // Los samples se gestionan desde SD en Daisy vía comandos SD_*.
@@ -64,8 +67,9 @@ bool gLimiterActive  = true;
 bool gDistActive     = false;
 #endif
 // Track synth engine map for sequencer tracks:
-// -1 = sample, 0 = 808, 1 = 909, 2 = 505, 3 = 303
-int8_t gTrackSynthEngine[16] = {
+// -1 = sample, 0 = 808, 1 = 909, 2 = 505, 3 = 303, 4=WT, 5=SH101, 6=FM
+// volatile: written from Core0 (WS handler), read from Core1 (stepCallback)
+volatile int8_t gTrackSynthEngine[16] = {
     -1, -1, -1, -1,
     -1, -1, -1, -1,
     -1, -1, -1, -1,
@@ -74,12 +78,14 @@ int8_t gTrackSynthEngine[16] = {
 
 void setTrackSynthEngine(int track, int8_t engine) {
     if (track < 0 || track >= 16) return;
-    if (engine < -1 || engine > 6) return;  // 0=808,1=909,2=505,3=303,4=WT,5=SH101,6=FM2Op
+    if (engine < -1 || engine > 6) return;  // 0-6 valid engine IDs (Daisy supports 0-6 only)
     gTrackSynthEngine[track] = engine;
+    // Memory barrier to ensure Core1 sees the write immediately
+    __asm__ __volatile__("memw" ::: "memory");
 }
 
 void setAllTrackSynthEngines(int8_t engine) {
-    if (engine < -1 || engine > 6) return;  // 0-6 valid engine IDs
+    if (engine < -1 || engine > 6) return;  // Daisy supports 0-6 only
     for (int i = 0; i < 16; i++) {
         gTrackSynthEngine[i] = engine;
     }
@@ -176,6 +182,17 @@ void setLedMonoMode(bool enabled) {
 // Daisy dispara los samples sample-accurately internamente (DsqFireStep).
 // ESP32 solo sube el patrón una vez y envía CMD_DSQ_CONTROL play/stop.
 
+// ── Deferred upload: Core0 sets flag, Core1 executes ──
+static volatile int8_t _pendingDsqUpload = -1;   // pattern index, -1 = idle
+static volatile bool   _pendingDsqSelect = false;
+
+void dsqUploadPatternDeferred(int pattern) {
+    // Safe to call from any core — just sets a flag
+    _pendingDsqSelect = true;                  // write select FIRST
+    __asm__ __volatile__("memw" ::: "memory"); // memory barrier
+    _pendingDsqUpload = (int8_t)pattern;       // write upload index LAST (consumer trigger)
+}
+
 // Helper: convierte un patrón del Sequencer ESP32 → DsqStepPkt y lo sube a Daisy
 void dsqUploadPattern(int pattern) {
     const int stepCount = sequencer.getPatternLength();  // longitud global
@@ -224,7 +241,28 @@ void spiAudioTask(void *pvParameters) {
     // Sync tempo inicial a secuenciador Daisy
     spiMaster.setTempo((float)sequencer.getTempo());
 
+    // ── Sync synth engines al arrancar ──────────
+    for (int t = 0; t < 16; t++) {
+        spiMaster.dsqSetTrackEngine((uint8_t)t, gTrackSynthEngine[t]);
+        // Synth tracks: mutear en Daisy-seq (ESP32 stepCallback dispara synths)
+        if (gTrackSynthEngine[t] >= 0) {
+            spiMaster.dsqSetMute((uint8_t)t, true);
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+
     while (true) {
+        // ── Check deferred pattern upload from Core0 ──
+        int8_t pat = _pendingDsqUpload;
+        if (pat >= 0) {
+            _pendingDsqUpload = -1;
+            dsqUploadPattern(pat);
+            if (_pendingDsqSelect) {
+                _pendingDsqSelect = false;
+                spiMaster.dsqSelectPattern((uint8_t)pat);
+            }
+        }
+
         sequencer.update();   // Mantiene internos del secuenciador (beat UI, song mode)
         spiMaster.process();
         esp_task_wdt_reset();
@@ -305,9 +343,9 @@ void triggerPadWithLED(int track, uint8_t velocity) {
 }
 
 static void applyProfessionalMixBaseline() {
-    // Global post-master defaults: clean and controlled
+    // Global post-master defaults: warm, punchy 808 mix
     spiMaster.setMasterVolume(100);
-    spiMaster.setSequencerVolume(100);
+    spiMaster.setSequencerVolume(95);
     spiMaster.setLiveVolume(100);
     spiMaster.setLivePitchShift(1.0f);
 
@@ -315,27 +353,66 @@ static void applyProfessionalMixBaseline() {
     spiMaster.setDelayActive(false);
     spiMaster.setPhaserActive(false);
     spiMaster.setFlangerActive(false);
-    spiMaster.setCompressorActive(false);
-    spiMaster.setReverbActive(false);
-    spiMaster.setChorusActive(false);
     spiMaster.setTremoloActive(false);
     spiMaster.setWaveFolderGain(1.0f);
+
+    // Compressor: suave glue para pegar la mezcla
+    spiMaster.setCompressorActive(true);
+    spiMaster.setCompressorThreshold(-12.0f);
+    spiMaster.setCompressorRatio(2.5f);
+    spiMaster.setCompressorAttack(10.0f);
+    spiMaster.setCompressorRelease(100.0f);
+    spiMaster.setCompressorMakeupGain(2.0f);
+
+    // Reverb: room sutil para dar espacio
+    spiMaster.setReverb(true, 0.45f, 6000.0f, 0.12f);  // feedback=0.45, lpFreq=6kHz, mix=12%
+
+    // Chorus off, limiter on
+    spiMaster.setChorusActive(false);
     spiMaster.setLimiterActive(true);
 
     for (int track = 0; track < 16; track++) {
         spiMaster.clearTrackFilter(track);
         spiMaster.clearTrackFX(track);
         spiMaster.clearTrackLiveFX(track);
-        spiMaster.setTrackReverbSend(track, 0);
         spiMaster.setTrackDelaySend(track, 0);
         spiMaster.setTrackChorusSend(track, 0);
-        spiMaster.setTrackPan(track, 0);
         spiMaster.setTrackMute(track, false);
         spiMaster.setTrackSolo(track, false);
         spiMaster.setTrackEq(track, 0, 0, 0);
-        spiMaster.setTrackVolume(track, 100);
+        spiMaster.setTrackPan(track, 0);
+        spiMaster.setTrackReverbSend(track, 0);
         sequencer.setTrackVolume(track, 100);
     }
+
+    // ── Professional 808 mix: niveles y panorámica por instrumento ──
+    // track 0=BD, 1=SD, 2=CH, 3=OH, 4=CY, 5=CP, 6=RS, 7=CB
+    // track 8=LT, 9=MT, 10=HT, 11=MA, 12=CL, 13=HC, 14=MC, 15=LC
+    spiMaster.setTrackVolume(0, 110);   // BD: prominente
+    spiMaster.setTrackVolume(1, 100);   // SD
+    spiMaster.setTrackVolume(2, 80);    // CH: sutil
+    spiMaster.setTrackVolume(3, 75);    // OH: suave
+    spiMaster.setTrackVolume(4, 70);    // CY: de fondo
+    spiMaster.setTrackVolume(5, 95);    // CP
+    spiMaster.setTrackVolume(6, 85);    // RS
+    spiMaster.setTrackVolume(7, 80);    // CB
+
+    // Reverb sends: snare/clap con room, kick seco
+    spiMaster.setTrackReverbSend(1, 18);   // SD: algo de room
+    spiMaster.setTrackReverbSend(5, 22);   // CP: clap con reverb
+    spiMaster.setTrackReverbSend(3, 15);   // OH: un toque
+    spiMaster.setTrackReverbSend(4, 25);   // CY: más espacio
+
+    // Panorámica estéreo para anchura
+    spiMaster.setTrackPan(2, -15);    // CH: ligeramente izq
+    spiMaster.setTrackPan(3,  20);    // OH: ligeramente der
+    spiMaster.setTrackPan(7,  25);    // CB: derecha
+    spiMaster.setTrackPan(8, -30);    // LT: izquierda
+    spiMaster.setTrackPan(9, -10);    // MT: casi centro izq
+    spiMaster.setTrackPan(10, 15);    // HT: centro der
+    spiMaster.setTrackPan(13,  35);   // HC: derecha
+    spiMaster.setTrackPan(14, -20);   // MC: izquierda
+    spiMaster.setTrackPan(15, -35);   // LC: izquierda
 
     for (int pad = 0; pad < 24; pad++) {
         spiMaster.clearPadFilter(pad);
@@ -362,16 +439,43 @@ void setup() {
         ESP.restart();
     }
 
+    syslogBegin();
+
+    // Register shutdown handler to capture crash info
+    esp_register_shutdown_handler([]() {
+        syslogPanic("shutdown/panic handler fired");
+    });
+
+    // Decode reset reason
+    const char* rstName = "unknown";
+    switch ((int)reason) {
+        case 1:  rstName = "POWERON";   break;
+        case 3:  rstName = "SW";        break;
+        case 4:  rstName = "PANIC";     break;
+        case 5:  rstName = "INT_WDT";   break;
+        case 6:  rstName = "TASK_WDT";  break;
+        case 7:  rstName = "WDT";       break;
+        case 8:  rstName = "DEEPSLEEP"; break;
+        case 12: rstName = "BROWNOUT";  break;
+        case 14: rstName = "USB";       break;
+        case 15: rstName = "JTAG";      break;
+    }
+    syslog("BOOT", "Reset reason: %d (%s)", (int)reason, rstName);
+    syslog("BOOT", "Heap: free=%u psram=%u/%u",
+           ESP.getFreeHeap(), (uint32_t)ESP.getFreePsram(), (uint32_t)ESP.getPsramSize());
+
     // NVS ya esta disponible en setup: cargar mapeos MIDI persistidos aqui.
     midiController.loadMappings();
 
     // 2. SPI Master — connects to STM32 for audio DSP
     if (!spiMaster.begin()) {
+        syslog("BOOT", "SPI Master init FAILED — restarting");
         rgbLed.setPixelColor(0, 0xFF0000);
         rgbLed.show();
         delay(3000);
         ESP.restart();
     }
+    syslog("BOOT", "SPI Master OK");
     
     
     showLoadingSamplesLED();
@@ -379,6 +483,7 @@ void setup() {
 
     // 3. Sample Manager (modo Daisy-first: sin precarga local en boot)
     sampleManager.begin();
+    syslog("BOOT", "SampleManager OK, heap=%u", ESP.getFreeHeap());
     bool shouldPreloadLocalSamples = BOOT_PRELOAD_LOCAL_SAMPLES;
     if (shouldPreloadLocalSamples) {
         SdStatusResponse sdStatus = {};
@@ -522,8 +627,23 @@ void setup() {
     }
 
     // 4. Sequencer Setup
-    // Trigger + automation callbacks eliminados → secuenciador interno en Daisy.
-    // Solo mantenemos step change para indicador de beat en la web UI.
+    // El secuenciador de la Daisy dispara SAMPLES.
+    // El ESP32 se encarga de disparar SYNTH TRIGGERS en paralelo.
+
+    // Step callback: cuando un track usa synth engine, enviar synthTrigger por SPI
+    sequencer.setStepCallback([](int track, uint8_t velocity, uint8_t trackVolume, uint32_t noteLenSamples) {
+        int8_t engine = getTrackSynthEngine(track);
+        if (engine < 0) return;  // sampler → la Daisy ya lo dispara internamente
+        // Synth engine: el ESP32 envía el trigger por SPI
+        float scaled = (velocity / 127.0f) * (trackVolume / 100.0f);
+        uint8_t synthVel = (uint8_t)constrain((int)roundf(scaled * 127.0f), 1, 127);
+        if (engine == 3) {
+            uint8_t midiNote = PAD_303_NOTES[track];
+            spiMaster.synth303NoteOn(midiNote, false, false);
+        } else {
+            spiMaster.synthTrigger((uint8_t)engine, (uint8_t)track, synthVel);
+        }
+    });
 
     // Callback para sincronización en tiempo real con la web
     sequencer.setStepChangeCallback([](int newStep) {
@@ -766,15 +886,75 @@ void setup() {
     sequencer.setStepVolumeLock(2, 8, true, 118);
     sequencer.setStepVolumeLock(2, 15, true, 112);
 
+    // ── DINÁMICAS DE VELOCIDAD: ghost notes, acentos, humanización ──────────
+    // Patrón 0: Hip Hop Boom Bap — groove con ghosts
+    sequencer.setStepVelocity(0, 0, 0, 120);   // BD: fuerte
+    sequencer.setStepVelocity(0, 0, 3, 75);    // BD: ghost suave
+    sequencer.setStepVelocity(0, 0, 10, 100);  // BD: sincopado medio
+    sequencer.setStepVelocity(0, 1, 4, 115);   // SD: accent
+    sequencer.setStepVelocity(0, 1, 12, 110);  // SD
+    // CH: alternar acentos 8ths
+    for(int i=0; i<16; i+=2) sequencer.setStepVelocity(0, 2, i, (i%4==0) ? 100 : 70);
+    sequencer.setStepVelocity(0, 3, 6, 85);    // OH
+    sequencer.setStepVelocity(0, 3, 14, 75);   // OH suave
+    sequencer.setStepVelocity(0, 5, 4, 105);   // CP
+    sequencer.setStepVelocity(0, 5, 12, 100);  // CP
+    sequencer.setStepVelocity(0, 6, 7, 80);    // RS ghost
+    sequencer.setStepVelocity(0, 7, 5, 70);    // CB suave
+    sequencer.setStepVelocity(0, 7, 13, 65);   // CB ghost
+
+    // Patrón 1: Techno — mecánico pero con groove sutil
+    sequencer.setStepVelocity(1, 0, 0, 127);   // BD: fuerte
+    sequencer.setStepVelocity(1, 0, 4, 120);
+    sequencer.setStepVelocity(1, 0, 8, 125);
+    sequencer.setStepVelocity(1, 0, 12, 118);
+    // CH 16ths: patrón de acentos dinámico
+    for(int i=0; i<16; i++) sequencer.setStepVelocity(1, 2, i, (i%4==0) ? 110 : (i%2==0) ? 85 : 60);
+
+    // Patrón 2: DnB — agresivo con ghosts
+    sequencer.setStepVelocity(2, 0, 0, 127);   // BD: máximo impacto
+    sequencer.setStepVelocity(2, 0, 2, 100);   // BD: segundo golpe más suave
+    sequencer.setStepVelocity(2, 0, 10, 110);
+    sequencer.setStepVelocity(2, 1, 4, 120);   // SD
+    sequencer.setStepVelocity(2, 1, 7, 65);    // SD: ghost note
+    sequencer.setStepVelocity(2, 1, 10, 90);
+    sequencer.setStepVelocity(2, 1, 12, 115);
+    // CH: rápido con dinámicas
+    for(int i=0; i<16; i++) sequencer.setStepVelocity(2, 2, i, (i%4==0) ? 100 : (i%2==0) ? 80 : 55);
+
+    // Patrón 3: Latin — orgánico con acentos de clave
+    sequencer.setStepVelocity(3, 7, 1, 90);    // CB: clave
+    sequencer.setStepVelocity(3, 7, 5, 100);
+    sequencer.setStepVelocity(3, 7, 9, 95);
+    sequencer.setStepVelocity(3, 7, 13, 85);
+    sequencer.setStepVelocity(3, 12, 0, 110);  // CL: acentuada
+    sequencer.setStepVelocity(3, 12, 3, 95);
+    sequencer.setStepVelocity(3, 12, 6, 100);
+    sequencer.setStepVelocity(3, 12, 10, 90);
+    // Congas: dinámica natural
+    sequencer.setStepVelocity(3, 13, 2, 95);   // HC
+    sequencer.setStepVelocity(3, 13, 7, 110);  // HC: acento
+    sequencer.setStepVelocity(3, 13, 11, 85);
+    sequencer.setStepVelocity(3, 14, 4, 90);   // MC
+    sequencer.setStepVelocity(3, 14, 9, 105);
+    sequencer.setStepVelocity(3, 14, 14, 80);
+    sequencer.setStepVelocity(3, 15, 0, 100);  // LC
+    sequencer.setStepVelocity(3, 15, 6, 110);  // LC: acento
+    sequencer.setStepVelocity(3, 15, 12, 95);
+    // Maracas: shake alternado
+    for(int i=1; i<16; i+=2) sequencer.setStepVelocity(3, 11, i, (i%4==1) ? 80 : 55);
+
     sequencer.selectPattern(0); // Empezar con Hip Hop
     // sequencer.start(); // DISABLED: User must press PLAY
 
-    // 5. WiFi: solo modo AP (RED808)
+    // 5. WiFi: STA (casa) + AP (RED808 fallback)
     
     showWiFiLED();
     delay(500);
     
-    if (webInterface.begin(AP_SSID, AP_PASSWORD, nullptr, nullptr, 0)) {
+    if (webInterface.begin(AP_SSID, AP_PASSWORD,
+                           HOME_WIFI_SSID, HOME_WIFI_PASS,
+                           HOME_WIFI_TIMEOUT)) {
         showWebServerLED();
         delay(500);
     }
@@ -1046,22 +1226,22 @@ void setup() {
     esp_task_wdt_init(10, true);
     esp_task_wdt_add(NULL);  // subscribe loopTask
 
+    Serial.println("=== RED808 BOOT COMPLETE ===");
+    syslog("BOOT", "COMPLETE heap=%u min=%u block=%u psram=%u samples=%d",
+           ESP.getFreeHeap(), ESP.getMinFreeHeap(),
+           (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+           (uint32_t)ESP.getFreePsram(), sampleManager.getLoadedSamplesCount());
+    Serial.printf("[BOOT] Heap: free=%u min=%u largest_block=%u\n",
+                  ESP.getFreeHeap(), ESP.getMinFreeHeap(),
+                  (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    Serial.printf("[BOOT] PSRAM: free=%u / %u\n",
+                  (uint32_t)ESP.getFreePsram(), (uint32_t)ESP.getPsramSize());
+    Serial.printf("[BOOT] Samples loaded: %d\n", sampleManager.getLoadedSamplesCount());
+
     showReadyLED();
 }
 
 void loop() {
     esp_task_wdt_reset();   // feed TWDT every iteration
-
-    // Heap monitor cada 10 segundos
-    static uint32_t lastStats = 0;
-    if (millis() - lastStats > 10000) {
-        uint32_t heap = ESP.getFreeHeap();
-        uint32_t minHeap = ESP.getMinFreeHeap();
-        Serial.printf("[HEAP] free=%u min=%u psram=%u\n", heap, minHeap, (uint32_t)ESP.getFreePsram());
-        if (heap < 30000) {
-            webInterface.broadcastRaw("{\"type\":\"warning\",\"msg\":\"low_heap\"}");
-        }
-        lastStats = millis();
-    }
     vTaskDelay(pdMS_TO_TICKS(100)); // loop() no hace nada crítico
 }

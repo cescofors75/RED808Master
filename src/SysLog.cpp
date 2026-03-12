@@ -1,0 +1,85 @@
+#include "SysLog.h"
+
+static bool _logReady = false;
+static unsigned long _bootMs = 0;
+
+void syslogBegin() {
+    _bootMs = millis();
+    _logReady = true;
+    // Write boot marker
+    syslog("BOOT", "=== RED808 boot at millis=%lu ===", _bootMs);
+}
+
+void syslog(const char* tag, const char* fmt, ...) {
+    if (!_logReady) return;
+
+    // Rate-limit: buffer line, flush to file
+    char line[256];
+    int offset = 0;
+
+    // Timestamp: seconds since boot
+    unsigned long elapsedMs = millis() - _bootMs;
+    unsigned long sec = elapsedMs / 1000;
+    unsigned long ms  = elapsedMs % 1000;
+    offset = snprintf(line, sizeof(line), "[%lu.%03lu][%s] ", sec, ms, tag);
+
+    va_list args;
+    va_start(args, fmt);
+    offset += vsnprintf(line + offset, sizeof(line) - offset, fmt, args);
+    va_end(args);
+
+    // Ensure newline
+    if (offset < (int)sizeof(line) - 1) {
+        line[offset++] = '\n';
+        line[offset] = '\0';
+    }
+
+    // Also echo to Serial
+    Serial.print(line);
+
+    // Check rotation before writing
+    File f = LittleFS.open(SYSLOG_PATH, "r");
+    if (f) {
+        size_t sz = f.size();
+        f.close();
+        if (sz > SYSLOG_MAX_SIZE) {
+            LittleFS.remove(SYSLOG_OLD_PATH);
+            LittleFS.rename(SYSLOG_PATH, SYSLOG_OLD_PATH);
+        }
+    }
+
+    // Append to log
+    f = LittleFS.open(SYSLOG_PATH, "a");
+    if (f) {
+        f.write((const uint8_t*)line, offset);
+        f.close();
+    }
+}
+
+size_t syslogSize() {
+    File f = LittleFS.open(SYSLOG_PATH, "r");
+    if (!f) return 0;
+    size_t sz = f.size();
+    f.close();
+    return sz;
+}
+
+void syslogPanic(const char* msg) {
+    // Minimal write for crash/shutdown handler — no heap, no format
+    File f = LittleFS.open(SYSLOG_PATH, "a");
+    if (f) {
+        unsigned long sec = (millis() - _bootMs) / 1000;
+        unsigned long ms  = (millis() - _bootMs) % 1000;
+        char hdr[32];
+        int hlen = snprintf(hdr, sizeof(hdr), "[%lu.%03lu][PANIC] ", sec, ms);
+        f.write((const uint8_t*)hdr, hlen);
+        f.write((const uint8_t*)msg, strlen(msg));
+        f.write((const uint8_t*)"\n", 1);
+        f.close();
+    }
+}
+
+void syslogClear() {
+    LittleFS.remove(SYSLOG_PATH);
+    LittleFS.remove(SYSLOG_OLD_PATH);
+}

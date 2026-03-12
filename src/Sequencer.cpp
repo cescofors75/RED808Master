@@ -275,22 +275,23 @@ bool Sequencer::getStep(int pattern, int track, int step) {
 void Sequencer::clearPattern(int pattern) {
   if (pattern < 0 || pattern >= MAX_PATTERNS) return;
   
+  // Bulk memset — orders of magnitude faster than element-by-element on PSRAM
+  memset(pd->steps[pattern],                  0, sizeof(pd->steps[pattern]));           // false
+  memset(pd->velocities[pattern],           127, sizeof(pd->velocities[pattern]));      // 127
+  memset(pd->noteLenDivs[pattern],            1, sizeof(pd->noteLenDivs[pattern]));     // 1
+  memset(pd->probabilities[pattern],        100, sizeof(pd->probabilities[pattern]));   // 100
+  memset(pd->ratchets[pattern],               1, sizeof(pd->ratchets[pattern]));        // 1
+  memset(pd->stepVolumeLockEnabled[pattern],  0, sizeof(pd->stepVolumeLockEnabled[pattern]));
+  memset(pd->stepVolumeLockValue[pattern],  100, sizeof(pd->stepVolumeLockValue[pattern]));
+  memset(pd->stepCutoffLockEnabled[pattern],  0, sizeof(pd->stepCutoffLockEnabled[pattern]));
+  memset(pd->stepReverbSendLockEnabled[pattern], 0, sizeof(pd->stepReverbSendLockEnabled[pattern]));
+  memset(pd->stepReverbSendLockValue[pattern],   0, sizeof(pd->stepReverbSendLockValue[pattern]));
+  // stepCutoffLockHz is uint16_t — memset can't set 1000, need loop
   for (int t = 0; t < MAX_TRACKS; t++) {
     for (int s = 0; s < STEPS_PER_PATTERN; s++) {
-      pd->steps[pattern][t][s] = false;
-      pd->velocities[pattern][t][s] = 127;
-      pd->noteLenDivs[pattern][t][s] = 1;
-      pd->probabilities[pattern][t][s] = 100;
-      pd->ratchets[pattern][t][s] = 1;
-      pd->stepVolumeLockEnabled[pattern][t][s] = false;
-      pd->stepVolumeLockValue[pattern][t][s] = 100;
-      pd->stepCutoffLockEnabled[pattern][t][s] = false;
       pd->stepCutoffLockHz[pattern][t][s] = 1000;
-      pd->stepReverbSendLockEnabled[pattern][t][s] = false;
-      pd->stepReverbSendLockValue[pattern][t][s] = 0;
     }
   }
-  
 }
 
 void Sequencer::clearPattern() {

@@ -12775,3 +12775,442 @@ body.embed-mode .tab-content:not(.active) { display: none !important; }
         align-items: flex-start;
     }
 }
+
+/* ══════════════════════════════════════════════════════
+   UNIFIED FX DESIGN SYSTEM  (ufx-*)
+   Matches PADS/Sequencer visual language
+   ══════════════════════════════════════════════════════ */
+
+/* ── Section Headers ── */
+.ufx-section-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    margin-bottom: 14px;
+    background: linear-gradient(135deg, rgba(0,0,0,0.5), rgba(20,20,20,0.5));
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.06);
+}
+.ufx-section-icon {
+    font-size: 1.3em;
+}
+.ufx-section-title {
+    font-weight: 800;
+    font-size: 0.95em;
+    letter-spacing: 1.5px;
+    color: #fff;
+    text-transform: uppercase;
+}
+.ufx-section-hint {
+    color: rgba(255,255,255,0.35);
+    font-size: 0.75em;
+    margin-left: auto;
+}
+
+/* ── Filter Cards Grid ── */
+.ufx-filters-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 20px;
+}
+.ufx-fcard {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 14px 8px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.03);
+    cursor: pointer;
+    transition: all 0.25s ease;
+    position: relative;
+}
+.ufx-fcard:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+}
+.ufx-fcard.active {
+    border-color: var(--accent, #00d4ff);
+    box-shadow: 0 0 16px rgba(0,212,255,0.25);
+    background: rgba(0,212,255,0.08);
+}
+.ufx-fcard-icon { font-size: 1.6em; }
+.ufx-fcard-name {
+    font-size: 0.7em;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: #ccc;
+    text-align: center;
+}
+.ufx-fcard-key {
+    position: absolute;
+    top: 5px;
+    right: 6px;
+    font-size: 0.55em;
+    font-weight: 700;
+    color: rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.06);
+    padding: 1px 5px;
+    border-radius: 4px;
+}
+/* Filter color variants */
+.ufx-fcard--off { --accent: #888; }
+.ufx-fcard--off:hover { border-color: #888; }
+.ufx-fcard--warm { --accent: #ff6600; }
+.ufx-fcard--warm:hover { border-color: #ff6600; }
+.ufx-fcard--warm .ufx-fcard-name { color: #ff8833; }
+.ufx-fcard--bright { --accent: #00ccff; }
+.ufx-fcard--bright:hover { border-color: #00ccff; }
+.ufx-fcard--bright .ufx-fcard-name { color: #00ccff; }
+.ufx-fcard--acid { --accent: #ff0044; }
+.ufx-fcard--acid:hover { border-color: #ff0044; }
+.ufx-fcard--acid .ufx-fcard-name { color: #ff3366; }
+.ufx-fcard--creative { --accent: #ff00ff; }
+.ufx-fcard--creative:hover { border-color: #ff00ff; }
+.ufx-fcard--creative .ufx-fcard-name { color: #ff66ff; }
+.ufx-fcard--boost { --accent: #ffaa00; }
+.ufx-fcard--boost:hover { border-color: #ffaa00; }
+.ufx-fcard--boost .ufx-fcard-name { color: #ffaa00; }
+.ufx-fcard--cut { --accent: #888; }
+.ufx-fcard--cut:hover { border-color: #aaa; }
+
+/* ── Active Filters Display ── */
+.ufx-active-section {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 10px;
+}
+.ufx-active-group {
+    flex: 1;
+    padding: 10px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.06);
+}
+.ufx-active-label {
+    display: block;
+    font-size: 0.65em;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: rgba(255,255,255,0.4);
+    margin-bottom: 6px;
+}
+.ufx-active-list {
+    font-size: 0.8em;
+    color: #aaa;
+}
+.ufx-active-list .no-filters {
+    color: rgba(255,255,255,0.2);
+    font-style: italic;
+    font-size: 0.85em;
+}
+
+/* ── Track Selector ── */
+.ufx-track-selector {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+}
+.ufx-tsel {
+    min-width: 42px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(20,20,20,0.8);
+    color: rgba(255,255,255,0.6);
+    font-size: 0.7em;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.ufx-tsel:hover {
+    border-color: rgba(255,255,255,0.3);
+    color: #fff;
+}
+.ufx-tsel.active {
+    background: rgba(255,0,0,0.2);
+    border-color: rgba(255,0,0,0.7);
+    color: #fff;
+    box-shadow: 0 0 10px rgba(255,0,0,0.3);
+}
+
+/* ── FX Card (Unified base for ALL effects) ── */
+.ufx-cards-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+.ufx-cards-row > .ufx-card {
+    flex: 1;
+    min-width: 180px;
+}
+.ufx-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+}
+.ufx-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-left: 3px solid var(--accent, rgba(255,255,255,0.1));
+    border-radius: 10px;
+    padding: 12px 14px;
+    transition: all 0.25s ease;
+}
+.ufx-card[data-accent] {
+    border-left-color: attr(data-accent);
+}
+.ufx-card:has(input[type="checkbox"]:checked),
+.ufx-card.ufx-card--active {
+    border-color: var(--accent, #00d4ff);
+    border-left-color: var(--accent, #00d4ff);
+    background: rgba(0,212,255,0.05);
+    box-shadow: 0 0 12px rgba(0,212,255,0.08);
+}
+/* Color-accent via data-accent attribute — applied with inline style in JS */
+.ufx-card[data-accent="#e94560"] { border-left-color: #e94560; --accent: #e94560; }
+.ufx-card[data-accent="#00d4ff"] { border-left-color: #00d4ff; --accent: #00d4ff; }
+.ufx-card[data-accent="#a855f7"] { border-left-color: #a855f7; --accent: #a855f7; }
+.ufx-card[data-accent="#06b6d4"] { border-left-color: #06b6d4; --accent: #06b6d4; }
+.ufx-card[data-accent="#f59e0b"] { border-left-color: #f59e0b; --accent: #f59e0b; }
+.ufx-card[data-accent="#6b7280"] { border-left-color: #6b7280; --accent: #6b7280; }
+.ufx-card[data-accent="#8b5cf6"] { border-left-color: #8b5cf6; --accent: #8b5cf6; }
+.ufx-card[data-accent="#0ea5e9"] { border-left-color: #0ea5e9; --accent: #0ea5e9; }
+.ufx-card[data-accent="#ef4444"] { border-left-color: #ef4444; --accent: #ef4444; }
+.ufx-card[data-accent="#ec4899"] { border-left-color: #ec4899; --accent: #ec4899; }
+.ufx-card[data-accent="#14b8a6"] { border-left-color: #14b8a6; --accent: #14b8a6; }
+.ufx-card[data-accent="#f97316"] { border-left-color: #f97316; --accent: #f97316; }
+
+/* ── Card Header ── */
+.ufx-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.ufx-card-icon { font-size: 1.2em; }
+.ufx-card-title {
+    flex: 1;
+    font-weight: 800;
+    font-size: 0.82em;
+    letter-spacing: 1.2px;
+    color: #ddd;
+}
+
+/* ── Card Body ── */
+.ufx-card-body {
+    margin-top: 10px;
+}
+
+/* ── Toggle Switch ── */
+.ufx-toggle {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 22px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.ufx-toggle input { opacity: 0; width: 0; height: 0; }
+.ufx-toggle-rail {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #333;
+    border-radius: 11px;
+    transition: 0.3s;
+}
+.ufx-toggle-rail::before {
+    content: "";
+    position: absolute;
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background: #777;
+    border-radius: 50%;
+    transition: 0.3s;
+}
+.ufx-toggle input:checked + .ufx-toggle-rail {
+    background: var(--accent, #00d4ff);
+}
+.ufx-toggle input:checked + .ufx-toggle-rail::before {
+    transform: translateX(18px);
+    background: #fff;
+}
+
+/* ── Parameters ── */
+.ufx-param {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-bottom: 6px;
+}
+.ufx-param label {
+    font-size: 0.72em;
+    color: #999;
+    white-space: nowrap;
+}
+.ufx-param label span {
+    color: var(--accent, #00d4ff);
+    font-weight: 700;
+}
+
+/* ── Slider ── */
+.ufx-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 5px;
+    border-radius: 3px;
+    background: #2a2a2a;
+    outline: none;
+    cursor: pointer;
+}
+.ufx-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent, #00d4ff);
+    cursor: pointer;
+    border: 2px solid #fff;
+    box-shadow: 0 0 6px rgba(0,0,0,0.5);
+}
+
+/* ── Select ── */
+.ufx-select {
+    background: #151520;
+    color: #ddd;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 0.8em;
+    cursor: pointer;
+    width: 100%;
+}
+.ufx-select:focus {
+    border-color: var(--accent, #00d4ff);
+    outline: none;
+}
+
+/* ── Preset Buttons ── */
+.ufx-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+.ufx-preset-btn {
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.04);
+    color: #aaa;
+    font-size: 0.72em;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.ufx-preset-btn:hover {
+    border-color: rgba(255,255,255,0.3);
+    color: #fff;
+}
+.ufx-preset-btn.active {
+    background: rgba(0,212,255,0.15);
+    border-color: #00d4ff;
+    color: #00d4ff;
+}
+
+/* ── Action Buttons ── */
+.ufx-action-btn {
+    padding: 8px 18px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.06);
+    color: #ddd;
+    font-size: 0.78em;
+    font-weight: 700;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.ufx-action-btn:hover {
+    background: rgba(255,255,255,0.12);
+    border-color: rgba(255,255,255,0.3);
+    color: #fff;
+}
+.ufx-action-btn--play {
+    background: rgba(0,200,80,0.15);
+    border-color: rgba(0,200,80,0.4);
+    color: #00c850;
+}
+.ufx-action-btn--play:hover {
+    background: rgba(0,200,80,0.25);
+}
+.ufx-action-btn--stop {
+    background: rgba(255,60,60,0.15);
+    border-color: rgba(255,60,60,0.4);
+    color: #ff4444;
+}
+.ufx-action-btn--stop:hover {
+    background: rgba(255,60,60,0.25);
+}
+
+/* ── Text Input ── */
+.ufx-text-input {
+    width: 100%;
+    padding: 7px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(0,0,0,0.4);
+    color: #fff;
+    font-size: 0.82em;
+    font-family: var(--font-mono, monospace);
+}
+.ufx-text-input:focus {
+    border-color: var(--accent, #00d4ff);
+    outline: none;
+}
+
+/* ── Button Row ── */
+.ufx-btn-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+/* ── LFO Grid ── */
+.ufx-lfo-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 10px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+    .ufx-filters-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+    .ufx-cards-grid {
+        grid-template-columns: 1fr;
+    }
+    .ufx-cards-row {
+        flex-direction: column;
+    }
+    .ufx-active-section {
+        flex-direction: column;
+    }
+    .ufx-lfo-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+    .ufx-section-hint {
+        display: none;
+    }
+}

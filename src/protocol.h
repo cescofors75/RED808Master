@@ -260,9 +260,7 @@ typedef struct __attribute__((packed)) {
 #define SYNTH_ENGINE_WTOSC 4  // Wavetable Oscillator
 #define SYNTH_ENGINE_SH101 5  // I1: Roland SH-101 monosynth
 #define SYNTH_ENGINE_FM2OP 6  // I2: 2-operator FM Yamaha-style
-#define SYNTH_ENGINE_PHYS  7  // Physical modeling (ModalVoice/StringVoice)
-#define SYNTH_ENGINE_NOISE 8  // Noise/particle textures
-#define SYNTH_ENGINE_COUNT 9
+#define SYNTH_ENGINE_COUNT 7
 
 // TR-808 instrument IDs (engine=0)
 #define SYNTH_808_KICK     0

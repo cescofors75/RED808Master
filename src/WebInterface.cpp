@@ -7,6 +7,7 @@
 #include "SPIMaster.h"
 #include "Sequencer.h"
 #include "SampleManager.h"
+#include "SysLog.h"
 #include <esp_wifi.h>
 #include <esp_heap_caps.h>
 
@@ -32,6 +33,10 @@ static constexpr unsigned long kFastVolumeCmdMinMs = 8;
 static char* _stateBuf = nullptr;
 static constexpr size_t kStateBufSize = 8192;  // serialized JSON fits in ~5-6KB
 
+// Pre-allocated PSRAM buffer for pattern JSON (selectPattern/getPattern)
+static char* _patternBuf = nullptr;
+static constexpr size_t kPatternBufSize = 24576;  // pattern JSON ~12-18KB
+
 // PSRAM allocator for ArduinoJson — documents allocated here never touch internal heap
 struct PsramAllocator {
   void* allocate(size_t size) {
@@ -55,7 +60,8 @@ extern Sequencer sequencer;
 
 // Page‐transition broadcast pause: set when '/' is served, cleared after 2s
 static volatile unsigned long pageTransitionMs = 0;
-extern void dsqUploadPattern(int pattern);  // upload one pattern to Daisy sequencer
+extern void dsqUploadPattern(int pattern);           // upload one pattern to Daisy sequencer (Core1 only)
+extern void dsqUploadPatternDeferred(int pattern);   // safe from Core0: sets flag for Core1
 
 // Helper: lee todos los param locks de un step del Sequencer y los envía a Daisy
 static void dsqSyncParamLock(int pat, int track, int step) {
@@ -71,10 +77,10 @@ static void dsqSyncParamLock(int pat, int track, int step) {
 extern SampleManager sampleManager;
 extern void triggerPadWithLED(int track, uint8_t velocity);  // Función que enciende LED
 extern void setLedMonoMode(bool enabled);
-extern int8_t gTrackSynthEngine[16];
+extern volatile int8_t gTrackSynthEngine[16];
 extern void setTrackSynthEngine(int track, int8_t engine);
 extern void setAllTrackSynthEngines(int8_t engine);
-static String gDaisyPadFiles[MAX_PADS];
+static char gDaisyPadFiles[MAX_PADS][32];
 
 static void clearTrackLoopStateForSynth(int track, AsyncWebSocket* ws) {
   if (track < 0 || track >= 16) {
@@ -89,34 +95,29 @@ static void clearTrackLoopStateForSynth(int track, AsyncWebSocket* ws) {
   spiMaster.setPadLoop(track, false);
   spiMaster.stopSample(track);
 
-  if (loopWasActive && ws) {
-    StaticJsonDocument<160> responseDoc;
-    responseDoc["type"] = "loopState";
-    responseDoc["track"] = track;
-    responseDoc["active"] = false;
-    responseDoc["paused"] = false;
-    responseDoc["loopType"] = (int)sequencer.getLoopType(track);
-    String output;
-    serializeJson(responseDoc, output);
-    ws->textAll(output);
+  if (loopWasActive && ws && ws->count() > 0) {
+    char buf[128];
+    int len = snprintf(buf, sizeof(buf),
+      "{\"type\":\"loopState\",\"track\":%d,\"active\":false,\"paused\":false,\"loopType\":%d}",
+      track, (int)sequencer.getLoopType(track));
+    ws->textAll(buf, len);
   }
 }
 
 static void setDaisyPadFile(int padIndex, const String& fileName) {
   if (padIndex < 0 || padIndex >= MAX_PADS) return;
-  gDaisyPadFiles[padIndex] = fileName;
+  strncpy(gDaisyPadFiles[padIndex], fileName.c_str(), 31);
+  gDaisyPadFiles[padIndex][31] = '\0';
 }
 
 static void clearDaisyPadFiles() {
-  for (int i = 0; i < MAX_PADS; i++) {
-    gDaisyPadFiles[i] = "";
-  }
+  memset(gDaisyPadFiles, 0, sizeof(gDaisyPadFiles));
 }
 
 static void clearDaisyPadFilesNotInMask(uint32_t loadedMask) {
   for (int i = 0; i < MAX_PADS; i++) {
     if ((loadedMask & (1UL << i)) == 0) {
-      gDaisyPadFiles[i] = "";
+      gDaisyPadFiles[i][0] = '\0';
     }
   }
 }
@@ -243,9 +244,9 @@ static void populateStateDocument(JsonDocument& doc) {
       sampleObj["pad"] = pad;
       sampleObj["loaded"] = true;
       const char* localName = sampleManager.getSampleName(pad);
-      String daisyName = gDaisyPadFiles[pad];
-      const char* finalName = (loadedLocal && localName) ? localName : daisyName.c_str();
-      sampleObj["name"] = finalName ? finalName : "";
+      const char* daisyName = gDaisyPadFiles[pad];
+      const char* finalName = (loadedLocal && localName) ? localName : daisyName;
+      sampleObj["name"] = (finalName && finalName[0]) ? finalName : "";
       sampleObj["size"] = loadedLocal ? (sampleManager.getSampleLength(pad) * 2) : 0;
       sampleObj["format"] = detectSampleFormat(finalName);
     }
@@ -374,25 +375,63 @@ WebInterface::~WebInterface() {
 }
 
 bool WebInterface::begin(const char* apSsid, const char* apPassword,
-                         const char* /* staSSID */, const char* /* staPassword */,
-                         unsigned long /* staTimeoutMs */) {
+                         const char* staSSID, const char* staPassword,
+                         unsigned long staTimeoutMs) {
   _staConnected = false;
 
-  // ── Modo AP exclusivo — máxima estabilidad ──
   WiFi.setSleep(false);
   WiFi.persistent(false);          // no guarda credenciales en NVS (evita flash corrupto)
   WiFi.mode(WIFI_OFF);
   delay(100);
 
-  WiFi.mode(WIFI_AP);
-  delay(50);
+  // ── Decide mode: STA+AP if home SSID provided, AP-only otherwise ──
+  bool tryStation = (staSSID && staSSID[0] != '\0');
 
-  IPAddress local_IP(192, 168, 4, 1);
-  IPAddress gateway(192, 168, 4, 1);
-  IPAddress subnet(255, 255, 255, 0);
-  WiFi.softAPConfig(local_IP, gateway, subnet);
-  WiFi.softAP(apSsid, apPassword, 1, 0, 4);   // canal 1, visible, max 4 clientes
-  delay(200);
+  if (tryStation) {
+    // --- STA + AP dual mode ---
+    WiFi.mode(WIFI_AP_STA);
+    delay(50);
+
+    // Start AP first so it's always reachable
+    IPAddress local_IP(192, 168, 4, 1);
+    IPAddress gateway(192, 168, 4, 1);
+    IPAddress subnet(255, 255, 255, 0);
+    WiFi.softAPConfig(local_IP, gateway, subnet);
+    WiFi.softAP(apSsid, apPassword, 1, 0, 4);
+    delay(200);
+
+    // Now try STA with static IP (192.168.1.80 — the "808" IP!)
+    IPAddress staIP(192, 168, 1, 80);
+    IPAddress staGW(192, 168, 1, 1);
+    IPAddress staSN(255, 255, 255, 0);
+    IPAddress staDNS(192, 168, 1, 1);
+    WiFi.config(staIP, staGW, staSN, staDNS);
+
+    WiFi.begin(staSSID, staPassword);
+    unsigned long t0 = millis();
+    while (WiFi.status() != WL_CONNECTED && (millis() - t0) < staTimeoutMs) {
+      delay(250);
+      yield();
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      _staConnected = true;
+      Serial.printf("[WiFi] STA connected: %s  IP: %s\n", staSSID, WiFi.localIP().toString().c_str());
+    } else {
+      Serial.printf("[WiFi] STA failed for '%s', AP-only mode\n", staSSID);
+      // Keep AP running, STA just didn't connect
+    }
+  } else {
+    // --- AP-only mode ---
+    WiFi.mode(WIFI_AP);
+    delay(50);
+
+    IPAddress local_IP(192, 168, 4, 1);
+    IPAddress gateway(192, 168, 4, 1);
+    IPAddress subnet(255, 255, 255, 0);
+    WiFi.softAPConfig(local_IP, gateway, subnet);
+    WiFi.softAP(apSsid, apPassword, 1, 0, 4);
+    delay(200);
+  }
 
   // Protocolo b/g/n y beacon 100ms
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
@@ -430,39 +469,39 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   });
   
   server->on("/app.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/app.js", "application/javascript", "max-age=86400, immutable");
+    sendWebAsset(request, "/app.js", "application/javascript", "no-cache");
   });
   
   server->on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/style.css", "text/css", "max-age=86400, immutable");
+    sendWebAsset(request, "/style.css", "text/css", "no-cache");
   });
   
   server->on("/keyboard-controls.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/keyboard-controls.js", "application/javascript", "max-age=86400, immutable");
+    sendWebAsset(request, "/keyboard-controls.js", "application/javascript", "no-cache");
   });
   
   server->on("/keyboard-styles.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/keyboard-styles.css", "text/css", "max-age=86400, immutable");
+    sendWebAsset(request, "/keyboard-styles.css", "text/css", "no-cache");
   });
   
   server->on("/midi-import.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/midi-import.js", "application/javascript", "max-age=86400, immutable");
+    sendWebAsset(request, "/midi-import.js", "application/javascript", "no-cache");
   });
   
   server->on("/chat-agent.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/chat-agent.js", "application/javascript", "max-age=86400, immutable");
+    sendWebAsset(request, "/chat-agent.js", "application/javascript", "no-cache");
   });
   
   server->on("/waveform-visualizer.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/waveform-visualizer.js", "application/javascript", "max-age=86400, immutable");
+    sendWebAsset(request, "/waveform-visualizer.js", "application/javascript", "no-cache");
   });
 
   server->on("/synth-editor.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/synth-editor.js", "application/javascript", "max-age=86400, immutable");
+    sendWebAsset(request, "/synth-editor.js", "application/javascript", "no-cache");
   });
 
   server->on("/export-pattern.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/export-pattern.js", "application/javascript", "max-age=86400, immutable");
+    sendWebAsset(request, "/export-pattern.js", "application/javascript", "no-cache");
   });
   
   // Patchbay page
@@ -473,11 +512,11 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   });
   
   server->on("/patchbay.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/patchbay.css", "text/css", "max-age=86400, immutable");
+    sendWebAsset(request, "/patchbay.css", "text/css", "no-cache");
   });
   
   server->on("/patchbay.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/patchbay.js", "application/javascript", "max-age=86400, immutable");
+    sendWebAsset(request, "/patchbay.js", "application/javascript", "no-cache");
   });
 
   // Multiview page — redirect to .html served by serveStatic (avoids AsyncFileResponse 500 edge case)
@@ -490,24 +529,24 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   });
 
   server->on("/multiview.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/multiview.css", "text/css", "max-age=86400, immutable");
+    sendWebAsset(request, "/multiview.css", "text/css", "no-cache");
   });
   
   server->on("/multiview.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/multiview.js", "application/javascript", "max-age=86400, immutable");
+    sendWebAsset(request, "/multiview.js", "application/javascript", "no-cache");
   });
 
   // Admin page
   server->on("/adm", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/admin.html", "text/html", "max-age=600");
+    sendWebAsset(request, "/admin.html", "text/html", "no-cache");
   });
 
   server->on("/admin.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/admin.css", "text/css", "max-age=86400, immutable");
+    sendWebAsset(request, "/admin.css", "text/css", "no-cache");
   });
 
   server->on("/admin.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    sendWebAsset(request, "/admin.js", "application/javascript", "max-age=86400, immutable");
+    sendWebAsset(request, "/admin.js", "application/javascript", "no-cache");
   });
 
   server->on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -553,8 +592,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     if (request->hasParam("index", true)) {
       int pattern = request->getParam("index", true)->value().toInt();
       sequencer.selectPattern(pattern);
-      dsqUploadPattern(pattern);
-      spiMaster.dsqSelectPattern((uint8_t)pattern);
+      dsqUploadPatternDeferred(pattern);
       request->send(200, "text/plain", "OK");
     }
   });
@@ -562,7 +600,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   server->on("/api/sequencer", HTTP_POST, [](AsyncWebServerRequest *request){
     if (request->hasParam("action", true)) {
       String action = request->getParam("action", true)->value();
-      if (action == "start") { sequencer.start(); dsqUploadPattern(sequencer.getCurrentPattern()); spiMaster.dsqControl(1); }
+      if (action == "start") { sequencer.start(); dsqUploadPatternDeferred(sequencer.getCurrentPattern()); spiMaster.dsqControl(1); }
       else if (action == "stop") { sequencer.stop(); spiMaster.dsqControl(0); }
       request->send(200, "text/plain", "OK");
     }
@@ -587,6 +625,65 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   // Endpoint para info del sistema (para dashboard /adm)
   // ZERO SPI calls here — only reads cached data.
   // SPI polling (status/peaks/ping) runs on Core1 via SPIMaster::process().
+
+  // === System Log: download raw ===
+  server->on("/api/log", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (LittleFS.exists(SYSLOG_PATH)) {
+      request->send(LittleFS, SYSLOG_PATH, "text/plain");
+    } else {
+      request->send(200, "text/plain", "(empty log)");
+    }
+  });
+
+  // === System Log: clear ===
+  server->on("/api/log", HTTP_DELETE, [](AsyncWebServerRequest *request){
+    syslogClear();
+    request->send(200, "text/plain", "log cleared");
+  });
+
+  // === System Log: live viewer with auto-refresh ===
+  server->on("/log", HTTP_GET, [](AsyncWebServerRequest *request){
+    static const char LOG_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>RED808 Log</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#111;color:#0f0;font:13px/1.4 'Courier New',monospace;height:100vh;display:flex;flex-direction:column}
+#bar{background:#222;padding:6px 12px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #333;flex-shrink:0}
+#bar span{color:#888;font-size:12px}
+#bar button{background:#333;color:#ccc;border:1px solid #555;padding:4px 12px;cursor:pointer;border-radius:3px;font-size:12px}
+#bar button:hover{background:#444}
+#bar button.danger{color:#f44}
+#log{flex:1;overflow-y:auto;padding:8px 12px;white-space:pre-wrap;word-break:break-all}
+.line-BOOT{color:#4af}.line-HEAP{color:#fa0}.line-WS{color:#e0e}.line-CMD{color:#0ff}
+.line-WARN{color:#ff0;font-weight:bold}
+</style></head><body>
+<div id="bar">
+  <span>RED808 SysLog</span>
+  <button onclick="refresh()">Refresh</button>
+  <button onclick="toggleAuto();" id="btnAuto">Auto: ON (3s)</button>
+  <button onclick="clearLog()" class="danger">Clear Log</button>
+  <span id="info"></span>
+</div>
+<div id="log">Loading...</div>
+<script>
+let auto_=true,timer,iv=3000;
+const $log=document.getElementById('log'),$info=document.getElementById('info'),$btn=document.getElementById('btnAuto');
+function colorize(t){return t.replace(/^(\[[\d.]+\]\[(\w+)\].*)/gm,(m,line,tag)=>'<span class="line-'+tag+'">'+line.replace(/</g,'&lt;')+'</span>');}
+function refresh(){
+  fetch('/api/log').then(r=>r.text()).then(t=>{
+    $log.innerHTML=colorize(t);
+    $log.scrollTop=$log.scrollHeight;
+    $info.textContent=t.length+' bytes | '+new Date().toLocaleTimeString();
+  }).catch(()=>{$info.textContent='fetch error';});
+}
+function toggleAuto(){auto_=!auto_;$btn.textContent='Auto: '+(auto_?'ON (3s)':'OFF');if(auto_)startAuto();else clearInterval(timer);}
+function startAuto(){clearInterval(timer);timer=setInterval(refresh,iv);}
+function clearLog(){if(confirm('Clear log?'))fetch('/api/log',{method:'DELETE'}).then(()=>refresh());}
+refresh();if(auto_)startAuto();
+</script></body></html>)rawliteral";
+    request->send_P(200, "text/html", LOG_HTML);
+  });
+
   server->on("/api/sysinfo", HTTP_GET, [this](AsyncWebServerRequest *request){
     StaticJsonDocument<3072> doc;
     
@@ -597,10 +694,17 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     doc["psramSize"] = ESP.getPsramSize();
     doc["flashSize"] = ESP.getFlashChipSize();
     
-    // Info de WiFi (AP-only)
-    doc["wifiMode"] = "AP";
-    doc["ssid"] = WiFi.softAPSSID();
-    doc["ip"] = WiFi.softAPIP().toString();
+    // Info de WiFi
+    if (_staConnected) {
+      doc["wifiMode"] = "STA+AP";
+      doc["ssid"] = WiFi.SSID();
+      doc["ip"] = WiFi.localIP().toString();
+      doc["apIP"] = WiFi.softAPIP().toString();
+    } else {
+      doc["wifiMode"] = "AP";
+      doc["ssid"] = WiFi.softAPSSID();
+      doc["ip"] = WiFi.softAPIP().toString();
+    }
     doc["channel"] = WiFi.channel();
     doc["txPower"] = "19.5dBm";
     doc["connectedStations"] = WiFi.softAPgetStationNum();
@@ -1107,6 +1211,10 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   if (!_stateBuf) {
     _stateBuf = (char*)ps_malloc(kStateBufSize);
   }
+  // Pre-allocate pattern JSON buffer in PSRAM (one-time, never freed)
+  if (!_patternBuf) {
+    _patternBuf = (char*)ps_malloc(kPatternBufSize);
+  }
   // Pre-allocate JSON document in PSRAM (one-time, reused via clear())
   if (!_stateDoc) {
     _stateDoc = new PsramJsonDocument(8192);
@@ -1133,8 +1241,11 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
     // ⚠️ LÍMITE DE 3 CLIENTES para estabilidad
     if (ws->count() > 3) {
       client->close(1008, "Max clients reached");
+      syslog("WS", "client %u rejected (max clients)", client->id());
       return;
     }
+    syslog("WS", "client %u connected (total=%d) heap=%u",
+           client->id(), ws->count(), ESP.getFreeHeap());
     
     
     StaticJsonDocument<512> basicState;
@@ -1151,6 +1262,8 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
       client->text(connectBuf, cLen);
     }
   } else if (type == WS_EVT_DISCONNECT) {
+    syslog("WS", "client %u disconnected (remaining=%d) heap=%u",
+           client->id(), ws->count() > 0 ? ws->count()-1 : 0, ESP.getFreeHeap());
     // Free any orphaned reassembly buffer owned by this client
     // (prevents 24KB leak if client disconnects mid-fragment)
     if (_wsReassemblyBuf && _wsReassemblyClientId == client->id()) {
@@ -1254,6 +1367,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
         
         // Check for bulk pattern command (needs larger JSON doc)
         if (len > 400 && strstr((char*)data, "\"setBulk\"") != nullptr) {
+          syslog("CMD", "setBulk len=%u heap=%u", (unsigned)len, ESP.getFreeHeap());
           if (ESP.getFreeHeap() < 35000) {
             StaticJsonDocument<64> errDoc;
             errDoc["type"] = "error"; errDoc["msg"] = "low_heap";
@@ -1263,7 +1377,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             if (_wsFreeAfter && _wsReassemblyBuf) { free(_wsReassemblyBuf); _wsReassemblyBuf = nullptr; }
             return;
           }
-          DynamicJsonDocument bulkDoc(32768);  // Larger to support 64-step patterns
+          PsramJsonDocument bulkDoc(32768);  // PSRAM — avoids 32KB spike on internal DRAM
           DeserializationError bulkErr = deserializeJson(bulkDoc, (char*)data);
           if (!bulkErr) {
             int pattern = bulkDoc["p"].as<int>();
@@ -1272,7 +1386,6 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             if (pattern >= 0 && pattern < MAX_PATTERNS) {
               bool stepsData[MAX_TRACKS][STEPS_PER_PATTERN] = {};
               uint8_t velsData[MAX_TRACKS][STEPS_PER_PATTERN];
-              memset(velsData, 127, sizeof(velsData));
               memset(velsData, 127, sizeof(velsData));
               
               JsonArray sArr = bulkDoc["s"].as<JsonArray>();
@@ -1293,19 +1406,15 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
               }
               
               sequencer.setPatternBulk(pattern, stepsData, velsData);
-              yield();
               
-              // Send ACK back to client
-              StaticJsonDocument<64> ack;
-              ack["type"] = "bulkAck";
-              ack["p"] = pattern;
-              String ackStr;
-              serializeJson(ack, ackStr);
+              // Lightweight ACK — stack buffer, no heap alloc
+              char ackBuf[40];
+              int ackLen = snprintf(ackBuf, sizeof(ackBuf),
+                "{\"type\":\"bulkAck\",\"p\":%d}", pattern);
               if (isClientReady(client)) {
-                client->text(ackStr);
+                client->text(ackBuf, ackLen);
               }
             }
-          } else {
           }
           // Cleanup reassembly buffer before early return
           if (_wsFreeAfter && _wsReassemblyBuf) {
@@ -1329,6 +1438,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
           
           if (cmd == "getPattern") {
             int pattern = sequencer.getCurrentPattern();
+            syslog("CMD", "getPattern idx=%d heap=%u", pattern, ESP.getFreeHeap());
             // 6 data structures × 16 tracks × 16 steps — needs ~13-15KB ArduinoJson pool
             if (ESP.getFreeHeap() < 35000) {
               StaticJsonDocument<64> err; err["type"] = "error"; err["msg"] = "low_heap";
@@ -1340,7 +1450,8 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             }
             yield();
             int stepCount = sequencer.getPatternLength();
-            DynamicJsonDocument responseDoc(stepCount > 16 ? 32768 : 16384);  // Dynamic size for step count
+            // Using PSRAM allocator to avoid 32KB spike on internal DRAM heap
+            PsramJsonDocument responseDoc(stepCount > 16 ? 32768 : 16384);
             responseDoc["stepCount"] = stepCount;  // 6 structures × 16×16 values needs 13-15KB
             responseDoc["type"] = "pattern";
             responseDoc["index"] = pattern;
@@ -1423,13 +1534,20 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
               }
             }
             
-            String output;
-            serializeJson(responseDoc, output);
-            if (isClientReady(client)) {
-              client->text(output);
-            } else {
-              ws->textAll(output);
+            // Serialize to PSRAM buffer to avoid String heap fragmentation
+            if (!_patternBuf) _patternBuf = (char*)ps_malloc(kPatternBufSize);
+            if (_patternBuf) {
+              size_t len = serializeJson(responseDoc, _patternBuf, kPatternBufSize);
+              syslog("CMD", "getPat JSON len=%u heap=%u", (unsigned)len, ESP.getFreeHeap());
+              if (len > 0 && len < kPatternBufSize) {
+                if (isClientReady(client)) {
+                  client->text(_patternBuf, len);
+                } else {
+                  ws->textAll(_patternBuf, len);
+                }
+              }
             }
+            syslog("CMD", "getPat DONE heap=%u", ESP.getFreeHeap());
           }
           else if (cmd == "init") {
             // Cliente solicita inicialización completa
@@ -1598,38 +1716,51 @@ void WebInterface::broadcastPadTrigger(int pad) {
   ws->textAll(buf, len);
 }
 
+// --- Deferred broadcast flags (written from Core1, consumed by Core0 update) ---
+static volatile int _pendingBroadcastStep = -1;     // -1 = nothing pending
+static volatile int _pendingSongPattern   = -1;     // -1 = nothing pending
+static volatile int _pendingSongLength    = 0;
+
 void WebInterface::broadcastStep(int step) {
-  if (!initialized || !ws || ws->count() == 0) return;
-  // Rate-limit step broadcasts to max ~16/sec (every 60ms)
-  static unsigned long lastStepBroadcast = 0;
-  static int lastStep = -1;
-  unsigned long now = millis();
-  if (now - lastStepBroadcast < 60 && step != 0) {
-    lastStep = step; // Remember for next broadcast
-    return;
-  }
-  lastStepBroadcast = now;
-  lastStep = step;
-  // Ultra-compact step message for minimum latency
-  char buf[32];
-  int len = snprintf(buf, sizeof(buf), "{\"type\":\"step\",\"step\":%d}", step);
-  ws->textAll(buf, len);
+  // Called from Core1 (stepChangeCallback) — do NOT touch ws here!
+  // Just set the volatile flag; update() on Core0 will do the actual broadcast.
+  _pendingBroadcastStep = step;
 }
 
 void WebInterface::broadcastSongPattern(int pattern, int songLength) {
-  if (!initialized || !ws || ws->count() == 0) return;
-  // Notify clients about pattern change in song mode
-  char buf[80];
-  int len = snprintf(buf, sizeof(buf), 
-    "{\"type\":\"songPattern\",\"pattern\":%d,\"songLength\":%d}", 
-    pattern, songLength);
-  ws->textAll(buf, len);
+  // Called from Core1 (patternChangeCallback) — do NOT touch ws here!
+  // Just set the volatile flags; update() on Core0 will do the actual broadcast.
+  _pendingSongLength  = songLength;
+  _pendingSongPattern = pattern;   // write pattern LAST so consumer sees both
 }
 
 void WebInterface::update() {
   if (!initialized || !ws || !server) return;
   
   unsigned long now = millis();
+
+  // ── Consume deferred broadcasts from Core1 (thread-safe: only ws access from Core0) ──
+  int step = _pendingBroadcastStep;
+  if (step >= 0 && ws->count() > 0) {
+    _pendingBroadcastStep = -1;
+    static unsigned long lastStepBroadcast = 0;
+    if (now - lastStepBroadcast >= 60 || step == 0) {
+      lastStepBroadcast = now;
+      char buf[32];
+      int len = snprintf(buf, sizeof(buf), "{\"type\":\"step\",\"step\":%d}", step);
+      ws->textAll(buf, len);
+    }
+  }
+  int songPat = _pendingSongPattern;
+  if (songPat >= 0 && ws->count() > 0) {
+    _pendingSongPattern = -1;
+    int songLen = _pendingSongLength;
+    char buf[80];
+    int len = snprintf(buf, sizeof(buf),
+      "{\"type\":\"songPattern\",\"pattern\":%d,\"songLength\":%d}",
+      songPat, songLen);
+    ws->textAll(buf, len);
+  }
 
   // Skip periodic broadcasts during page transitions (2s window)
   bool pageLoading = (pageTransitionMs != 0 && (now - pageTransitionMs) < 2000);
@@ -1690,13 +1821,29 @@ void WebInterface::update() {
     lastHeapLog = now;
     uint32_t h = ESP.getFreeHeap();
     size_t maxBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    uint32_t psramFree = ESP.getFreePsram();
     if (h < minHeapSeen) minHeapSeen = h;
+    
+    syslog("HEAP", "free=%u min=%u block=%u psram=%u ws=%d",
+           h, minHeapSeen, (uint32_t)maxBlock, psramFree, ws ? ws->count() : 0);
+    
+    // Warn web clients when heap is getting low
+    if (h < 30000 && ws && ws->count() > 0) {
+      char warnBuf[80];
+      int wlen = snprintf(warnBuf, sizeof(warnBuf),
+        "{\"type\":\"warning\",\"msg\":\"low_heap\",\"heap\":%u,\"block\":%u}",
+        h, (uint32_t)maxBlock);
+      ws->textAll(warnBuf, wlen);
+    }
     
     // Safety net: if largest contiguous block stays critically low for
     // 3 consecutive checks (30s), gracefully restart to avoid total lockup
-    if (maxBlock < 8000) {
+    if (maxBlock < 12000) {
       lowHeapStrikes++;
+      syslog("HEAP", "WARNING low block=%u strike=%d/3", (uint32_t)maxBlock, lowHeapStrikes);
       if (lowHeapStrikes >= 3) {
+        syslog("HEAP", "CRITICAL restarting due to sustained low heap");
+        delay(100);
         ESP.restart();
       }
     } else {
@@ -1716,16 +1863,27 @@ void WebInterface::update() {
   if (now - lastWifiCheck > 30000) {
     lastWifiCheck = now;
 
-    // ── Modo AP: verificar que siga activo ──
-    if (WiFi.getMode() != WIFI_AP) {
-      WiFi.mode(WIFI_AP);
-      WiFi.softAP("RED808", "red808esp32", 1, 0, 4);
-      WiFi.setSleep(false);
+    if (_staConnected) {
+      // ── STA+AP: check STA still connected, recover if dropped ──
+      if (WiFi.status() != WL_CONNECTED) {
+        WiFi.reconnect();
+      }
+      // AP should stay alive automatically in AP_STA mode
+    } else {
+      // ── AP-only: verify AP is active ──
+      if (WiFi.getMode() != WIFI_AP && WiFi.getMode() != WIFI_AP_STA) {
+        WiFi.mode(WIFI_AP);
+        WiFi.softAP("RED808", "red808esp32", 1, 0, 4);
+        WiFi.setSleep(false);
+      }
     }
   }
 }
 
 String WebInterface::getIP() {
+  if (_staConnected && WiFi.status() == WL_CONNECTED) {
+    return WiFi.localIP().toString();
+  }
   return WiFi.softAPIP().toString();
 }
 
@@ -1733,6 +1891,7 @@ String WebInterface::getIP() {
 void WebInterface::processCommand(const JsonDocument& doc) {
   // ── Heap guard: si queda poca memoria, descartamos el comando ──
   if (ESP.getFreeHeap() < 20000) {
+    syslog("CMD", "DROPPED cmd heap=%u", ESP.getFreeHeap());
     return;
   }
 
@@ -1855,7 +2014,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "start") {
     sequencer.start();
-    dsqUploadPattern(sequencer.getCurrentPattern());
+    dsqUploadPatternDeferred(sequencer.getCurrentPattern());
     spiMaster.dsqControl(1);
     StaticJsonDocument<96> resp;
     resp["type"] = "playState";
@@ -1876,11 +2035,27 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int pattern = doc.containsKey("pattern") ? doc["pattern"].as<int>() : sequencer.getCurrentPattern();
     sequencer.clearPattern(pattern);
     yield();
-    StaticJsonDocument<96> resp;
-    resp["type"] = "patternCleared";
-    resp["pattern"] = pattern;
-    String out; serializeJson(resp, out);
-    if (ws) ws->textAll(out);
+    char buf[64];
+    int blen = snprintf(buf, sizeof(buf), "{\"type\":\"patternCleared\",\"pattern\":%d}", pattern);
+    if (ws && ws->count() > 0) ws->textAll(buf, blen);
+  }
+  else if (cmd == "clearPatterns") {
+    // Bulk clear: {cmd:"clearPatterns", from:0, to:99}
+    int from = doc.containsKey("from") ? doc["from"].as<int>() : 0;
+    int to   = doc.containsKey("to")   ? doc["to"].as<int>()   : from;
+    if (from < 0) from = 0;
+    if (to >= MAX_PATTERNS) to = MAX_PATTERNS - 1;
+    syslog("CMD", "clearPatterns %d-%d heap=%u", from, to, ESP.getFreeHeap());
+    for (int p = from; p <= to; p++) {
+      sequencer.clearPattern(p);
+      if ((p & 3) == 3) yield();   // feed WDT every 4 patterns
+    }
+    yield();
+    char buf[80];
+    int blen = snprintf(buf, sizeof(buf),
+      "{\"type\":\"patternsCleared\",\"from\":%d,\"to\":%d}", from, to);
+    if (ws && ws->count() > 0) ws->textAll(buf, blen);
+    syslog("CMD", "clearPatterns DONE heap=%u", ESP.getFreeHeap());
   }
   else if (cmd == "setSongMode") {
     bool enabled = doc["enabled"];
@@ -1913,31 +2088,30 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "selectPattern") {
     int pattern = doc["index"];
+    syslog("CMD", "selPat idx=%d heap=%u", pattern, ESP.getFreeHeap());
     sequencer.selectPattern(pattern);
-    dsqUploadPattern(pattern);
-    spiMaster.dsqSelectPattern((uint8_t)pattern);
+    dsqUploadPatternDeferred(pattern);
     
-    // Only broadcast state if heap is comfortably above the combined allocation spike
-    // (broadcastSequencerState ~8-13KB) + (patternDoc ~14KB) = ~22-27KB peak
+    // broadcastSequencerState + pattern JSON — no SPI blocking now
     if (ESP.getFreeHeap() > 50000) {
       broadcastSequencerState();
-      yield(); // Let broadcastSequencerState String free before patternDoc alloc
+      yield();
     } else if (ESP.getFreeHeap() > 35000) {
-      // Heap tight — send only a compact state notification, skip full broadcast
       StaticJsonDocument<128> minState;
       minState["type"] = "patternSelected";
       minState["pattern"] = pattern;
       String ms; serializeJson(minState, ms);
       if (ws) ws->textAll(ms);
     }
+    syslog("CMD", "selPat bcast done heap=%u", ESP.getFreeHeap());
     
     if (ESP.getFreeHeap() < 30000) {
+      syslog("CMD", "selPat SKIP pattern JSON (low heap)");
       return;
     }
     yield();
     int stepCount = sequencer.getPatternLength();
-    // 5 data structures × 16 tracks × 16 steps — needs ~11-13KB ArduinoJson pool
-    DynamicJsonDocument patternDoc(stepCount > 16 ? 32768 : 14336);
+    PsramJsonDocument patternDoc(stepCount > 16 ? 32768 : 14336);
     patternDoc["type"] = "pattern";
     patternDoc["index"] = pattern;
     patternDoc["stepCount"] = stepCount;
@@ -2009,9 +2183,16 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       }
     }
     
-    String patternOutput;
-    serializeJson(patternDoc, patternOutput);
-    if (ws && ws->count() > 0) ws->textAll(patternOutput);
+    // Serialize to PSRAM buffer to avoid String heap fragmentation
+    if (!_patternBuf) _patternBuf = (char*)ps_malloc(kPatternBufSize);
+    if (_patternBuf) {
+      size_t len = serializeJson(patternDoc, _patternBuf, kPatternBufSize);
+      syslog("CMD", "selPat JSON len=%u heap=%u", (unsigned)len, ESP.getFreeHeap());
+      if (len > 0 && len < kPatternBufSize && ws && ws->count() > 0) {
+        ws->textAll(_patternBuf, len);
+      }
+    }
+    syslog("CMD", "selPat DONE heap=%u", ESP.getFreeHeap());
   }
   else if (cmd == "loadSample") {
     const char* family   = doc["family"];
@@ -2019,6 +2200,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int padIndex = doc["pad"];
     if (padIndex < 0 || padIndex >= 16) return;
     if (!family || !filename) return;
+    syslog("CMD", "loadSample pad=%d %s/%s heap=%u", padIndex, family, filename, ESP.getFreeHeap());
 
     yield();
 
@@ -3608,8 +3790,9 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "setTrackSynthEngine") {
     int track = doc["track"];
     int engine = doc["engine"];
+    syslog("CMD", "setEngine trk=%d eng=%d heap=%u", track, engine, ESP.getFreeHeap());
     if (track < 0 || track >= 16 || engine < -1 || engine > 6) {
-      return;
+      return;  // Daisy supports engines 0-6 only
     }
 
     // Si el pad estaba en 303 y cambia a otro motor, detener la nota
@@ -3623,19 +3806,21 @@ void WebInterface::processCommand(const JsonDocument& doc) {
 
     setTrackSynthEngine(track, (int8_t)engine);
     spiMaster.dsqSetTrackEngine((uint8_t)track, (int8_t)engine);
+    spiMaster.dsqSetMute((uint8_t)track, engine >= 0);
 
-    StaticJsonDocument<128> responseDoc;
-    responseDoc["type"] = "trackSynthEngineSet";
-    responseDoc["track"] = track;
-    responseDoc["engine"] = engine;
-    String output;
-    serializeJson(responseDoc, output);
-    if (ws) ws->textAll(output);
+    // Stack buffer — avoids String heap allocation
+    char buf[96];
+    int len = snprintf(buf, sizeof(buf),
+      "{\"type\":\"trackSynthEngineSet\",\"track\":%d,\"engine\":%d}",
+      track, engine);
+    if (ws && ws->count() > 0) ws->textAll(buf, len);
+    syslog("CMD", "setEngine DONE trk=%d eng=%d heap=%u", track, engine, ESP.getFreeHeap());
   }
   else if (cmd == "applyKitToAllPads") {
     int engine = doc["engine"];
+    syslog("CMD", "applyKitToAllPads engine=%d heap=%u", engine, ESP.getFreeHeap());
     if (engine < -1 || engine > 6) {
-      return;
+      return;  // Daisy supports engines 0-6 only
     }
 
     // Si algún track estaba en 303 y cambia a otro motor, detener la nota
@@ -3655,7 +3840,10 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     }
 
     setAllTrackSynthEngines((int8_t)engine);
-    for (int i = 0; i < 16; i++) spiMaster.dsqSetTrackEngine((uint8_t)i, (int8_t)engine);
+    for (int i = 0; i < 16; i++) {
+      spiMaster.dsqSetTrackEngine((uint8_t)i, (int8_t)engine);
+      spiMaster.dsqSetMute((uint8_t)i, engine >= 0);
+    }
 
     StaticJsonDocument<256> responseDoc;
     responseDoc["type"] = "trackSynthEngines";
