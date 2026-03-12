@@ -13,6 +13,11 @@ void syslogBegin() {
 void syslog(const char* tag, const char* fmt, ...) {
     if (!_logReady) return;
 
+#if !SYSLOG_RUNTIME_ENABLED
+    // Only allow BOOT tags through when runtime logging is disabled
+    if (tag[0] != 'B' || tag[1] != 'O') return;
+#endif
+
     // Rate-limit: buffer line, flush to file
     char line[256];
     int offset = 0;

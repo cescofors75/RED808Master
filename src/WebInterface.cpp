@@ -649,6 +649,38 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     request->send(200, "text/plain", "log cleared");
   });
 
+  // === MIDI preset files: list + serve ===
+  server->on("/api/midi/list", HTTP_GET, [](AsyncWebServerRequest *request){
+    String json = "[";
+    File dir = LittleFS.open("/midi");
+    bool first = true;
+    if (dir && dir.isDirectory()) {
+      File f = dir.openNextFile();
+      while (f) {
+        String name = f.name();
+        if (name.endsWith(".mid") || name.endsWith(".midi")) {
+          if (!first) json += ",";
+          // Escape quotes in filename
+          name.replace("\"", "\\\"");
+          json += "\"" + name + "\"";
+          first = false;
+        }
+        f = dir.openNextFile();
+      }
+    }
+    json += "]";
+    request->send(200, "application/json", json);
+  });
+
+  server->on("/midi/*", HTTP_GET, [](AsyncWebServerRequest *request){
+    String path = request->url();  // e.g. /midi/filename.mid
+    if (!LittleFS.exists(path)) {
+      request->send(404, "text/plain", "Not found");
+      return;
+    }
+    request->send(LittleFS, path, "audio/midi");
+  });
+
   // === System Log: live viewer with auto-refresh ===
   server->on("/log", HTTP_GET, [](AsyncWebServerRequest *request){
     static const char LOG_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>

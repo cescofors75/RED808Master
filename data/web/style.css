@@ -6906,6 +6906,34 @@ body.midi-dialog-open .midi-import-overlay * {
     margin-top: 5px;
 }
 
+.midi-preset-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 0;
+    align-items: center;
+}
+.preset-label {
+    font-size: 0.85em;
+    color: #aaa;
+    margin: 0 4px 0 0;
+    white-space: nowrap;
+}
+.midi-preset-btn {
+    background: rgba(255,140,0,0.15);
+    border: 1px solid rgba(255,140,0,0.4);
+    color: #ffb347;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    cursor: pointer;
+    transition: background 0.2s;
+    white-space: nowrap;
+}
+.midi-preset-btn:hover {
+    background: rgba(255,140,0,0.35);
+}
+
 .midi-file-info {
     background: rgba(0, 100, 0, 0.15);
     border: 1px solid rgba(0, 200, 0, 0.3);

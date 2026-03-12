@@ -80,7 +80,7 @@ class MIDIFileParser {
 
     parse() {
         this.parseHeader();
-        console.log(`[MIDI Parser] Header: format=${this.format}, tracks=${this.numTracks}, ticksPerBeat=${this.ticksPerBeat}, fileSize=${this.data.byteLength}`);
+        // Track parsed
         for (let i = 0; i < this.numTracks; i++) {
             this.parseTrack();
         }
@@ -261,16 +261,15 @@ class MIDIFileParser {
         // Debug logging
         const noteOnCount = events.filter(e => e.type === 'noteOn').length;
         const channels = [...new Set(events.filter(e => e.type === 'noteOn').map(e => e.channel))];
-        console.log(`[MIDI Parser] Track parsed: ${events.length} events, ${noteOnCount} noteOn, channels: ${channels.map(c => c + 1).join(',')}`);
+        // Track parse done
         if (noteOnCount > 0) {
             const firstNote = events.find(e => e.type === 'noteOn');
             const lastNote = [...events].reverse().find(e => e.type === 'noteOn');
-            console.log(`[MIDI Parser] First noteOn: tick=${firstNote.tick}, ch=${firstNote.channel + 1}, note=${firstNote.note}`);
-            console.log(`[MIDI Parser] Last noteOn: tick=${lastNote.tick}, ch=${lastNote.channel + 1}, note=${lastNote.note}`);
+            // first/last noteOn info available
             // Log per-channel note counts
             const chCounts = {};
             events.filter(e => e.type === 'noteOn').forEach(e => { chCounts[e.channel] = (chCounts[e.channel] || 0) + 1; });
-            console.log(`[MIDI Parser] Notes per channel:`, Object.entries(chCounts).map(([ch, n]) => `Ch${Number(ch) + 1}:${n}`).join(', '));
+            // per-channel note counts available
         }
     }
 }
@@ -292,8 +291,7 @@ function midiToPattern(midiData, options = {}) {
     const startTick = startBar * ticksPerBar;
     const endTick = startTick + (bars * ticksPerBar);
 
-    console.log(`[midiToPattern] ticksPerBeat=${ticksPerBeat}, ticksPerStep=${ticksPerStep}, ticksPerBar=${ticksPerBar}`);
-    console.log(`[midiToPattern] startBar=${startBar}, channel=${channel}, startTick=${startTick}, endTick=${endTick}`);
+
 
     // Collect all note events
     let totalEventsScanned = 0;
@@ -309,7 +307,7 @@ function midiToPattern(midiData, options = {}) {
             allNotes.push(event);
         }
     }
-    console.log(`[midiToPattern] Scanned ${totalEventsScanned} noteOns: ${channelFiltered} filtered by channel, ${tickFiltered} filtered by tick range, ${allNotes.length} passed`);
+    // scan complete
 
     // Create pattern grid [track][step]
     const pattern = Array.from({ length: 16 }, () => Array(16).fill(false));
@@ -491,6 +489,7 @@ function showMidiImportDialog() {
                         <input type="file" id="midiFileInput" accept=".mid,.midi" style="display:none">
                     </div>
                 </div>
+                <div id="midiPresetList" class="midi-preset-list"></div>
                 <div id="midiFileInfo" class="midi-file-info" style="display:none"></div>
                 <div id="midiImportOptions" class="midi-import-options" style="display:none">
                     <div class="import-option-row">
@@ -585,6 +584,40 @@ function showMidiImportDialog() {
             e.stopPropagation();
         }
     });
+
+    // Load preset MIDI list from device
+    loadMidiPresetList();
+}
+
+function loadMidiPresetList() {
+    const container = document.getElementById('midiPresetList');
+    if (!container) return;
+    fetch('/api/midi/list').then(r => r.json()).then(files => {
+        if (!files || files.length === 0) {
+            container.style.display = 'none';
+            return;
+        }
+        container.innerHTML = '<p class="preset-label">🎹 MIDI presets:</p>' +
+            files.map(f => `<button class="midi-preset-btn" onclick="loadMidiPreset('${f.replace(/'/g, "\\'")}')">${f.replace(/\.midi?$/i, '')}</button>`).join('');
+        container.style.display = 'flex';
+    }).catch(() => { container.style.display = 'none'; });
+}
+
+function loadMidiPreset(filename) {
+    const url = '/midi/' + encodeURIComponent(filename);
+    fetch(url).then(r => {
+        if (!r.ok) throw new Error('Not found');
+        return r.arrayBuffer();
+    }).then(buf => {
+        lastMidiFileName = filename;
+        const parser = new MIDIFileParser(buf);
+        parsedMidiData = parser.parse();
+        currentImportBar = 0;
+        showMidiFileInfo({ name: filename, size: buf.byteLength }, parsedMidiData);
+        updateMidiPreview();
+    }).catch(err => {
+        alert('Error cargando MIDI: ' + err.message);
+    });
 }
 
 function closeMidiImportDialog() {
@@ -678,11 +711,11 @@ function showMidiFileInfo(file, midiData) {
     // Auto-navigate to first bar with notes for the selected channel
     const firstBar = findFirstBarWithNotes(midiData, currentImportChannel, GM_DRUM_TO_PAD);
     currentImportBar = firstBar;
-    console.log(`[MIDI Import] Auto-detected channel: ${currentImportChannel + 1}, first bar with drum notes: ${firstBar + 1}`);
+    // auto-detected channel
 
     // Get mappable note stats for the selected channel
     const chStats = countMappableNotes(midiData, currentImportChannel, GM_DRUM_TO_PAD);
-    console.log(`[MIDI Import] Channel ${currentImportChannel + 1}: ${chStats.total} total notes, ${chStats.mappable} mappable to drum pads`);
+    // channel stats available
 
     // Update channel select with note counts
     const channelSelect = document.getElementById('midiChannelSelect');
@@ -702,7 +735,7 @@ function showMidiFileInfo(file, midiData) {
         const fb = findFirstBarWithNotes(midiData, currentImportChannel, GM_DRUM_TO_PAD);
         currentImportBar = fb;
         document.getElementById('barDisplay').textContent = `${currentImportBar + 1} / ${totalBars}`;
-        console.log(`[MIDI Import] Channel changed to ${currentImportChannel + 1}, jumping to bar ${fb + 1}`);
+        // channel changed
         updateMidiPreview();
         updateBarMap(midiData);
     });
@@ -876,7 +909,7 @@ function updateMidiPreview() {
         }
     }
     statsEl.innerHTML = statsHtml;
-    console.log(`[MIDI Import] Bar ${currentImportBar + 1}: ${result.totalNotes} notes, ${result.mappedNotes} mapped, channel=${currentImportChannel}`);
+    // bar stats available
 
     document.getElementById('midiPreview').style.display = 'block';
 }
@@ -1006,7 +1039,7 @@ function confirmMidiImport() {
         let totalMapped = 0;
         const midiFileName = lastMidiFileName || 'MIDI';
 
-        console.log(`[MIDI Import] Starting BULK song import: ${barsToImport} bars`);
+        // Starting bulk song import
 
         // Close the import dialog FIRST, then show progress
         closeMidiImportDialog();
@@ -1098,7 +1131,7 @@ function confirmMidiImport() {
                 }
                 completeImportProgress(midiFileName, barsToImport, totalMapped);
             }, 300);
-            console.log(`[MIDI Import] Song imported: ${barsToImport} bars, ${totalMapped} notes, ACKs: ${acksReceived}`);
+            // Song import finalized
         }
 
         // Global fallback timeout
@@ -1120,7 +1153,7 @@ function confirmMidiImport() {
             quantize: true
         });
 
-        console.log(`[MIDI Import] Single bar: bar ${currentImportBar + 1}, ${result.totalNotes} notes found, ${result.mappedNotes} mapped`);
+        // Single bar imported
 
         if (result.mappedNotes === 0) {
             alert(`No hay notas mapeables en el compás ${currentImportBar + 1}. Usa las flechas ◀ ▶ para encontrar un compás con datos.`);
@@ -1152,7 +1185,7 @@ function confirmMidiImport() {
             sendWebSocket({ cmd: 'getPattern' });
             parsedMidiData = null; // Clean up
         }, 400);
-        console.log(`[MIDI Import] Single bar BULK imported: bar ${currentImportBar + 1}, ${result.mappedNotes} notes`);
+        // Single bar bulk import done
     }
 }
 

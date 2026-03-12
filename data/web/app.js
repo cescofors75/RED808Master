@@ -2774,8 +2774,6 @@ function triggerPad(padIndex) {
         return;
     }
 
-    console.log('[PAD] triggerPad()', padIndex, 'ws=', ws ? ws.readyState : 'null');
-
     // Enviar al ESP32 (Protocolo Binario para baja latencia)
     if (ws && ws.readyState === WebSocket.OPEN) {
         const data = new Uint8Array(3);
