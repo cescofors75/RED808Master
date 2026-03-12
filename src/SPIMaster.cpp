@@ -340,9 +340,9 @@ void SPIMaster::process() {
         lastHeartbeat = millis();
     }
 
-    // ── 3. Poll audio peaks every 120ms ──
+    // ── 3. Poll audio peaks every 200ms (was 120ms — reduces SPI mutex hold time) ──
     static uint32_t lastPeakPoll = 0;
-    if (stm32Connected && (millis() - lastPeakPoll > 120)) {
+    if (stm32Connected && (millis() - lastPeakPoll > 200)) {
         requestPeaks();
         lastPeakPoll = millis();
     }

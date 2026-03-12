@@ -415,7 +415,15 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     }
     if (WiFi.status() == WL_CONNECTED) {
       _staConnected = true;
-      Serial.printf("[WiFi] STA connected: %s  IP: %s\n", staSSID, WiFi.localIP().toString().c_str());
+      // Restart AP on SAME channel as STA to eliminate radio channel switching
+      // (channel hopping causes hardware interrupts that jitter Core1 audio)
+      uint8_t staCh = WiFi.channel();
+      if (staCh > 0 && staCh != 1) {
+        WiFi.softAP(apSsid, apPassword, staCh, 0, 4);
+        delay(100);
+      }
+      Serial.printf("[WiFi] STA connected: %s  IP: %s  ch=%d\n",
+                    staSSID, WiFi.localIP().toString().c_str(), staCh);
     } else {
       Serial.printf("[WiFi] STA failed for '%s', AP-only mode\n", staSSID);
       // Keep AP running, STA just didn't connect
