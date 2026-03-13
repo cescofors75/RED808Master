@@ -1819,7 +1819,7 @@ void WebInterface::update() {
   if (step >= 0 && ws->count() > 0) {
     _pendingBroadcastStep = -1;
     static unsigned long lastStepBroadcast = 0;
-    if (now - lastStepBroadcast >= 60 || step == 0) {
+    if (now - lastStepBroadcast >= 80 || step == 0) {
       lastStepBroadcast = now;
       char buf[32];
       int len = snprintf(buf, sizeof(buf), "{\"type\":\"step\",\"step\":%d}", step);
@@ -1845,7 +1845,7 @@ void WebInterface::update() {
   
   // Broadcast audio levels for all WS clients (main UI + /adm)
   static unsigned long lastAudioLevels = 0;
-  if (!pageLoading && now - lastAudioLevels >= 100 && ws->count() > 0) {
+  if (!pageLoading && now - lastAudioLevels >= 150 && ws->count() > 0) {
     lastAudioLevels = now;
 
     // Peak data is polled by SPIMaster::process() on Core1 —

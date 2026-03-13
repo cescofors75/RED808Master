@@ -16,6 +16,8 @@ const PATTERN_NAMES = ['HIP HOP', 'TECHNO', 'DnB', 'BREAK', 'HOUSE', 'TRAP'];
 
 // Sync LEDs: when ON, live pads flash in rhythm with sequencer
 let syncLedsEnabled = false;
+let _cachedPadEls = null; // cached pad DOM elements for sync LEDs
+let _syncFlashTimer = null; // single timer for all sync flashes
 
 // Sequencer caches
 let currentStepCount = 16;  // 16, 32, or 64
@@ -1201,6 +1203,7 @@ function updateLoopButtonState(padIndex) {
 
 // Create Pads
 function createPads() {
+    _cachedPadEls = null; // invalidate sync-LED cache
     const grid = document.getElementById('padsGrid');
     
     const families = padNames;
@@ -3738,14 +3741,23 @@ function _applyStepUpdate(step) {
 
     // === SYNC LEDS: flash live pads in rhythm with sequencer ===
     if (syncLedsEnabled && isPlaying) {
+        if (!_cachedPadEls) {
+            _cachedPadEls = new Array(16);
+            for (let i = 0; i < 16; i++) _cachedPadEls[i] = document.querySelector(`.pad[data-pad="${i}"]`);
+        }
+        const flashedPads = [];
         for (let track = 0; track < 16; track++) {
             if (circularSequencerData[track] && circularSequencerData[track][step]) {
-                const pad = document.querySelector(`.pad[data-pad="${track}"]`);
-                if (pad) {
-                    pad.classList.add('sync-flash');
-                    setTimeout(() => pad.classList.remove('sync-flash'), 120);
-                }
+                const pad = _cachedPadEls[track];
+                if (pad) { pad.classList.add('sync-flash'); flashedPads.push(pad); }
             }
+        }
+        if (flashedPads.length) {
+            if (_syncFlashTimer) clearTimeout(_syncFlashTimer);
+            _syncFlashTimer = setTimeout(() => {
+                for (let i = 0; i < flashedPads.length; i++) flashedPads[i].classList.remove('sync-flash');
+                _syncFlashTimer = null;
+            }, 120);
         }
     }
 }
