@@ -51,7 +51,7 @@ let padFilterState = new Array(24).fill(0); // 0 = FILTER_NONE (16 main + 8 xtra
 let trackFilterState = new Array(16).fill(0); // 0 = FILTER_NONE
 
 // Synth engine selector per pad (-1 = sample mode, 0=808, 1=909, 2=505, 3=303, 4=WT, 5=SH101, 6=FM2OP)
-let padSynthEngine = new Array(16).fill(-1);
+var padSynthEngine = new Array(16).fill(-1);
 // TB-303 note map per live pad (chromatic scale C3-D5)
 const PAD_303_NOTES = [48,50,52,53,55,57,59,60,62,64,65,67,69,71,72,74];
 const SYNTH_ENGINE_LABELS = ['808','909','505','303','WT','SH101','FM2OP'];
@@ -248,7 +248,8 @@ async function loadDeferredModules() {
         'waveform-visualizer.js',
         'synth-editor.js',
         'midi-import.js',
-        'export-pattern.js'
+        'export-pattern.js',
+        'melody-editor.js'
     ];
     for (const src of modules) {
         await _loadScript(src);
@@ -256,6 +257,7 @@ async function loadDeferredModules() {
     // Initialize modules that need explicit init
     if (window.initKeyboardControls) window.initKeyboardControls();
     if (typeof initSynthEditor === 'function') initSynthEditor();
+    if (window.initMelodyEditor) window.initMelodyEditor();
     console.log('[Loader] All deferred modules loaded');
 }
 
@@ -326,7 +328,7 @@ function initWebSocket() {
             window._bulkAckCallback(data.p);
             return;
         }
-        handleWebSocketMessage(data);
+        (window.handleWebSocketMessage || handleWebSocketMessage)(data);
     };
 }
 
@@ -409,7 +411,7 @@ function handleWebSocketMessage(data) {
             if (data.stepCount && data.stepCount !== currentStepCount) {
                 applyStepCount(data.stepCount);
             }
-            loadPatternData(data);
+            (window.loadPatternData || loadPatternData)(data);
             // Actualizar patrón actual si viene el índice
             if (data.index !== undefined) {
                 currentPatternIndex = data.index;
@@ -530,7 +532,7 @@ function handleWebSocketMessage(data) {
             break;
         case 'trackSynthEngineSet':
             if (data.track !== undefined && data.engine !== undefined) {
-                setSynthEngineExact(data.track, data.engine, false);
+                (window.setSynthEngineExact || setSynthEngineExact)(data.track, data.engine, false);
             }
             break;
         case 'trackSynthEngines':
@@ -2867,7 +2869,7 @@ function setSynthEngineExact(padIndex, engine, notifyBackend = true, refreshGlob
     padSynthEngine[padIndex] = normalizedEngine;
     updatePadSynthVisual(padIndex, normalizedEngine);
     updateTrackStepDots(padIndex);
-    if (typeof onSynthEngineChanged === 'function') onSynthEngineChanged(padIndex, normalizedEngine);
+    if (typeof window.onSynthEngineChanged === 'function') window.onSynthEngineChanged(padIndex, normalizedEngine);
 
     if (notifyBackend) {
         sendWebSocket({ cmd: 'setTrackSynthEngine', track: padIndex, engine: normalizedEngine });
@@ -2880,9 +2882,11 @@ function syncTrackSynthEnginesFromState(engines) {
     if (!Array.isArray(engines)) return;
     for (let track = 0; track < 16; track++) {
         const engine = parseInt(engines[track], 10);
-        setSynthEngineExact(track, Number.isFinite(engine) ? engine : -1, false, false);
+        (window.setSynthEngineExact || setSynthEngineExact)(track, Number.isFinite(engine) ? engine : -1, false, false);
     }
     refreshGlobalKitButtons();
+    // Notify melody editor that engines changed
+    if (typeof window.onSynthEnginesRefreshed === 'function') window.onSynthEnginesRefreshed();
 }
 
 // Activar/desactivar engine synth en un pad (toggle)

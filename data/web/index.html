@@ -97,6 +97,7 @@
             <button class="tab-btn" data-tab="midi">🎹 MIDI</button>
             <button class="tab-btn" data-tab="daisy-sd">💾 SD</button>
             <button class="tab-btn" data-tab="info">📊 INFO</button>
+            <button class="tab-btn" data-tab="melody">🎼 MELODY</button>
             <a href="/multiview.html" class="tab-btn tab-btn-multiview" title="Ver múltiples secciones a la vez">🖥 MULTIVIEW</a>
         </nav>
 
@@ -1514,6 +1515,37 @@
         </div>
 
         <!-- Fin de Tabs -->
+
+        <!-- TAB: Melody Editor -->
+        <div id="tab-melody" class="tab-content">
+            <section class="section melody-tab-section">
+                <div class="melody-tab-header">
+                    <h2>🎼 MELODY EDITOR</h2>
+                    <div class="melody-tab-track-selector">
+                        <label>Track:</label>
+                        <select id="melodyTrackSelect"></select>
+                        <label style="margin-left:12px;">Engine:</label>
+                        <select id="melodyEngineSelect" disabled>
+                            <option value="-1">— Engine —</option>
+                            <option value="3">303 Acid</option>
+                            <option value="4">WaveTable</option>
+                            <option value="5">SH-101</option>
+                            <option value="6">FM 2-Op</option>
+                        </select>
+                        <span id="melodyTrackEngine" class="melody-engine-badge">—</span>
+                    </div>
+                </div>
+                <div id="melodyTabPresets" class="melody-tab-presets"></div>
+                <div class="melody-tab-controls">
+                    <button id="melodyTabPlay" class="melody-ctrl-btn">▶ Preview</button>
+                    <label class="melody-flag-label"><input type="checkbox" id="melodyTabAccent"> Accent</label>
+                    <label class="melody-flag-label"><input type="checkbox" id="melodyTabSlide"> Slide</label>
+                    <button id="melodyTabClear" class="melody-ctrl-btn">🗑️ Clear Track</button>
+                    <span class="melody-hint">Click = set note | Right-click = rest | Presets auto-fill</span>
+                </div>
+                <div id="melodyTabPianoRoll" class="melody-tab-piano-roll"></div>
+            </section>
+        </div>
 
         <!-- Footer -->
         <footer class="footer">

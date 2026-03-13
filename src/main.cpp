@@ -637,10 +637,18 @@ void setup() {
         // Synth engine: el ESP32 envía el trigger por SPI
         float scaled = (velocity / 127.0f) * (trackVolume / 100.0f);
         uint8_t synthVel = (uint8_t)constrain((int)roundf(scaled * 127.0f), 1, 127);
-        if (engine == 3) {
-            uint8_t midiNote = PAD_303_NOTES[track];
-            spiMaster.synth303NoteOn(midiNote, false, false);
+        // Melodic engines (303/WTOSC/SH101/FM2Op): use per-step note if available
+        if (engine >= 3) {
+            int pat = sequencer.getCurrentPattern();
+            int step = sequencer.getCurrentStep();
+            uint8_t note = sequencer.getStepNote(pat, track, step);
+            uint8_t flags = sequencer.getStepFlags(pat, track, step);
+            if (note == 0) return; // no melody note assigned → skip (silence)
+            bool accent = (flags & 0x01) != 0;
+            bool slide  = (flags & 0x02) != 0;
+            spiMaster.synthNoteOnEx((uint8_t)engine, note, synthVel, accent, slide);
         } else {
+            // Percussion engines (808/909/505): trigger by instrument
             spiMaster.synthTrigger((uint8_t)engine, (uint8_t)track, synthVel);
         }
     });

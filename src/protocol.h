@@ -251,6 +251,7 @@ typedef struct __attribute__((packed)) {
 #define CMD_SYNTH_303_PARAM  0xC4  // TB-303 global parameter
 #define CMD_SYNTH_ACTIVE     0xC5  // Engine active mask (1 or 2 bytes)
 #define CMD_SYNTH_PRESET     0xC6  // Apply factory preset [engine(1), preset(1)]
+#define CMD_SYNTH_NOTE_ON_EX 0xC7  // Generic synth note on (any engine: 303/SH101/FM2Op/WTOSC)
 
 // Synth engine IDs
 #define SYNTH_ENGINE_808   0
@@ -323,6 +324,15 @@ typedef struct __attribute__((packed)) {
 } SynthNoteOnPayload;
 
 // CMD_SYNTH_NOTE_OFF (0xC3) — no payload
+
+// CMD_SYNTH_NOTE_ON_EX (0xC7) — 5 bytes (generic melodic synth note-on)
+typedef struct __attribute__((packed)) {
+    uint8_t  engine;      // SYNTH_ENGINE_303 / _WTOSC / _SH101 / _FM2OP
+    uint8_t  midiNote;    // 0-127
+    uint8_t  velocity;    // 0-127
+    uint8_t  accent;      // 0=normal, 1=accent (303 only)
+    uint8_t  slide;       // 0=normal, 1=slide  (303 only)
+} SynthNoteOnExPayload;
 
 // CMD_SYNTH_303_PARAM (0xC4) — 5 bytes
 typedef struct __attribute__((packed)) {

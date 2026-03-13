@@ -35,7 +35,7 @@ static constexpr size_t kStateBufSize = 8192;  // serialized JSON fits in ~5-6KB
 
 // Pre-allocated PSRAM buffer for pattern JSON (selectPattern/getPattern)
 static char* _patternBuf = nullptr;
-static constexpr size_t kPatternBufSize = 24576;  // pattern JSON ~12-18KB
+static constexpr size_t kPatternBufSize = 40960;  // pattern JSON ~18-32KB (with melody data)
 
 // PSRAM allocator for ArduinoJson — documents allocated here never touch internal heap
 struct PsramAllocator {
@@ -511,6 +511,10 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   server->on("/export-pattern.js", HTTP_GET, [](AsyncWebServerRequest *request){
     sendWebAsset(request, "/export-pattern.js", "application/javascript", "no-cache");
   });
+
+  server->on("/melody-editor.js", HTTP_GET, [](AsyncWebServerRequest *request){
+    sendWebAsset(request, "/melody-editor.js", "application/javascript", "no-cache");
+  });
   
   // Patchbay page
   server->on("/patchbay", HTTP_GET, [this](AsyncWebServerRequest *request){
@@ -679,6 +683,19 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
       return;
     }
     request->send(LittleFS, path, "audio/midi");
+  });
+
+  // === Melody presets: hardcoded classic patterns ===
+  server->on("/api/melody/list", HTTP_GET, [](AsyncWebServerRequest *request){
+    static const char MELODY_PRESETS[] PROGMEM = R"json([
+      {"name":"Acid Am","notes":[45,0,57,48,45,0,57,60,45,0,57,48,45,0,60,57],"accents":[1,0,0,0,1,0,0,1,1,0,0,0,1,0,1,0],"slides":[0,0,0,1,0,0,1,0,0,0,0,1,0,0,0,1]},
+      {"name":"303 Bass","notes":[36,0,36,38,36,0,41,0,36,0,36,43,36,0,41,38],"accents":[1,0,1,0,0,0,1,0,1,0,1,0,0,0,1,0],"slides":[0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1]},
+      {"name":"Arpeggio","notes":[48,52,55,60,48,52,55,60,48,52,55,60,48,52,55,60],"accents":[1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],"slides":[0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1]},
+      {"name":"Detroit","notes":[48,48,0,48,60,0,48,48,0,48,55,0,48,48,0,60],"accents":[1,0,0,1,1,0,0,0,1,0,1,0,0,0,0,1],"slides":[0,1,0,0,0,0,0,1,0,0,0,0,0,1,0,0]},
+      {"name":"Fm Bell","notes":[60,67,64,72,60,67,64,72,60,67,64,72,60,67,64,72],"accents":[1,0,0,1,0,0,1,0,1,0,0,1,0,0,1,0],"slides":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},
+      {"name":"Octave Riff","notes":[36,48,36,48,38,50,38,50,41,53,41,53,43,55,43,55],"accents":[1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],"slides":[0,1,0,0,0,1,0,0,0,1,0,0,0,1,0,0]}
+    ])json";
+    request->send_P(200, "application/json", MELODY_PRESETS);
   });
 
   // === System Log: live viewer with auto-refresh ===
@@ -1491,8 +1508,8 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             yield();
             int stepCount = sequencer.getPatternLength();
             // Using PSRAM allocator to avoid 32KB spike on internal DRAM heap
-            PsramJsonDocument responseDoc(stepCount > 16 ? 32768 : 16384);
-            responseDoc["stepCount"] = stepCount;  // 6 structures × 16×16 values needs 13-15KB
+            PsramJsonDocument responseDoc(stepCount > 16 ? 49152 : 24576);
+            responseDoc["stepCount"] = stepCount;  // 8+ structures × 16×steps values
             responseDoc["type"] = "pattern";
             responseDoc["index"] = pattern;
             
@@ -1571,6 +1588,24 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
                 } else {
                   trackLocks.add(-1);
                 }
+              }
+            }
+
+            // Melody: per-step MIDI notes (0 = rest)
+            JsonObject notesObj = responseDoc.createNestedObject("stepNotes");
+            for (int track = 0; track < 16; track++) {
+              JsonArray trackNotes = notesObj.createNestedArray(String(track));
+              for (int step = 0; step < stepCount; step++) {
+                trackNotes.add(sequencer.getStepNote(track, step));
+              }
+            }
+
+            // Melody: per-step flags (bit0=accent, bit1=slide)
+            JsonObject flagsObj = responseDoc.createNestedObject("stepFlags");
+            for (int track = 0; track < 16; track++) {
+              JsonArray trackFlags = flagsObj.createNestedArray(String(track));
+              for (int step = 0; step < stepCount; step++) {
+                trackFlags.add(sequencer.getStepFlags(track, step));
               }
             }
             
@@ -3684,6 +3719,38 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     serializeJson(responseDoc, output);
     if (ws) ws->textAll(output);
   }
+  else if (cmd == "setStepNote") {
+    int track = doc["track"];
+    int step = doc["step"];
+    int note = doc.containsKey("note") ? doc["note"].as<int>() : 0;
+    int flags = doc.containsKey("flags") ? doc["flags"].as<int>() : -1;
+    if (track < 0 || track >= MAX_TRACKS || step < 0 || step >= STEPS_PER_PATTERN) return;
+    if (note < 0) note = 0;
+    if (note > 127) note = 127;
+
+    if (doc.containsKey("pattern")) {
+      int pattern = doc["pattern"].as<int>();
+      if (pattern >= 0 && pattern < MAX_PATTERNS) {
+        sequencer.setStepNote(pattern, track, step, (uint8_t)note);
+        if (flags >= 0) sequencer.setStepFlags(pattern, track, step, (uint8_t)flags);
+      }
+    } else {
+      sequencer.setStepNote(track, step, (uint8_t)note);
+      if (flags >= 0) sequencer.setStepFlags(track, step, (uint8_t)flags);
+    }
+
+    bool silent = doc.containsKey("silent") && doc["silent"].as<bool>();
+    if (!silent) {
+      StaticJsonDocument<160> resp;
+      resp["type"] = "stepNoteSet";
+      resp["track"] = track;
+      resp["step"] = step;
+      resp["note"] = note;
+      if (flags >= 0) resp["flags"] = flags;
+      String out; serializeJson(resp, out);
+      if (ws) ws->textAll(out);
+    }
+  }
   else if (cmd == "setHumanize") {
     int timing = doc.containsKey("timing") ? doc["timing"].as<int>() : 0;
     int velocity = doc.containsKey("velocity") ? doc["velocity"].as<int>() : 0;
@@ -4085,6 +4152,16 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     bool    accent = doc["accent"] | false;
     bool    slide  = doc["slide"]  | false;
     spiMaster.synth303NoteOn(note, accent, slide);
+  }
+
+  // {"cmd":"synthNoteOnEx","engine":4,"note":60,"velocity":100,"accent":false,"slide":false}
+  else if (cmd == "synthNoteOnEx") {
+    uint8_t engine   = doc["engine"]   | 3;
+    uint8_t note     = doc["note"]     | 48;
+    uint8_t velocity = doc["velocity"] | 100;
+    bool    accent   = doc["accent"]   | false;
+    bool    slide    = doc["slide"]    | false;
+    spiMaster.synthNoteOnEx(engine, note, velocity, accent, slide);
   }
 
   // {"cmd":"synth303NoteOff"}

@@ -286,6 +286,8 @@ void Sequencer::clearPattern(int pattern) {
   memset(pd->stepCutoffLockEnabled[pattern],  0, sizeof(pd->stepCutoffLockEnabled[pattern]));
   memset(pd->stepReverbSendLockEnabled[pattern], 0, sizeof(pd->stepReverbSendLockEnabled[pattern]));
   memset(pd->stepReverbSendLockValue[pattern],   0, sizeof(pd->stepReverbSendLockValue[pattern]));
+  memset(pd->stepNotes[pattern],                  0, sizeof(pd->stepNotes[pattern]));              // 0 = rest
+  memset(pd->stepFlags[pattern],                  0, sizeof(pd->stepFlags[pattern]));              // no accent/slide
   // stepCutoffLockHz is uint16_t — memset can't set 1000, need loop
   for (int t = 0; t < MAX_TRACKS; t++) {
     for (int s = 0; s < STEPS_PER_PATTERN; s++) {
@@ -355,6 +357,60 @@ uint8_t Sequencer::getStepNoteLen(int pattern, int track, int step) {
   if (track < 0 || track >= MAX_TRACKS) return 1;
   if (step < 0 || step >= STEPS_PER_PATTERN) return 1;
   return pd->noteLenDivs[pattern][track][step];
+}
+
+// ============= MELODY NOTE PER STEP =============
+
+void Sequencer::setStepNote(int track, int step, uint8_t midiNote) {
+  if (track < 0 || track >= MAX_TRACKS) return;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return;
+  pd->stepNotes[currentPattern][track][step] = midiNote;
+}
+
+void Sequencer::setStepNote(int pattern, int track, int step, uint8_t midiNote) {
+  if (pattern < 0 || pattern >= MAX_PATTERNS) return;
+  if (track < 0 || track >= MAX_TRACKS) return;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return;
+  pd->stepNotes[pattern][track][step] = midiNote;
+}
+
+uint8_t Sequencer::getStepNote(int track, int step) {
+  if (track < 0 || track >= MAX_TRACKS) return 0;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return 0;
+  return pd->stepNotes[currentPattern][track][step];
+}
+
+uint8_t Sequencer::getStepNote(int pattern, int track, int step) {
+  if (pattern < 0 || pattern >= MAX_PATTERNS) return 0;
+  if (track < 0 || track >= MAX_TRACKS) return 0;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return 0;
+  return pd->stepNotes[pattern][track][step];
+}
+
+void Sequencer::setStepFlags(int track, int step, uint8_t flags) {
+  if (track < 0 || track >= MAX_TRACKS) return;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return;
+  pd->stepFlags[currentPattern][track][step] = flags;
+}
+
+void Sequencer::setStepFlags(int pattern, int track, int step, uint8_t flags) {
+  if (pattern < 0 || pattern >= MAX_PATTERNS) return;
+  if (track < 0 || track >= MAX_TRACKS) return;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return;
+  pd->stepFlags[pattern][track][step] = flags;
+}
+
+uint8_t Sequencer::getStepFlags(int track, int step) {
+  if (track < 0 || track >= MAX_TRACKS) return 0;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return 0;
+  return pd->stepFlags[currentPattern][track][step];
+}
+
+uint8_t Sequencer::getStepFlags(int pattern, int track, int step) {
+  if (pattern < 0 || pattern >= MAX_PATTERNS) return 0;
+  if (track < 0 || track >= MAX_TRACKS) return 0;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return 0;
+  return pd->stepFlags[pattern][track][step];
 }
 
 void Sequencer::setPatternBulk(int pattern, const bool stepsData[MAX_TRACKS][STEPS_PER_PATTERN], const uint8_t velsData[MAX_TRACKS][STEPS_PER_PATTERN]) {

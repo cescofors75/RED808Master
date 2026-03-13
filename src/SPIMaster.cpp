@@ -1702,6 +1702,16 @@ void SPIMaster::synth303Param(uint8_t paramId, float value) {
     sendCommand(CMD_SYNTH_303_PARAM, &p, sizeof(p));
 }
 
+void SPIMaster::synthNoteOnEx(uint8_t engine, uint8_t midiNote, uint8_t velocity, bool accent, bool slide) {
+    SynthNoteOnExPayload p;
+    p.engine   = engine;
+    p.midiNote = midiNote;
+    p.velocity = velocity;
+    p.accent   = accent ? 1 : 0;
+    p.slide    = slide  ? 1 : 0;
+    sendCommand(CMD_SYNTH_NOTE_ON_EX, &p, sizeof(p));
+}
+
 void SPIMaster::synthSetActive(uint8_t engineMask) {
     // Legacy 1-byte: store in low byte of 16-bit mask
     SynthActivePayload p;

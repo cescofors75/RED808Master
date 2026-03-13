@@ -38,6 +38,9 @@ struct PatternData {
   uint16_t stepCutoffLockHz[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
   bool    stepReverbSendLockEnabled[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
   uint8_t stepReverbSendLockValue[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+  // Melody: per-step MIDI note (0 = rest/inherit) and flags (bit0=accent, bit1=slide)
+  uint8_t stepNotes[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+  uint8_t stepFlags[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
 };
 // sizeof(PatternData) ≈ 229 KB  →  allocated from 8 MB PSRAM, not DRAM
 
@@ -114,6 +117,17 @@ public:
   uint8_t getStepReverbSendLock(int track, int step);
   uint8_t getStepReverbSendLock(int pattern, int track, int step);
   
+  // Melody note per step (MIDI note 0-127, 0 = rest/no note)
+  void setStepNote(int track, int step, uint8_t midiNote);
+  void setStepNote(int pattern, int track, int step, uint8_t midiNote);
+  uint8_t getStepNote(int track, int step);
+  uint8_t getStepNote(int pattern, int track, int step);
+  // Melody flags per step (bit0=accent, bit1=slide)
+  void setStepFlags(int track, int step, uint8_t flags);
+  void setStepFlags(int pattern, int track, int step, uint8_t flags);
+  uint8_t getStepFlags(int track, int step);
+  uint8_t getStepFlags(int pattern, int track, int step);
+
   // Bulk pattern writing (for reliable MIDI import)
   void setPatternBulk(int pattern, const bool stepsData[MAX_TRACKS][STEPS_PER_PATTERN], const uint8_t velsData[MAX_TRACKS][STEPS_PER_PATTERN]);
   
