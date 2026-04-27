@@ -22,7 +22,7 @@ struct SpiQueuedCmd {
 };
 
 // Audio constants (shared with STM32)
-#define SAMPLE_RATE 44100
+#define SAMPLE_RATE 48000
 #define MAX_VOICES 10
 
 // ═══════════════════════════════════════════════════════
@@ -207,6 +207,12 @@ public:
     void setTrackPan(int track, int8_t pan);             // -100..+100
     void setTrackMute(int track, bool mute);
     void setTrackSolo(int track, bool solo);
+    uint8_t getTrackReverbSend(int track) const { return (track >= 0 && track < MAX_AUDIO_TRACKS) ? cachedTrackReverbSend[track] : 0; }
+    uint8_t getTrackDelaySend(int track) const { return (track >= 0 && track < MAX_AUDIO_TRACKS) ? cachedTrackDelaySend[track] : 0; }
+    uint8_t getTrackChorusSend(int track) const { return (track >= 0 && track < MAX_AUDIO_TRACKS) ? cachedTrackChorusSend[track] : 0; }
+    int8_t getTrackPan(int track) const { return (track >= 0 && track < MAX_AUDIO_TRACKS) ? cachedTrackPan[track] : 0; }
+    bool getTrackMute(int track) const { return (track >= 0 && track < MAX_AUDIO_TRACKS) ? cachedTrackMute[track] : false; }
+    bool getTrackSolo(int track) const { return (track >= 0 && track < MAX_AUDIO_TRACKS) ? cachedTrackSolo[track] : false; }
 
     // Per-track extended FX
     void setTrackPhaser(int track, bool active, float rate = 1.0f, float depth = 50.0f, float feedback = 50.0f);

@@ -9,7 +9,7 @@ Branch: main
 - [ ] 1) Frontera de responsabilidades (ESP32 manda, Daisy ejecuta)
 - [ ] 2) Cobertura Web completa (todo controlable desde UI)
 - [ ] 3) Limpieza de lógica “hacia Daisy”
-- [ ] 4) Protocolo UART robusto y sincronizado
+- [ ] 4) Protocolo SPI robusto y sincronizado
 - [ ] 5) Sincronización de eventos y triggers
 - [ ] 6) SD/Upload en background
 - [ ] 7) Gate de build y release
@@ -22,7 +22,7 @@ Branch: main
 - [ ] El secuenciador (steps, patrón, song mode, probabilidad, ratchet, humanize) vive solo en ESP32.
 - [ ] El cálculo de LFO/modulación vive solo en ESP32.
 - [ ] Daisy no decide timing ni lógica de patrón; solo recibe comandos.
-- [ ] Ningún cálculo de audio/LFO/step-state cruza UART.
+- [ ] Ningún cálculo de audio/LFO/step-state cruza el enlace SPI.
 
 ### Evidencia esperada
 - Referencias en código de ESP32: secuenciador/LFO/timing centralizados.
@@ -59,14 +59,14 @@ Notas:
 
 ### Evidencia esperada
 - Flags/modo estricto verificables.
-- Tráfico UART revisado con payloads permitidos.
+- Tráfico SPI revisado con payloads permitidos.
 
 Resultado: [ ] OK  [ ] NOK
 Notas:
 
 ---
 
-## 4) Protocolo UART robusto y sincronizado
+## 4) Protocolo SPI robusto y sincronizado
 
 ### Validaciones
 - [ ] Comandos canónicos definidos y usados: `TRIGGER`, `PARAM_RT`, `TEMPO`, `SYNC/STATE`, `LOAD_SAMPLE`, `UPLOAD_START/CHUNK/END`, `MUTE`, `REQ_DIR`.

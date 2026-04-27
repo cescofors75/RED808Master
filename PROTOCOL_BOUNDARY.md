@@ -2,7 +2,7 @@
 
 ## Principio
 ESP32 es **master de lógica y tiempo**. Daisy es **motor DSP**.
-Por el enlace UART viajan **instrucciones**, no cálculos de audio.
+Por el enlace SPI viajan **instrucciones**, no cálculos de audio.
 
 ## ESP32 → Daisy (Command Plane)
 - `TRIGGER`: `CMD_TRIGGER_SEQ` / `CMD_TRIGGER_LIVE`

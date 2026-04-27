@@ -27,8 +27,8 @@
 // --- WiFi: Red Doméstica (modo STA) ---
 // Pon aquí tu SSID y contraseña WiFi de casa.
 // Si se deja vacío (""), usará solo modo AP (red propia RED808).
-#define HOME_WIFI_SSID     "MIWIFI_2G_yU2f"       // vacío = solo modo AP (RED808)
-#define HOME_WIFI_PASS     "M6LR7zHk"   
+#define HOME_WIFI_SSID     ""       // vacío = solo modo AP (RED808)
+#define HOME_WIFI_PASS     ""   
 
 #define HOME_WIFI_TIMEOUT  12000      // ms para intentar conectar (12s)
 
@@ -1231,7 +1231,11 @@ void setup() {
 
     // ── Task Watchdog: 10s timeout, panic on timeout ──
     // Initialized AFTER setup completes to avoid WDT reset during sample loading
-    esp_task_wdt_init(10, true);
+    esp_task_wdt_config_t twdtConfig = {};
+    twdtConfig.timeout_ms = 10000;
+    twdtConfig.idle_core_mask = 0;
+    twdtConfig.trigger_panic = true;
+    esp_task_wdt_init(&twdtConfig);
     esp_task_wdt_add(NULL);  // subscribe loopTask
 
     Serial.println("=== RED808 BOOT COMPLETE ===");

@@ -177,8 +177,23 @@ bool SPIMaster::sendCommand(uint8_t cmd, const void* payload, uint16_t payloadLe
         if (payload && payloadLen > 0) memcpy(env.payload, payload, payloadLen);
         // Non-blocking enqueue; if queue full, DROP command (never fall through
         // to sendCommandDirect which would block Core0 on spiMutex and risk WDT)
-        xQueueSend(spiCmdQueue, &env, pdMS_TO_TICKS(5));
-        return true;
+        BaseType_t queued = xQueueSend(spiCmdQueue, &env, pdMS_TO_TICKS(5));
+        if (queued == pdTRUE) return true;
+
+        spiErrorCount++;
+        Serial.printf("[SPI] queue full, dropped cmd=0x%02X len=%u waiting=%u\n",
+                      (unsigned)cmd,
+                      (unsigned)payloadLen,
+                      (unsigned)uxQueueMessagesWaiting(spiCmdQueue));
+
+        if (cmd == CMD_TRIGGER_SEQ || cmd == CMD_TRIGGER_LIVE || cmd == CMD_DSQ_CONTROL ||
+            cmd == CMD_DSQ_SET_STEP || cmd == CMD_DSQ_SELECT_PATTERN) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+            queued = xQueueSend(spiCmdQueue, &env, pdMS_TO_TICKS(10));
+            if (queued == pdTRUE) return true;
+            Serial.printf("[SPI] retry failed, dropped critical cmd=0x%02X\n", (unsigned)cmd);
+        }
+        return false;
     }
     return sendCommandDirect(cmd, payload, payloadLen);
 }
@@ -1748,7 +1763,7 @@ bool SPIMaster::dsqUploadTrack(uint8_t pattern, uint8_t track,
 
     // Build payload: 4-byte header + stepCount * 4-byte DsqStepPkt
     uint8_t buf[4 + DSQ_MAX_STEPS * sizeof(DsqStepPkt)];
-    buf[0] = pattern & 7;
+    buf[0] = pattern % DSQ_PATTERNS;
     buf[1] = track & 15;
     buf[2] = stepCount;
     buf[3] = 0; // reserved
@@ -1761,7 +1776,7 @@ bool SPIMaster::dsqSetStep(uint8_t pattern, uint8_t track, uint8_t step,
                            uint8_t noteLenDiv, uint8_t probability)
 {
     DsqSetStepPayload p;
-    p.pattern    = pattern & 7;
+    p.pattern    = pattern % DSQ_PATTERNS;
     p.track      = track & 15;
     p.step       = step < DSQ_MAX_STEPS ? step : 0;
     p.active     = active ? 1 : 0;
@@ -1778,7 +1793,7 @@ bool SPIMaster::dsqControl(uint8_t mode) {
 }
 
 bool SPIMaster::dsqSelectPattern(uint8_t pattern) {
-    uint8_t buf[1] = { (uint8_t)(pattern & 7) };
+    uint8_t buf[1] = { (uint8_t)(pattern % DSQ_PATTERNS) };
     return sendCommand(CMD_DSQ_SELECT_PATTERN, buf, 1);
 }
 
@@ -1804,7 +1819,7 @@ bool SPIMaster::dsqSetParamLock(uint8_t pattern, uint8_t track, uint8_t step,
                                 bool volEn, uint8_t volume)
 {
     DsqSetParamLockPayload p;
-    p.pattern   = pattern & 7;
+    p.pattern   = pattern % DSQ_PATTERNS;
     p.track     = track & 15;
     p.step      = step < DSQ_MAX_STEPS ? step : 0;
     p.cutoffEn  = cutoffEn ? 1 : 0;

@@ -8,6 +8,7 @@
 #define PROTOCOL_H
 
 #include <stdint.h>
+#include "../../shared/red808_protocol_codes.h"
 
 // ═══════════════════════════════════════════════════════
 // SPI PACKET STRUCTURE
@@ -156,6 +157,7 @@ typedef struct __attribute__((packed)) {
 #define CMD_TRACK_EQ_LOW      0x63  // Per-track 3-band EQ low  (-12..+12 dB)
 #define CMD_TRACK_EQ_MID      0x64  // Per-track 3-band EQ mid  (-12..+12 dB)
 #define CMD_TRACK_EQ_HIGH     0x65  // Per-track 3-band EQ high (-12..+12 dB)
+#define CMD_TRACK_FX_ROUTE    0x66  // Per-track FX routing: [track(1), connected(1)]
 #define CMD_TRACK_LFO_CONFIG  0x67  // Per-track LFO config (7 bytes)
 
 // ═══════════════════════════════════════════════════════
@@ -261,7 +263,9 @@ typedef struct __attribute__((packed)) {
 #define SYNTH_ENGINE_WTOSC 4  // Wavetable Oscillator
 #define SYNTH_ENGINE_SH101 5  // I1: Roland SH-101 monosynth
 #define SYNTH_ENGINE_FM2OP 6  // I2: 2-operator FM Yamaha-style
-#define SYNTH_ENGINE_COUNT 7
+#define SYNTH_ENGINE_PHYS  7  // Physical modeling: ModalVoice/StringVoice
+#define SYNTH_ENGINE_NOISE 8  // Noise/texture: Particle percussion
+#define SYNTH_ENGINE_COUNT 9
 
 // TR-808 instrument IDs (engine=0)
 #define SYNTH_808_KICK     0
@@ -364,7 +368,7 @@ typedef struct __attribute__((packed)) {
 #define CMD_DSQ_UPLOAD_TRACK    0xD0  // Upload full track steps for one pattern
 #define CMD_DSQ_SET_STEP        0xD1  // Set/update a single step
 #define CMD_DSQ_CONTROL         0xD2  // 0=stop, 1=play, 2=reset
-#define CMD_DSQ_SELECT_PATTERN  0xD3  // Select active pattern (0-7)
+#define CMD_DSQ_SELECT_PATTERN  0xD3  // Select active pattern (0-15)
 #define CMD_DSQ_SET_LENGTH      0xD4  // Set pattern length (16/32/64)
 #define CMD_DSQ_SET_MUTE        0xD5  // Mute/unmute a track
 #define CMD_DSQ_GET_POS         0xD6  // Query current step/pattern (→ response)
@@ -375,7 +379,7 @@ typedef struct __attribute__((packed)) {
 #define CMD_DSQ_SET_HUMANIZE     0xDB  // E2: [timingMs(1), velocityAmt(1)] humanization
 
 // ─── DSQ Step packet (4 bytes) – used in upload track ───
-#define DSQ_PATTERNS    8
+#define DSQ_PATTERNS   16
 #define DSQ_TRACKS     16
 #define DSQ_MAX_STEPS  64
 
@@ -388,7 +392,7 @@ typedef struct __attribute__((packed)) {
 
 // CMD_DSQ_UPLOAD_TRACK (0xD0)  payload: 4 + stepCount×4 bytes (max 260)
 typedef struct __attribute__((packed)) {
-    uint8_t   pattern;     // 0-7
+    uint8_t   pattern;     // 0-15
     uint8_t   track;       // 0-15
     uint8_t   stepCount;   // 16/32/64
     uint8_t   reserved;
@@ -425,7 +429,7 @@ typedef struct __attribute__((packed)) {
 // CMD_DSQ_GET_POS response (4 bytes)
 typedef struct __attribute__((packed)) {
     uint8_t  currentStep;    // 0-63
-    uint8_t  currentPattern; // 0-7
+    uint8_t  currentPattern; // 0-15
     uint8_t  playing;        // 1 = running
     uint8_t  reserved;
 } DsqPosResponse;
@@ -842,7 +846,7 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
     uint8_t  padIndex;       // 0-23
     uint8_t  bitsPerSample;  // 16
-    uint16_t sampleRate;     // 44100
+    uint16_t sampleRate;     // 48000
     uint32_t totalBytes;     // Total PCM data size
     uint32_t totalSamples;   // Total int16_t samples
 } SampleBeginPayload;
@@ -1006,7 +1010,7 @@ typedef struct __attribute__((packed)) {
 // CMD_SONG_UPLOAD (0xF2)
 #define SONG_MAX_ENTRIES  32
 typedef struct __attribute__((packed)) {
-    uint8_t  pattern;    // 0-7
+    uint8_t  pattern;    // 0-15
     uint8_t  repeats;    // 1-255 (0 treated as 1)
 } SongEntry;
 

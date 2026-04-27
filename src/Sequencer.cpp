@@ -4,6 +4,7 @@
  */
 
 #include "Sequencer.h"
+#include "SPIMaster.h"
 #include <esp_heap_caps.h>    // ps_calloc / heap_caps_malloc
 
 Sequencer::Sequencer() : 
@@ -145,7 +146,7 @@ void Sequencer::update() {
             // Chain ended — stop song chain
             songChainActive = false;
           } else {
-            currentPattern = songChain[songChainIdx].pattern & 7;
+            currentPattern = songChain[songChainIdx].pattern % MAX_PATTERNS;
             if (patternChangeCallback) {
               patternChangeCallback(currentPattern, songChainCount);
             }
@@ -216,11 +217,9 @@ void Sequencer::processStep() {
       }
       
       // Compute max samples for note length (0 = full sample)
-      // stepInterval is in microseconds, SAMPLE_RATE = 44100
       uint32_t noteLenSamples = 0;
       if (div > 1) {
-        // samples = (stepInterval_us / div) * 44100 / 1000000
-        noteLenSamples = (uint32_t)(((uint64_t)stepInterval * 44100UL) / ((uint32_t)div * 1000000UL));
+        noteLenSamples = (uint32_t)(((uint64_t)stepInterval * SAMPLE_RATE) / ((uint32_t)div * 1000000UL));
         if (noteLenSamples < 64) noteLenSamples = 64;  // minimum
       }
       
@@ -820,7 +819,7 @@ void Sequencer::songChainPlay() {
   songChainActive = true;
   songChainIdx = 0;
   songChainRepeatCnt = 0;
-  currentPattern = songChain[0].pattern & 7;
+  currentPattern = songChain[0].pattern % MAX_PATTERNS;
   currentStep = 0;
   if (!playing) start();
   if (patternChangeCallback) {
@@ -836,7 +835,7 @@ void Sequencer::songChainReset() {
   songChainIdx = 0;
   songChainRepeatCnt = 0;
   if (songChainCount > 0) {
-    currentPattern = songChain[0].pattern & 7;
+    currentPattern = songChain[0].pattern % MAX_PATTERNS;
   }
 }
 

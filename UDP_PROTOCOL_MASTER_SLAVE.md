@@ -1,5 +1,8 @@
 # Protocolo UDP Master-Slave - DrumMachine ESP32-S3
 
+> Documento historico. El contrato canonico actual esta en `../RED808_COMMAND_CONTRACT.md`.
+> Mantener este archivo solo como ejemplos extendidos; si hay conflicto, manda el contrato canonico.
+
 ## Configuración de Red
 
 ### MASTER (DrumMachine Principal)
@@ -19,13 +22,15 @@
 
 **Protocolo**: UDP (sin conexión, rápido, ideal para tiempo real)  
 **Formato de Datos**: JSON (texto plano)  
-**Tamaño Máximo**: 512 bytes por paquete  
+**Tamaño Máximo**: 4096 bytes por paquete  
 **Encoding**: UTF-8
 
 ### Respuesta Estándar del MASTER
 ```json
 {"status":"ok"}
 ```
+
+El firmware actual tambien puede responder con `{"s":"ok"}` y, para comandos de estado, con un paquete posterior `state_sync`.
 
 ### Respuesta de Error
 ```json
@@ -70,6 +75,7 @@
 ```
 - `track`: 0-15 (pista/instrumento)
 - `step`: 0-15 (posición en el patrón)
+- El contrato actual permite `step`: 0-63; algunas pantallas legacy solo renderizan 16.
 - `active`: true/false
 
 #### Silenciar/activar track
@@ -163,42 +169,573 @@
 
 ---
 
-### 5. EFECTOS DE AUDIO
+### 5. EFECTOS DE AUDIO — MASTER FX
 
-#### Tipo de filtro
+#### 5.1 Filtro Master
+
+##### Tipo de filtro (0-19)
 ```json
 {"cmd":"setFilter","type":1}
 ```
-- `type`: 0=None, 1=LowPass, 2=HighPass, 3=BandPass, 4=Notch
+- `type`: 0=None, 1=LowPass, 2=HighPass, 3=BandPass, 4=Notch, 5-19=otros tipos
 
-#### Frecuencia de corte (20-20000 Hz)
+##### Frecuencia de corte (20-20000 Hz)
 ```json
 {"cmd":"setFilterCutoff","value":2000}
 ```
 
-#### Resonancia del filtro (0.1-10.0)
+##### Resonancia del filtro (0.1-10.0)
 ```json
 {"cmd":"setFilterResonance","value":3.0}
 ```
 
-#### Bit Crush (1-16 bits)
-```json
-{"cmd":"setBitCrush","value":8}
-```
+#### 5.2 Distorsión & BitCrush Master
 
-#### Distorsión (0.0-1.0)
+##### Distorsión (0.0-1.0)
 ```json
 {"cmd":"setDistortion","value":0.5}
 ```
 
-#### Reducción de Sample Rate (1000-44100 Hz)
+##### Modo de distorsión (0-3)
+```json
+{"cmd":"setDistortionMode","value":1}
+```
+- `value`: 0=Soft Clip, 1=Hard Clip, 2=Tube, 3=Fuzz
+
+##### Bit Crush (1-16 bits)
+```json
+{"cmd":"setBitCrush","value":8}
+```
+
+##### Reducción de Sample Rate (1000-44100 Hz)
 ```json
 {"cmd":"setSampleRate","value":11025}
 ```
 
+#### 5.3 Delay Master
+
+##### Activar/desactivar delay
+```json
+{"cmd":"setDelayActive","value":true}
+```
+
+##### Tiempo de delay (1-5000 ms)
+```json
+{"cmd":"setDelayTime","value":250}
+```
+
+##### Feedback del delay (0-100 %)
+```json
+{"cmd":"setDelayFeedback","value":40}
+```
+
+##### Mix dry/wet del delay (0-100 %)
+```json
+{"cmd":"setDelayMix","value":30}
+```
+
+##### Modo estéreo del delay
+```json
+{"cmd":"setDelayStereo","mode":1}
+```
+- `mode`: 0=mono, 1=stereo ping-pong
+
+#### 5.4 Reverb Master
+
+##### Activar/desactivar reverb
+```json
+{"cmd":"setReverbActive","value":true}
+```
+
+##### Feedback de reverb (0.0-1.0)
+```json
+{"cmd":"setReverbFeedback","value":0.45}
+```
+
+##### Frecuencia LP de damping (200-12000 Hz)
+```json
+{"cmd":"setReverbLpFreq","value":6000}
+```
+
+##### Mix dry/wet de reverb (0.0-1.0)
+```json
+{"cmd":"setReverbMix","value":0.12}
+```
+
+##### Early Reflections activas
+```json
+{"cmd":"setEarlyRefActive","active":true}
+```
+
+##### Early Reflections mix (0-100)
+```json
+{"cmd":"setEarlyRefMix","mix":30}
+```
+
+#### 5.5 Chorus Master
+
+##### Activar/desactivar chorus
+```json
+{"cmd":"setChorusActive","value":true}
+```
+
+##### Rate del chorus (Hz)
+```json
+{"cmd":"setChorusRate","value":1.5}
+```
+
+##### Depth del chorus (0-100)
+```json
+{"cmd":"setChorusDepth","value":50}
+```
+
+##### Mix dry/wet del chorus (0-100)
+```json
+{"cmd":"setChorusMix","value":40}
+```
+
+##### Modo estéreo del chorus
+```json
+{"cmd":"setChorusStereo","mode":1}
+```
+- `mode`: 0=mono, 1=stereo
+
+#### 5.6 Phaser Master
+
+##### Activar/desactivar phaser
+```json
+{"cmd":"setPhaserActive","value":true}
+```
+
+##### Rate del phaser (0-100 → Hz/100)
+```json
+{"cmd":"setPhaserRate","value":50}
+```
+
+##### Depth del phaser (0-100)
+```json
+{"cmd":"setPhaserDepth","value":60}
+```
+
+##### Feedback del phaser (0-100)
+```json
+{"cmd":"setPhaserFeedback","value":40}
+```
+
+#### 5.7 Flanger Master
+
+##### Activar/desactivar flanger
+```json
+{"cmd":"setFlangerActive","value":true}
+```
+
+##### Rate del flanger (0-100 → Hz/100)
+```json
+{"cmd":"setFlangerRate","value":30}
+```
+
+##### Depth del flanger (0-100)
+```json
+{"cmd":"setFlangerDepth","value":50}
+```
+
+##### Feedback del flanger (0-100)
+```json
+{"cmd":"setFlangerFeedback","value":40}
+```
+
+##### Mix dry/wet del flanger (0-100)
+```json
+{"cmd":"setFlangerMix","value":50}
+```
+
+#### 5.8 Compressor Master
+
+##### Activar/desactivar compresor
+```json
+{"cmd":"setCompressorActive","value":true}
+```
+
+##### Threshold (-80 a 0 dB)
+```json
+{"cmd":"setCompressorThreshold","value":-12}
+```
+
+##### Ratio (1-20)
+```json
+{"cmd":"setCompressorRatio","value":2.5}
+```
+
+##### Attack (0-100 ms)
+```json
+{"cmd":"setCompressorAttack","value":10}
+```
+
+##### Release (0-1000 ms)
+```json
+{"cmd":"setCompressorRelease","value":100}
+```
+
+##### Makeup Gain (0-30 dB)
+```json
+{"cmd":"setCompressorMakeupGain","value":2.0}
+```
+
+#### 5.9 Tremolo Master
+
+##### Activar/desactivar tremolo
+```json
+{"cmd":"setTremoloActive","value":true}
+```
+
+##### Rate del tremolo (Hz)
+```json
+{"cmd":"setTremoloRate","value":5.0}
+```
+
+##### Depth del tremolo (0-100)
+```json
+{"cmd":"setTremoloDepth","value":60}
+```
+
+#### 5.10 Wavefolder & Limiter
+
+##### Wavefolder gain (1.0=off, >1 = fold)
+```json
+{"cmd":"setWavefolderGain","value":3.0}
+```
+
+##### Limiter brick-wall 0dBFS
+```json
+{"cmd":"setLimiterActive","value":true}
+```
+
+#### 5.11 Auto-Wah Master
+
+##### Activar/desactivar auto-wah
+```json
+{"cmd":"setAutoWahActive","active":true}
+```
+
+##### Nivel de sensibilidad (0-100)
+```json
+{"cmd":"setAutoWahLevel","level":80}
+```
+
+##### Mix del auto-wah (0-100)
+```json
+{"cmd":"setAutoWahMix","mix":50}
+```
+
+#### 5.12 Stereo Width
+
+##### Ancho estéreo (0-200, 100=normal)
+```json
+{"cmd":"setStereoWidth","width":100}
+```
+
+#### 5.13 Tape Stop & Beat Repeat
+
+##### Tape Stop
+```json
+{"cmd":"setTapeStop","mode":1}
+```
+- `mode`: 0=off, 1=activar efecto
+
+##### Beat Repeat
+```json
+{"cmd":"setBeatRepeat","division":8}
+```
+- `division`: 0=off, 2/4/8/16=subdivisión del beat
+
+#### 5.14 Master FX Route (Patchbay)
+
+```json
+{"cmd":"setMasterFxRoute","fxId":10,"connected":true}
+```
+- `fxId`: ID del módulo FX en la cadena
+- `connected`: true/false (conectar/desconectar del bus)
+
 ---
 
-### 6. CARGA DE SAMPLES
+### 6. EFECTOS PER-TRACK (0-15)
+
+#### 6.1 Filtro por Track
+
+##### Configurar filtro en track
+```json
+{"cmd":"setTrackFilter","track":0,"type":1,"cutoff":1000,"resonance":1.0,"gain":0}
+```
+- `track`: 0-15
+- `type`: 0-19 (tipo de filtro)
+- `cutoff`: 20-20000 Hz
+- `resonance`: 0.1-10.0
+- `gain`: dB (para filtros shelving/peaking)
+
+##### Eliminar filtro de track
+```json
+{"cmd":"clearTrackFilter","track":0}
+```
+
+#### 6.2 Distorsión & BitCrush por Track
+
+##### Distorsión por track
+```json
+{"cmd":"setTrackDistortion","track":0,"amount":0.5,"mode":1}
+```
+- `amount`: 0.0-1.0
+- `mode`: 0=Soft, 1=Hard, 2=Tube, 3=Fuzz
+
+##### BitCrush por track
+```json
+{"cmd":"setTrackBitCrush","track":0,"value":8}
+```
+- `value`: 1-16 bits
+
+##### Limpiar todos los FX de un track
+```json
+{"cmd":"clearTrackFX","track":0}
+```
+
+#### 6.3 Sends por Track
+
+##### Reverb Send (0-100)
+```json
+{"cmd":"setTrackReverbSend","track":0,"value":30}
+```
+
+##### Delay Send (0-100)
+```json
+{"cmd":"setTrackDelaySend","track":0,"value":25}
+```
+
+##### Chorus Send (0-100)
+```json
+{"cmd":"setTrackChorusSend","track":0,"value":20}
+```
+
+#### 6.4 Pan, Mute & Solo por Track
+
+##### Pan (-100=L, 0=C, +100=R)
+```json
+{"cmd":"setTrackPan","track":0,"value":0}
+```
+
+##### Mute en DSP (silenciar en Daisy)
+```json
+{"cmd":"setTrackDspMute","track":0,"value":true}
+```
+
+##### Solo
+```json
+{"cmd":"setTrackSolo","track":0,"value":true}
+```
+
+#### 6.5 Echo por Track (Live FX)
+
+```json
+{"cmd":"setTrackEcho","track":0,"active":true,"time":100,"feedback":40,"mix":50}
+```
+- `time`: ms de delay
+- `feedback`: % de retroalimentación
+- `mix`: % dry/wet
+- Modo alternativo one-knob: `{"cmd":"setTrackEcho","track":0,"value":80}` (0-127)
+
+#### 6.6 Flanger por Track (Live FX)
+
+```json
+{"cmd":"setTrackFlanger","track":0,"active":true,"rate":50,"depth":50,"feedback":30}
+```
+- `rate`: velocidad (Hz %)
+- `depth`: profundidad (%)
+- `feedback`: retroalimentación (%)
+- Modo alternativo one-knob: `{"cmd":"setTrackFlanger","track":0,"value":80}` (0-127)
+
+#### 6.7 Compressor por Track (Live FX)
+
+```json
+{"cmd":"setTrackCompressor","track":0,"active":true,"threshold":-20,"ratio":4}
+```
+- `threshold`: dB (en one-knob: value 0=-60dB, 127=0dB)
+- `ratio`: ratio de compresión
+- Modo alternativo one-knob: `{"cmd":"setTrackCompressor","track":0,"value":80}` (0-127)
+
+#### 6.8 Phaser por Track
+
+```json
+{"cmd":"setTrackPhaser","track":0,"active":true,"rate":1.0,"depth":50,"feedback":50}
+```
+
+#### 6.9 Tremolo por Track
+
+```json
+{"cmd":"setTrackTremolo","track":0,"active":true,"rate":4,"depth":50,"wave":0,"target":0}
+```
+- `wave`: 0=sine, 1=triangle, 2=square, 3=saw, 4=random
+- `target`: 0=volume, 1=pan
+
+#### 6.10 Pitch por Track (-1200 a +1200 cents)
+
+```json
+{"cmd":"setTrackPitch","track":0,"value":100}
+```
+- `value`: cents (-1200 a +1200, 0=no pitch shift)
+
+#### 6.11 Gate por Track
+
+```json
+{"cmd":"setTrackGate","track":0,"active":true,"threshold":-40,"attack":1,"release":50}
+```
+- `threshold`: dB de apertura
+- `attack`: ms
+- `release`: ms
+
+#### 6.12 EQ por Track (3 bandas)
+
+##### EQ completo (low/mid/high en un solo comando)
+```json
+{"cmd":"setTrackEq","track":0,"low":3,"mid":-2,"high":5}
+```
+
+##### EQ individual por banda
+```json
+{"cmd":"setTrackEqLow","track":0,"value":3}
+{"cmd":"setTrackEqMid","track":0,"value":-2}
+{"cmd":"setTrackEqHigh","track":0,"value":5}
+```
+- `value`/`low`/`mid`/`high`: -12 a +12 dB
+
+#### 6.13 LFO por Track (Daisy-side)
+
+```json
+{"cmd":"setTrackLfo","track":0,"wave":0,"target":3,"rate":100,"depth":500}
+```
+- `wave`: 0=sine, 1=triangle, 2=square, 3=saw, 4=random
+- `target`: 0=volume, 1=pitch, 2=filter cutoff, 3=pan, 4=decay, 5=LED brightness, 6=distortion drive, 7=bitcrush, 8=reverb send, 9=delay send
+- `rate`: centésimas de Hz (100 = 1.00 Hz)
+- `depth`: milésimas (500 = 0.500)
+
+#### 6.14 Limpiar Live FX de track
+
+```json
+{"cmd":"clearTrackLiveFX","track":0}
+```
+> Elimina echo, flanger y compressor del track
+
+---
+
+### 7. EFECTOS PER-PAD (0-23)
+
+> Los pads 0-15 = tracks del sequencer, 16-23 = live pads extra
+
+#### 7.1 Filtro por Pad
+
+```json
+{"cmd":"setPadFilter","pad":0,"type":1,"cutoff":1000,"resonance":1.0,"gain":0}
+```
+
+#### Eliminar filtro de pad
+```json
+{"cmd":"clearPadFilter","pad":0}
+```
+
+#### 7.2 Distorsión por Pad
+
+```json
+{"cmd":"setPadDistortion","pad":0,"amount":0.5,"mode":1}
+```
+
+#### 7.3 BitCrush por Pad
+
+```json
+{"cmd":"setPadBitCrush","pad":0,"value":8}
+```
+
+#### 7.4 Limpiar todos los FX del pad
+
+```json
+{"cmd":"clearPadFX","pad":0}
+```
+
+---
+
+### 8. EFECTOS DE SAMPLE (Track o Pad)
+
+> Estos comandos aceptan `"track"` O `"pad"` como clave.
+
+#### 8.1 Reverse
+
+```json
+{"cmd":"setReverse","track":0,"value":true}
+```
+```json
+{"cmd":"setReverse","pad":0,"value":true}
+```
+
+#### 8.2 Pitch Shift (0.25 - 3.0)
+
+```json
+{"cmd":"setPitchShift","track":0,"value":1.5}
+```
+- `value`: multiplicador (1.0=original, 0.5=octava abajo, 2.0=octava arriba)
+
+#### 8.3 Stutter
+
+```json
+{"cmd":"setStutter","track":0,"value":true,"interval":100}
+```
+- `value` / `active`: true/false
+- `interval`: ms entre repeticiones
+
+#### 8.4 Scratch (configurable)
+
+```json
+{"cmd":"setScratch","track":0,"value":true,"rate":5,"depth":0.85,"filter":4000,"crackle":0.25}
+```
+- `rate`: velocidad del scratch
+- `depth`: profundidad (0.0-1.0)
+- `filter`: frecuencia de filtro (Hz)
+- `crackle`: nivel de ruido tipo vinilo (0.0-1.0)
+
+#### 8.5 Turntablism (configurable)
+
+```json
+{"cmd":"setTurntablism","track":0,"value":true,"control":"auto","mode":-1,"brakeSpeed":350,"backspinSpeed":450,"transformRate":11,"vinylNoise":0.35}
+```
+- `control`: "auto" o "manual"
+- `mode`: -1=random, 0=brake, 1=backspin, 2=transform
+- `brakeSpeed`: ms de frenado
+- `backspinSpeed`: ms de backspin
+- `transformRate`: velocidad del transform (Hz)
+- `vinylNoise`: nivel de ruido vinilo (0.0-1.0)
+
+---
+
+### 9. SIDECHAIN PRO
+
+```json
+{"cmd":"setSidechainPro","active":true,"source":0,"destinations":[1,2,3],"amount":50,"attack":6,"release":180,"knee":0.4}
+```
+- `source`: track fuente (0-15, típicamente BD=0)
+- `destinations`: array de tracks destino (se excluye source)
+- `amount`: cantidad de ducking (0-100 %)
+- `attack`: ms de attack
+- `release`: ms de release
+- `knee`: suavidad (0.0-1.0)
+
+---
+
+### 10. CHOKE GROUPS
+
+```json
+{"cmd":"setChokeGroup","pad":6,"group":1}
+```
+- `pad`: 0-23
+- `group`: 0=sin grupo, 1-8=grupo (pads del mismo grupo se silencian mutuamente)
+
+---
+
+### 11. CARGA DE SAMPLES
 
 #### Cargar sample en un pad
 ```json
@@ -210,7 +747,7 @@
 
 ---
 
-### 7. LED RGB
+### 12. LED RGB
 
 #### Modo mono (un solo color)
 ```json
@@ -468,28 +1005,102 @@ MASTER → SLAVE: {"cmd":"pattern_sync","pattern":0,"data":[[...],[...],...]}
 | | `mute` | `track`, `value` | Silenciar/activar track |
 | | `toggleLoop` | `track` | Toggle loop en track |
 | | `pauseLoop` | `track` | Pausar loop |
-| | `setStepVelocity` | `track`, `step`, `velocity` | Establecer velocity de step (0-127) |
-| | `getStepVelocity` | `track`, `step` | Obtener velocity de step |
-| **Pads** | `trigger` | `pad`, `vel` (opcional) | Trigger pad con velocity |
+| | `setStepVelocity` | `track`, `step`, `velocity` | Velocity de step (0-127) |
+| | `getStepVelocity` | `track`, `step` | Obtener velocity |
+| **Pads** | `trigger` | `pad`, `vel` (opc.) | Trigger pad con velocity |
 | **Volumen** | `setVolume` | `value` (0-150) | Volumen maestro |
-| | `setSequencerVolume` | `value` (0-150) | Volumen del sequencer |
-| | `setLiveVolume` | `value` (0-150) | Volumen de live pads |
-| | **`setTrackVolume`** | **`track`, `volume` (0-100)** | **Volumen por track (NUEVO)** |
-| | **`getTrackVolume`** | **`track`** | **Obtener volumen de track (NUEVO)** |
-| | **`getTrackVolumes`** | **-** | **Obtener todos los volúmenes (NUEVO)** |
-| **FX** | `setFilter` | `type` (0-9) | Tipo de filtro global |
-| | `setFilterCutoff` | `value` (20-20000) | Frecuencia de corte (Hz) |
-| | `setFilterResonance` | `value` (0.1-10.0) | Resonancia del filtro |
+| | `setSequencerVolume` | `value` (0-150) | Volumen sequencer |
+| | `setLiveVolume` | `value` (0-150) | Volumen live pads |
+| | `setTrackVolume` | `track`, `volume` (0-100) | Volumen por track |
+| | `getTrackVolume` | `track` | Obtener volumen track |
+| | `getTrackVolumes` | - | Todos los volúmenes |
+| **Master Filter** | `setFilter` | `type` (0-19) | Tipo de filtro global |
+| | `setFilterCutoff` | `value` (20-20000) | Frecuencia corte Hz |
+| | `setFilterResonance` | `value` (0.1-10.0) | Resonancia |
+| **Master Dist/Crush** | `setDistortion` | `value` (0.0-1.0) | Distorsión |
+| | `setDistortionMode` | `value` (0-3) | Modo: soft/hard/tube/fuzz |
 | | `setBitCrush` | `value` (1-16) | Bit depth |
-| | `setDistortion` | `value` (0.0-1.0) | Distorsión |
 | | `setSampleRate` | `value` (1000-44100) | Sample rate reduction |
-| | `setTrackFilter` | `track`, `filterType`, `cutoff`, `resonance`, `gain` | Filtro por track |
-| | `clearTrackFilter` | `track` | Eliminar filtro de track |
-| | `setPadFilter` | `pad`, `filterType`, `cutoff`, `resonance`, `gain` | Filtro por pad |
-| | `clearPadFilter` | `pad` | Eliminar filtro de pad |
-| **Samples** | `loadSample` | `family`, `filename`, `pad` | Cargar sample en pad |
+| **Master Delay** | `setDelayActive` | `value` (bool) | On/off |
+| | `setDelayTime` | `value` (1-5000) | Tiempo ms |
+| | `setDelayFeedback` | `value` (0-100) | Feedback % |
+| | `setDelayMix` | `value` (0-100) | Mix % |
+| | `setDelayStereo` | `mode` (0-1) | Mono/stereo |
+| **Master Reverb** | `setReverbActive` | `value` (bool) | On/off |
+| | `setReverbFeedback` | `value` (0.0-1.0) | Feedback |
+| | `setReverbLpFreq` | `value` (200-12000) | Damping Hz |
+| | `setReverbMix` | `value` (0.0-1.0) | Mix dry/wet |
+| | `setEarlyRefActive` | `active` (bool) | Early reflections on/off |
+| | `setEarlyRefMix` | `mix` (0-100) | Early ref mix |
+| **Master Chorus** | `setChorusActive` | `value` (bool) | On/off |
+| | `setChorusRate` | `value` (Hz) | Rate |
+| | `setChorusDepth` | `value` (0-100) | Depth |
+| | `setChorusMix` | `value` (0-100) | Mix |
+| | `setChorusStereo` | `mode` (0-1) | Mono/stereo |
+| **Master Phaser** | `setPhaserActive` | `value` (bool) | On/off |
+| | `setPhaserRate` | `value` (0-100) | Rate |
+| | `setPhaserDepth` | `value` (0-100) | Depth |
+| | `setPhaserFeedback` | `value` (0-100) | Feedback |
+| **Master Flanger** | `setFlangerActive` | `value` (bool) | On/off |
+| | `setFlangerRate` | `value` (0-100) | Rate |
+| | `setFlangerDepth` | `value` (0-100) | Depth |
+| | `setFlangerFeedback` | `value` (0-100) | Feedback |
+| | `setFlangerMix` | `value` (0-100) | Mix |
+| **Master Compressor** | `setCompressorActive` | `value` (bool) | On/off |
+| | `setCompressorThreshold` | `value` (-80~0) | Threshold dB |
+| | `setCompressorRatio` | `value` (1-20) | Ratio |
+| | `setCompressorAttack` | `value` (0-100) | Attack ms |
+| | `setCompressorRelease` | `value` (0-1000) | Release ms |
+| | `setCompressorMakeupGain` | `value` (0-30) | Makeup dB |
+| **Master Tremolo** | `setTremoloActive` | `value` (bool) | On/off |
+| | `setTremoloRate` | `value` (Hz) | Rate |
+| | `setTremoloDepth` | `value` (0-100) | Depth |
+| **Wavefolder/Limiter** | `setWavefolderGain` | `value` (1.0-10.0) | Gain (1=off) |
+| | `setLimiterActive` | `value` (bool) | Limiter on/off |
+| **Auto-Wah** | `setAutoWahActive` | `active` (bool) | On/off |
+| | `setAutoWahLevel` | `level` (0-100) | Sensibilidad |
+| | `setAutoWahMix` | `mix` (0-100) | Mix |
+| **Stereo/FX Route** | `setStereoWidth` | `width` (0-200) | Ancho estéreo |
+| | `setMasterFxRoute` | `fxId`, `connected` | Patchbay route |
+| | `setTapeStop` | `mode` (0-1) | Tape stop effect |
+| | `setBeatRepeat` | `division` (0/2/4/8/16) | Beat repeat |
+| **Track Filter** | `setTrackFilter` | `track`, `type`, `cutoff`, `resonance`, `gain` | Filtro per-track |
+| | `clearTrackFilter` | `track` | Eliminar filtro |
+| **Track Dist/Crush** | `setTrackDistortion` | `track`, `amount`, `mode` | Distorsión per-track |
+| | `setTrackBitCrush` | `track`, `value` | BitCrush per-track |
+| | `clearTrackFX` | `track` | Limpiar todos FX |
+| **Track Sends** | `setTrackReverbSend` | `track`, `value` (0-100) | Send reverb |
+| | `setTrackDelaySend` | `track`, `value` (0-100) | Send delay |
+| | `setTrackChorusSend` | `track`, `value` (0-100) | Send chorus |
+| **Track Mixer** | `setTrackPan` | `track`, `value` (-100~100) | Pan L/R |
+| | `setTrackDspMute` | `track`, `value` (bool) | Mute DSP |
+| | `setTrackSolo` | `track`, `value` (bool) | Solo |
+| **Track Live FX** | `setTrackEcho` | `track`, `active/value`, `time`, `feedback`, `mix` | Echo per-track |
+| | `setTrackFlanger` | `track`, `active/value`, `rate`, `depth`, `feedback` | Flanger per-track |
+| | `setTrackCompressor` | `track`, `active/value`, `threshold`, `ratio` | Comp per-track |
+| | `clearTrackLiveFX` | `track` | Limpiar live FX |
+| **Track Advanced** | `setTrackPhaser` | `track`, `active`, `rate`, `depth`, `feedback` | Phaser per-track |
+| | `setTrackTremolo` | `track`, `active`, `rate`, `depth`, `wave`, `target` | Tremolo per-track |
+| | `setTrackPitch` | `track`, `value` (-1200~1200) | Pitch cents |
+| | `setTrackGate` | `track`, `active`, `threshold`, `attack`, `release` | Gate per-track |
+| **Track EQ** | `setTrackEq` | `track`, `low`, `mid`, `high` | EQ 3 bandas |
+| | `setTrackEqLow/Mid/High` | `track`, `value` (-12~12) | EQ individual |
+| **Track LFO** | `setTrackLfo` | `track`, `wave`, `target`, `rate`, `depth` | LFO per-track |
+| **Pad FX** | `setPadFilter` | `pad`, `type`, `cutoff`, `resonance`, `gain` | Filtro per-pad |
+| | `clearPadFilter` | `pad` | Eliminar filtro pad |
+| | `setPadDistortion` | `pad`, `amount`, `mode` | Distorsión per-pad |
+| | `setPadBitCrush` | `pad`, `value` | BitCrush per-pad |
+| | `clearPadFX` | `pad` | Limpiar FX pad |
+| **Sample FX** | `setReverse` | `track/pad`, `value` | Reverse sample |
+| | `setPitchShift` | `track/pad`, `value` (0.25-3.0) | Pitch shift |
+| | `setStutter` | `track/pad`, `value`, `interval` | Stutter |
+| | `setScratch` | `track`, `value`, `rate`, `depth`, `filter`, `crackle` | Scratch DJ |
+| | `setTurntablism` | `track`, `value`, `control`, `mode`, etc. | Turntablism DJ |
+| **Sidechain** | `setSidechainPro` | `active`, `source`, `destinations`, `amount`, etc. | Sidechain ducking |
+| **Choke Groups** | `setChokeGroup` | `pad`, `group` (0-8) | Choke group |
+| **Samples** | `loadSample` | `family`, `filename`, `pad` | Cargar sample |
 | **LED** | `setLedMonoMode` | `value` (bool) | Modo mono LED |
-| **Sync** | `get_pattern` | `pattern` (opcional) | Solicitar patrón |
+| **Sync** | `get_pattern` | `pattern` (opc.) | Solicitar patrón |
 
 ---
 

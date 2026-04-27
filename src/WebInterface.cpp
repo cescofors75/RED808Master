@@ -25,6 +25,7 @@ static constexpr unsigned long kFastMasterCmdMinMs = 8;
 static constexpr unsigned long kFastTrackCmdMinMs = 8;
 static constexpr unsigned long kFastPadCmdMinMs = 8;
 static constexpr unsigned long kFastVolumeCmdMinMs = 8;
+static constexpr size_t kUdpMaxPacketBytes = 4096;
 
 // ── Pre-allocated broadcast buffer in PSRAM to avoid heap fragmentation ──
 // broadcastSequencerState() was the #1 cause of heap fragmentation:
@@ -60,6 +61,16 @@ extern Sequencer sequencer;
 
 // Page‐transition broadcast pause: set when '/' is served, cleared after 2s
 static volatile unsigned long pageTransitionMs = 0;
+static bool gMasterDelayActive = false;
+static bool gMasterPhaserActive = false;
+static bool gMasterFlangerActive = false;
+static bool gMasterCompressorActive = false;
+static int gMasterFilterType = 0;
+static int gMasterBitCrushBits = 16;
+static int gMasterSampleRateReduction = SAMPLE_RATE;
+static float gMasterFilterCutoff = 20000.0f;
+static float gMasterFilterResonance = 1.0f;
+static float gMasterDistortion = 0.0f;
 extern void dsqUploadPattern(int pattern);           // upload one pattern to Daisy sequencer (Core1 only)
 extern void dsqUploadPatternDeferred(int pattern);   // safe from Core0: sets flag for Core1
 
@@ -397,7 +408,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     IPAddress gateway(192, 168, 4, 1);
     IPAddress subnet(255, 255, 255, 0);
     WiFi.softAPConfig(local_IP, gateway, subnet);
-    WiFi.softAP(apSsid, apPassword, 1, 0, 4);
+    WiFi.softAP(apSsid, apPassword, 11, 0, 4);
     delay(200);
 
     // Now try STA with static IP (192.168.1.80 — the "808" IP!)
@@ -437,7 +448,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     IPAddress gateway(192, 168, 4, 1);
     IPAddress subnet(255, 255, 255, 0);
     WiFi.softAPConfig(local_IP, gateway, subnet);
-    WiFi.softAP(apSsid, apPassword, 1, 0, 4);
+    WiFi.softAP(apSsid, apPassword, 11, 0, 4);
     delay(200);
   }
 
@@ -770,11 +781,11 @@ refresh();if(auto_)startAuto();
     if (ws) {
       doc["wsClients"] = ws->count();
       JsonArray clients = doc.createNestedArray("wsClientList");
-      for (auto client : ws->getClients()) {
+      for (auto& client : ws->getClients()) {
         JsonObject c = clients.createNestedObject();
-        c["id"] = client->id();
-        c["ip"] = client->remoteIP().toString();
-        c["status"] = client->status();
+        c["id"] = client.id();
+        c["ip"] = client.remoteIP().toString();
+        c["status"] = client.status();
       }
     }
     
@@ -992,7 +1003,7 @@ refresh();if(auto_)startAuto();
       uint32_t dataSize = 0;
       uint16_t numChannels = 1;
       uint16_t bitsPerSample = 16;
-      uint32_t sampleRate = 44100;
+      uint32_t sampleRate = SAMPLE_RATE;
       
       String fname = filePath;
       fname.toLowerCase();
@@ -1179,7 +1190,7 @@ refresh();if(auto_)startAuto();
     request->send(200, "application/json", json);
   });
 
-  // Endpoint para descargar audio RAW del pad cargado (PCM 16-bit mono 44100Hz)
+  // Endpoint para descargar audio RAW del pad cargado (PCM 16-bit mono 48000Hz)
   server->on("/api/sampledata", HTTP_GET, [](AsyncWebServerRequest *request){
     if (!request->hasParam("pad")) {
       request->send(400, "application/json", "{\"error\":\"Missing pad parameter\"}");
@@ -1226,9 +1237,9 @@ refresh();if(auto_)startAuto();
           memcpy(header + 20, &audioFormat, 2);
           uint16_t numChannels = 1;
           memcpy(header + 22, &numChannels, 2);
-          uint32_t sampleRate = 44100;
+          uint32_t sampleRate = SAMPLE_RATE;
           memcpy(header + 24, &sampleRate, 4);
-          uint32_t byteRate = 44100 * 2;
+          uint32_t byteRate = SAMPLE_RATE * 2;
           memcpy(header + 28, &byteRate, 4);
           uint16_t blockAlign = 2;
           memcpy(header + 32, &blockAlign, 2);
@@ -1703,7 +1714,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
                         sampleObj["bits"] = 0;
                       }
                     } else {
-                      sampleObj["rate"] = 44100;
+                      sampleObj["rate"] = SAMPLE_RATE;
                       sampleObj["channels"] = 1;
                       sampleObj["bits"] = 16;
                     }
@@ -1764,6 +1775,130 @@ void WebInterface::broadcastSequencerState() {
     if (len > 0 && len < kStateBufSize) {
       ws->textAll(_stateBuf, len);
     }
+  }
+}
+
+bool WebInterface::shouldSendUdpStateSync(const char* cmd) const {
+  if (!cmd) return false;
+  return strcmp(cmd, "hello") == 0 ||
+         strcmp(cmd, "get_state") == 0 ||
+         strcmp(cmd, "getState") == 0 ||
+         strcmp(cmd, "selectPattern") == 0 ||
+         strcmp(cmd, "start") == 0 ||
+         strcmp(cmd, "stop") == 0 ||
+         strcmp(cmd, "tempo") == 0 ||
+         strcmp(cmd, "mute") == 0 ||
+         strcmp(cmd, "solo") == 0 ||
+         strcmp(cmd, "setTrackSolo") == 0 ||
+         strcmp(cmd, "setTrackVolume") == 0 ||
+         strcmp(cmd, "getTrackVolumes") == 0 ||
+         strncmp(cmd, "setFilter", 9) == 0 ||
+         strncmp(cmd, "setDelay", 8) == 0 ||
+         strncmp(cmd, "setReverb", 9) == 0 ||
+         strncmp(cmd, "setChorus", 9) == 0 ||
+         strncmp(cmd, "setPhaser", 9) == 0 ||
+         strncmp(cmd, "setFlanger", 10) == 0 ||
+         strncmp(cmd, "setCompressor", 13) == 0 ||
+         strcmp(cmd, "setDistortion") == 0 ||
+         strcmp(cmd, "setBitCrush") == 0 ||
+         strcmp(cmd, "setSampleRate") == 0 ||
+         strncmp(cmd, "setTrack", 8) == 0 ||
+         strncmp(cmd, "sdLoad", 6) == 0 ||
+         strcmp(cmd, "sdUnloadKit") == 0 ||
+         strcmp(cmd, "sdGetStatus") == 0;
+}
+
+void WebInterface::sendUdpStateSync(IPAddress ip, uint16_t port) {
+  if (!initialized || ip == IPAddress(0, 0, 0, 0) || port == 0) return;
+
+  PsramJsonDocument doc(4096);
+  SdStatusResponse sdStat = {};
+  bool sdOk = spiMaster.getCachedSdStatus(sdStat);
+  uint32_t sdLoadedMask = sdOk ? sdStat.samplesLoaded : 0;
+
+  doc["cmd"] = "state_sync";
+  doc["pattern"] = sequencer.getCurrentPattern();
+  doc["playing"] = sequencer.isPlaying();
+  doc["tempo"] = sequencer.getTempo();
+  doc["step"] = sequencer.getCurrentStep();
+  doc["stepCount"] = sequencer.getPatternLength();
+  doc["masterVolume"] = spiMaster.getMasterVolume();
+  doc["sequencerVolume"] = spiMaster.getSequencerVolume();
+  doc["liveVolume"] = spiMaster.getLiveVolume();
+  doc["kit"] = sdOk ? String(sdStat.currentKit) : "";
+  doc["sdPresent"] = sdOk ? (bool)sdStat.present : false;
+  doc["sdLoadedMask"] = sdLoadedMask;
+
+  JsonArray mute = doc.createNestedArray("mute");
+  JsonArray solo = doc.createNestedArray("solo");
+  JsonArray volumes = doc.createNestedArray("trackVolumes");
+  for (int track = 0; track < MAX_TRACKS; track++) {
+    mute.add(sequencer.isTrackMuted(track) || spiMaster.getTrackMute(track));
+    solo.add(spiMaster.getTrackSolo(track));
+    volumes.add(sequencer.getTrackVolume(track));
+  }
+
+  JsonObject fx = doc.createNestedObject("fx");
+  fx["filterType"] = gMasterFilterType;
+  fx["filterCutoff"] = gMasterFilterCutoff;
+  fx["filterResonance"] = gMasterFilterResonance;
+  fx["distortion"] = gMasterDistortion;
+  fx["bitCrush"] = gMasterBitCrushBits;
+  fx["sampleRate"] = gMasterSampleRateReduction;
+  fx["delayActive"] = gMasterDelayActive;
+  fx["phaserActive"] = gMasterPhaserActive;
+  fx["flangerActive"] = gMasterFlangerActive;
+  fx["compressorActive"] = gMasterCompressorActive;
+  fx["reverbActive"] = spiMaster.isReverbActive();
+  fx["chorusActive"] = spiMaster.isChorusActive();
+
+  JsonArray trackFilters = fx.createNestedArray("trackFilters");
+  JsonArray trackReverbSend = fx.createNestedArray("trackReverbSend");
+  JsonArray trackDelaySend = fx.createNestedArray("trackDelaySend");
+  JsonArray trackChorusSend = fx.createNestedArray("trackChorusSend");
+  JsonArray trackPan = fx.createNestedArray("trackPan");
+  JsonArray trackEcho = fx.createNestedArray("trackEcho");
+  JsonArray trackFlanger = fx.createNestedArray("trackFlanger");
+  JsonArray trackCompressor = fx.createNestedArray("trackCompressor");
+  for (int track = 0; track < MAX_TRACKS; track++) {
+    trackFilters.add((int)spiMaster.getTrackFilter(track));
+    trackReverbSend.add(spiMaster.getTrackReverbSend(track));
+    trackDelaySend.add(spiMaster.getTrackDelaySend(track));
+    trackChorusSend.add(spiMaster.getTrackChorusSend(track));
+    trackPan.add(spiMaster.getTrackPan(track));
+    trackEcho.add(spiMaster.getTrackEchoActive(track));
+    trackFlanger.add(spiMaster.getTrackFlangerActive(track));
+    trackCompressor.add(spiMaster.getTrackCompressorActive(track));
+  }
+
+  JsonArray samples = doc.createNestedArray("samples");
+  for (int pad = 0; pad < MAX_PADS; pad++) {
+    bool loadedLocal = (pad < MAX_SAMPLES) && sampleManager.isSampleLoaded(pad);
+    bool loadedDaisy = (sdLoadedMask & (1UL << pad)) != 0;
+    if (!loadedLocal && !loadedDaisy) continue;
+    JsonObject sample = samples.createNestedObject();
+    sample["pad"] = pad;
+    sample["loaded"] = true;
+    const char* localName = loadedLocal ? sampleManager.getSampleName(pad) : nullptr;
+    const char* daisyName = gDaisyPadFiles[pad];
+    const char* name = (localName && localName[0]) ? localName : daisyName;
+    sample["name"] = (name && name[0]) ? name : "";
+  }
+
+  if (!_stateBuf) _stateBuf = (char*)ps_malloc(kStateBufSize);
+  if (!_stateBuf) return;
+  size_t len = serializeJson(doc, _stateBuf, kUdpMaxPacketBytes);
+  if (len == 0 || len >= kUdpMaxPacketBytes) return;
+  udp.beginPacket(ip, port);
+  udp.write((uint8_t*)_stateBuf, len);
+  udp.endPacket();
+}
+
+void WebInterface::broadcastUdpStateSync() {
+  if (udpClients.empty()) return;
+  for (auto& entry : udpClients) {
+    sendUdpStateSync(entry.second.ip, entry.second.port);
+    yield();
   }
 }
 
@@ -1886,6 +2021,12 @@ void WebInterface::update() {
   if (!pageLoading && ws->count() > 0 && now - lastPeriodicState >= 15000) {
     lastPeriodicState = now;
     broadcastSequencerState();
+  }
+
+  static unsigned long lastUdpStateSync = 0;
+  if (!pageLoading && !udpClients.empty() && now - lastUdpStateSync >= 2000) {
+    lastUdpStateSync = now;
+    broadcastUdpStateSync();
   }
 
   // ── Heap monitor: log cada 10s para diagnosticar fugas ──
@@ -2038,7 +2179,10 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     lastVolumeCmdMs = nowCmdMs;
   }
   
-  if (cmd == "trigger") {
+  if (cmd == "hello" || cmd == "get_state" || cmd == "getState") {
+    return;
+  }
+  else if (cmd == "trigger") {
     int pad = doc["pad"];
     if (pad < 0 || pad >= 24) return;  // 16 sequencer + 8 XTRA
     int velocity = doc.containsKey("vel") ? doc["vel"].as<int>() : 127;
@@ -2414,6 +2558,19 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     serializeJson(muteDoc, muteOutput);
     if (ws) ws->textAll(muteOutput);
   }
+  else if (cmd == "solo") {
+    int track = doc["track"];
+    if (track < 0 || track >= 16) return;
+    bool solo = doc["value"];
+    spiMaster.setTrackSolo(track, solo);
+    StaticJsonDocument<128> soloDoc;
+    soloDoc["type"] = "trackSolo";
+    soloDoc["track"] = track;
+    soloDoc["solo"] = solo;
+    String soloOutput;
+    serializeJson(soloDoc, soloOutput);
+    if (ws) ws->textAll(soloOutput);
+  }
   else if (cmd == "toggleLoop") {
     int track = doc["track"];
     if (track < 0 || track >= 24) return;
@@ -2513,6 +2670,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setFilter") {
     int type = doc["type"];
+    gMasterFilterType = type;
     spiMaster.setFilterType((FilterType)type);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "filterType"; resp["value"] = type;
@@ -2521,6 +2679,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setFilterCutoff") {
     float cutoff = doc["value"];
+    gMasterFilterCutoff = cutoff;
     spiMaster.setFilterCutoff(cutoff);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "filterCutoff"; resp["value"] = cutoff;
@@ -2529,6 +2688,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setFilterResonance") {
     float resonance = doc["value"];
+    gMasterFilterResonance = resonance;
     spiMaster.setFilterResonance(resonance);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "filterResonance"; resp["value"] = resonance;
@@ -2537,6 +2697,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setBitCrush") {
     int bits = doc["value"];
+    gMasterBitCrushBits = bits;
     spiMaster.setBitDepth(bits);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "bitCrush"; resp["value"] = bits;
@@ -2545,6 +2706,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setDistortion") {
     float amount = doc["value"];
+    gMasterDistortion = amount;
     spiMaster.setDistortion(amount);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "distortion"; resp["value"] = amount;
@@ -2561,6 +2723,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setSampleRate") {
     int rate = doc["value"];
+    gMasterSampleRateReduction = rate;
     spiMaster.setSampleRateReduction(rate);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "sampleRate"; resp["value"] = rate;
@@ -2570,6 +2733,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   // ============= NEW: Master Effects Commands =============
   else if (cmd == "setDelayActive") {
     bool active = doc["value"];
+    gMasterDelayActive = active;
     spiMaster.setDelayActive(active);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "delayActive"; resp["value"] = active;
@@ -2602,6 +2766,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setPhaserActive") {
     bool active = doc["value"];
+    gMasterPhaserActive = active;
     spiMaster.setPhaserActive(active);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "phaserActive"; resp["value"] = active;
@@ -2634,6 +2799,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setFlangerActive") {
     bool active = doc["value"];
+    gMasterFlangerActive = active;
     spiMaster.setFlangerActive(active);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "flangerActive"; resp["value"] = active;
@@ -2674,6 +2840,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setCompressorActive") {
     bool active = doc["value"];
+    gMasterCompressorActive = active;
     spiMaster.setCompressorActive(active);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "compressorActive"; resp["value"] = active;
@@ -3514,7 +3681,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int track = doc["track"];
     int step = doc["step"];
     int velocity = doc["velocity"];
-    if (track < 0 || track >= 16 || step < 0 || step >= 16) {
+    if (track < 0 || track >= MAX_TRACKS || step < 0 || step >= STEPS_PER_PATTERN) {
       return;
     }
     
@@ -3821,10 +3988,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "get_pattern") {
     int patternNum = doc.containsKey("pattern") ? doc["pattern"].as<int>() : sequencer.getCurrentPattern();
     
-    // Crear respuesta con el patrón
-    StaticJsonDocument<2048> response;
+    if (patternNum < 0 || patternNum >= MAX_PATTERNS) return;
+
+    PsramJsonDocument response(8192);
     response["cmd"] = "pattern_sync";
     response["pattern"] = patternNum;
+    response["stepCount"] = sequencer.getPatternLength();
     
     JsonArray data = response.createNestedArray("data");
     for (int t = 0; t < MAX_TRACKS; t++) {
@@ -3836,10 +4005,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     
     // Enviar UDP de vuelta al slave (solo si es una petición UDP)
     if (udp.remoteIP() != IPAddress(0, 0, 0, 0)) {
-      String json;
-      serializeJson(response, json);
+      if (!_patternBuf) _patternBuf = (char*)ps_malloc(kPatternBufSize);
+      if (!_patternBuf) return;
+      size_t jsonLen = serializeJson(response, _patternBuf, kPatternBufSize);
+      if (jsonLen == 0 || jsonLen >= kPatternBufSize) return;
       udp.beginPacket(udp.remoteIP(), udp.remotePort());
-      udp.write((uint8_t*)json.c_str(), json.length());
+      udp.write((uint8_t*)_patternBuf, jsonLen);
       udp.endPacket();
       
     }
@@ -4411,24 +4582,8 @@ void WebInterface::handleUdp() {
     return;
   }
 
-  // ── Rate limit: max 50 packets/second ──
-  static unsigned long lastUdpProcess = 0;
-  static uint8_t udpBurstCount = 0;
-  unsigned long now = millis();
-  if (now - lastUdpProcess < 20) {
-    udpBurstCount++;
-    if (udpBurstCount > 5) {
-      char drain[64];
-      while (udp.available()) udp.read(drain, sizeof(drain));
-      return;
-    }
-  } else {
-    udpBurstCount = 0;
-  }
-  lastUdpProcess = now;
-
   // ── Reject oversized packets ──
-  if (packetSize > 500) {
+  if (packetSize >= (int)kUdpMaxPacketBytes) {
     char drain[64];
     while (udp.available()) udp.read(drain, sizeof(drain));
     udp.beginPacket(udp.remoteIP(), udp.remotePort());
@@ -4437,21 +4592,28 @@ void WebInterface::handleUdp() {
     return;
   }
 
-  char incomingPacket[512];
-  int len = udp.read(incomingPacket, 511);
+  static char incomingPacket[kUdpMaxPacketBytes];
+  int len = udp.read(incomingPacket, sizeof(incomingPacket) - 1);
   if (len <= 0) return;
   incomingPacket[len] = 0;
 
   updateUdpClient(udp.remoteIP(), udp.remotePort());
 
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<4096> doc;
   DeserializationError error = deserializeJson(doc, incomingPacket);
 
   if (!error) {
+    const char* cmd = doc["cmd"] | "";
+    bool syncAfter = shouldSendUdpStateSync(cmd);
+    IPAddress remoteIp = udp.remoteIP();
+    uint16_t remotePort = udp.remotePort();
     processCommand(doc);
-    udp.beginPacket(udp.remoteIP(), udp.remotePort());
+    udp.beginPacket(remoteIp, remotePort);
     udp.print("{\"s\":\"ok\"}");
     udp.endPacket();
+    if (syncAfter) {
+      sendUdpStateSync(remoteIp, remotePort);
+    }
   } else {
     udp.beginPacket(udp.remoteIP(), udp.remotePort());
     udp.print("{\"s\":\"err\",\"m\":\"parse\"}");
@@ -4557,9 +4719,6 @@ void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename,
     
     // Buscar el parámetro 'pad' en la query string (GET params)
     if (!request->hasParam("pad", false)) {
-      for (int i = 0; i < request->params(); i++) {
-        AsyncWebParameter* p = request->getParam(i);
-      }
       uploadError = true;
       uploadErrorMsg = "Missing pad parameter";
       broadcastUploadComplete(-1, false, uploadErrorMsg);

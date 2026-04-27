@@ -9,7 +9,7 @@
 
 #include <Arduino.h>
 
-#define MAX_PATTERNS 128
+#define MAX_PATTERNS 16
 #define STEPS_PER_PATTERN 64
 #define MAX_TRACKS 16
 

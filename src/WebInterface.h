@@ -91,6 +91,9 @@ private:
   void onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, 
                        AwsEventType type, void *arg, uint8_t *data, size_t len);
   void processCommand(const JsonDocument& doc);  // Función común para procesar comandos
+  void sendUdpStateSync(IPAddress ip, uint16_t port);
+  void broadcastUdpStateSync();
+  bool shouldSendUdpStateSync(const char* cmd) const;
   
   // File upload handlers
   void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);

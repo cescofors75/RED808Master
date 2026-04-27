@@ -1,6 +1,8 @@
 # RED808 — Daisy Seed: Guía de implementación del Slave Audio
 > Documento para el equipo de desarrollo del slave Daisy Seed
-> Actualizado: 27/02/2026 — Transporte cambiado de SPI a **UART** (GPIO17 TX verificado)
+> Actualizado: 27/04/2026 — Transporte operativo: **SPI real**. Las secciones UART de este documento son legado y no deben usarse para nuevos cambios.
+
+> Contrato vigente: P4/S3/Master usan JSON UDP segun `../RED808_COMMAND_CONTRACT.md`; RedMaster traduce hacia Daisy por SPI binario (`SPIMaster.*`, `protocol.h`). Daisy no recibe JSON ni UART legacy en la arquitectura actual.
 
 ---
 
@@ -8,8 +10,8 @@
 
 1. [Resumen del proyecto](#1-resumen-del-proyecto)
 2. [Hardware — Daisy Seed](#2-hardware--daisy-seed)
-3. [Protocolo UART — Formato de paquete](#3-protocolo-uart--formato-de-paquete)
-4. [Recepción UART — Flujo de bytes](#4-recepción-uart--flujo-de-bytes)
+3. [Protocolo SPI — Formato de paquete](#3-protocolo-spi--formato-de-paquete)
+4. [Recepción SPI — Flujo de bytes](#4-recepción-spi--flujo-de-bytes)
 5. [CRC16-Modbus](#5-crc16-modbus)
 6. [Tabla completa de comandos](#6-tabla-completa-de-comandos)
 7. [Payloads — Definición exacta de cada struct](#7-payloads--definición-exacta-de-cada-struct)
@@ -33,41 +35,30 @@
 | **Master** | ESP32-S3 N16R8 | Web UI, secuenciador, MIDI, WiFi, control |
 | **Slave** | **Daisy Seed** (STM32H750 + WM8731) | Motor de audio, DSP, efectos, samples |
 
-La comunicación es **UART** (115200 8N1): el ESP32 (master) envía comandos, la Daisy (slave) reproduce audio.
+La comunicación operativa es **SPI real**: el ESP32-S3 actua como master SPI, envia comandos binarios y la Daisy Seed actua como slave de audio.
 
 **Ventajas de la Daisy Seed para este proyecto:**
 - **64 MB SDRAM** — cabe todo el kit de samples en RAM (los samples son ~500 KB total)
 - **WM8731 codec integrado** — audio estéreo 44.1/48 kHz sin hardware externo
 - **480 MHz Cortex-M7** — DSP de sobra para 16+ voces + FX chain
 - **DaisySP** — librería DSP con filtros, delay, reverb, compressor, chorus, etc.
-- **libDaisy** — UartHandler, AudioCallback, FatFS para SD card
+- **libDaisy** — AudioCallback, FatFS para SD card y perifericos STM32 usados por el slave SPI
 
 ---
 
 ## 2. Hardware — Daisy Seed
 
-### 2.1 Pinout UART — Daisy Seed ↔ ESP32-S3
+### 2.1 Pinout SPI — Daisy Seed ↔ ESP32-S3
 
-> ⚠ **Transporte UART** (SPI descartado). Solo 3 cables necesarios.
+> Transporte vigente: **SPI real**. No usar el pinout UART legacy salvo para pruebas aisladas antiguas.
 
-| Señal    | Daisy Seed pin | Columna / posición física   | STM32H750   | ESP32-S3 GPIO | Notas |
-|----------|----------------|-----------------------------|-------------|---------------|-------|
-| **RX**   | **D14**        | **Izquierda, pin 15 desde USB (abajo)** | PB7 (USART1_RX) | **GPIO17 (TX)** | ESP32 transmite → Daisy recibe |
-| **TX**   | **D13**        | Izquierda, pin 14 desde USB (abajo) | PB6 (USART1_TX) | **GPIO18 (RX)** | Daisy transmite → ESP32 recibe |
-| GND      | GND            | —                           | GND         | GND           | Tierra común obligatoria |
-
-**Configuración UART:**
-- **Periférico Daisy:** USART1
-- **Baud rate:** 115200
-- **Formato:** 8N1 (8 bits, sin paridad, 1 stop bit)
-- **GPIO17 TX verificado** con tester: 1.60V medidos ✅
-
-**Conexión:**
-```
-ESP32 GPIO17 (TX) ──────→ Daisy D14 (PB7 USART1_RX)  [columna izq, pin 15 desde USB]
-ESP32 GPIO18 (RX) ←────── Daisy D13 (PB6 USART1_TX)  [columna izq, pin 14 desde USB]
-ESP32 GND         ──────── Daisy GND
-```
+| Señal SPI | Daisy Seed pin | STM32H750 | ESP32-S3 GPIO ejemplo | Notas |
+|-----------|----------------|-----------|------------------------|-------|
+| SCK       | D10            | PC10      | GPIO12                 | SPI clock |
+| MOSI      | D9             | PC11      | GPIO11                 | ESP32 -> Daisy |
+| MISO      | D8             | PC12      | GPIO13                 | Daisy -> ESP32 |
+| CS/NSS    | D7             | PA15      | GPIO10                 | Chip select |
+| GND       | GND            | GND       | GND                    | Tierra comun |
 
 ### 2.2 Pinout SD Card (opcional pero recomendado)
 
@@ -86,7 +77,7 @@ La Daisy puede conectar una micro-SD via SDMMC (4-bit, mucho más rápido que SP
 
 ### 2.3 Audio — WM8731 integrado
 
-- Usar `seed.SetAudioSampleRate(SaiHandle::Config::SampleRate::SAI_44KHZ)` — los samples del ESP32 son **44100 Hz, mono, 16-bit signed**
+- Usar audio a **48000 Hz** para coincidir con el Master ESP32-S3 y el contrato actual.
 - `seed.SetAudioBlockSize(128)` — block size recomendado
 - Salida estéreo: el AudioCallback escribe en `out[0]` (L) y `out[1]` (R)
 

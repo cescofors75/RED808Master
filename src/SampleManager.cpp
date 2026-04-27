@@ -271,7 +271,7 @@ bool SampleManager::applyFade(int padIndex, float fadeInSec, float fadeOutSec) {
   
   // Fade in: ramp up gain from 0 to 1 over the first fadeInSamples
   if (fadeInSec > 0.001f) {
-    uint32_t fadeInSamples = (uint32_t)(fadeInSec * 44100.0f);
+    uint32_t fadeInSamples = (uint32_t)(fadeInSec * SAMPLE_RATE);
     if (fadeInSamples > len / 2) fadeInSamples = len / 2;  // Max half the sample
     for (uint32_t i = 0; i < fadeInSamples; i++) {
       float t = (float)i / (float)fadeInSamples;  // 0.0 to 1.0
@@ -281,7 +281,7 @@ bool SampleManager::applyFade(int padIndex, float fadeInSec, float fadeOutSec) {
   
   // Fade out: ramp down gain from 1 to 0 over the last fadeOutSamples
   if (fadeOutSec > 0.001f) {
-    uint32_t fadeOutSamples = (uint32_t)(fadeOutSec * 44100.0f);
+    uint32_t fadeOutSamples = (uint32_t)(fadeOutSec * SAMPLE_RATE);
     if (fadeOutSamples > len / 2) fadeOutSamples = len / 2;  // Max half the sample
     uint32_t fadeOutStart = len - fadeOutSamples;
     for (uint32_t i = 0; i < fadeOutSamples; i++) {
