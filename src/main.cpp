@@ -41,6 +41,23 @@
 // Los samples se gestionan desde SD en Daisy vía comandos SD_*.
 #define BOOT_PRELOAD_LOCAL_SAMPLES false
 
+#ifndef RED808_MASTER_SPI_TRIGGER_TEST
+#define RED808_MASTER_SPI_TRIGGER_TEST 0
+#endif
+
+#ifndef RED808_MASTER_UART0_DEBUG
+#define RED808_MASTER_UART0_DEBUG 0
+#endif
+
+#if RED808_MASTER_UART0_DEBUG
+HardwareSerial debugUart(0);
+#define DBG_PRINTLN(msg) debugUart.println(msg)
+#define DBG_PRINTF(...) debugUart.printf(__VA_ARGS__)
+#else
+#define DBG_PRINTLN(msg) do {} while (0)
+#define DBG_PRINTF(...) do {} while (0)
+#endif
+
 // --- OBJETOS GLOBALES ---
 // NOTE: Sequencer's large pattern arrays (~229 KB) are allocated from PSRAM
 // via ps_calloc() inside the Sequencer constructor — see Sequencer.cpp.
@@ -265,6 +282,28 @@ void spiAudioTask(void *pvParameters) {
 
         sequencer.update();   // Mantiene internos del secuenciador (beat UI, song mode)
         spiMaster.process();
+
+#if RED808_MASTER_SPI_TRIGGER_TEST
+        static uint32_t lastDiagTriggerMs = 0;
+        static uint8_t diagPad = 0;
+        uint32_t nowMs = millis();
+        if (nowMs - lastDiagTriggerMs >= 1000) {
+            lastDiagTriggerMs = nowMs;
+            uint32_t pingUs = 0;
+            bool pingOk = spiMaster.ping(pingUs);
+            spiMaster.triggerSampleLive(diagPad, 120);
+            spiMaster.synthTrigger(0, diagPad, 120);
+            rgbLed.setPixelColor(0, (diagPad & 1) ? 0x00FF00 : 0xFF0000);
+            rgbLed.show();
+            DBG_PRINTF("[SPI_DIAG] pad=%u ping=%u rtt_us=%lu errors=%lu\n",
+                       (unsigned)diagPad,
+                       pingOk ? 1U : 0U,
+                       (unsigned long)pingUs,
+                       (unsigned long)spiMaster.getSPIErrors());
+            diagPad = (diagPad + 1) & 0x03;
+        }
+#endif
+
         esp_task_wdt_reset();
         vTaskDelay(pdMS_TO_TICKS(1));
     }
@@ -317,6 +356,7 @@ void systemTask(void *pvParameters) {
 // Función para triggers manuales desde live pads (web interface)
 // Esta SÍ enciende el LED RGB
 void triggerPadWithLED(int track, uint8_t velocity) {
+    DBG_PRINTF("[TRIG] pad=%d vel=%d connected=%d\n", track, velocity, (int)spiMaster.isConnected());
     int8_t engine = getTrackSynthEngine(track);
     if (track >= 0 && track < 16 && engine >= 0 && engine <= 6) {
         uint8_t liveVol = spiMaster.getLiveVolume();
@@ -422,6 +462,11 @@ static void applyProfessionalMixBaseline() {
 
 void setup() {
     Serial.begin(115200);
+#if RED808_MASTER_UART0_DEBUG
+    debugUart.begin(115200, SERIAL_8N1, -1, -1);
+    delay(50);
+    DBG_PRINTLN("[BOOT] UART0 debug online");
+#endif
     rgbLed.begin();
     rgbLed.setBrightness(255);
     showBootLED();
@@ -430,6 +475,7 @@ void setup() {
     // ── Reset reason logging ──
     esp_reset_reason_t reason = esp_reset_reason();
     Serial.printf("[BOOT] Reset reason: %d\n", (int)reason);
+    DBG_PRINTF("[BOOT] Reset reason: %d\n", (int)reason);
 
     // 1. Filesystem
     if (!LittleFS.begin(true)) {
