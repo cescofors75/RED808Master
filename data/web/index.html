@@ -25,6 +25,8 @@
                     <button class="hdr-transport-btn hdr-play-btn" id="headerPlayPauseBtn" title="Play/Pause">PLAY</button>
                     <button class="hdr-transport-btn hdr-pattern-btn" id="headerPatternNextBtn" title="Patrón siguiente">PAT +</button>
                     <span class="hdr-pattern-readout" id="headerPatternReadout">P01</span>
+                    <span class="hdr-step-readout" id="headerStepIndicator" title="Step activo">S--</span>
+                    <button class="hdr-transport-btn hdr-panic-btn" id="headerPanicBtn" title="Apagar todas las notas colgadas (ESC)">🛑</button>
                 </div>
                 <!-- BPM -->
                 <div class="hdr-ctrl" id="meter-bpm">
@@ -1516,13 +1518,16 @@
 
         <!-- TAB: Melody Editor -->
         <div id="tab-melody" class="tab-content">
-            <section class="section melody-tab-section">
-                <div class="melody-tab-header">
-                    <h2>🎼 MELODY EDITOR</h2>
-                    <div class="melody-tab-track-selector">
-                        <label>Track:</label>
+            <section class="section melody-studio">
+                <div class="melody-studio-header">
+                    <div class="melody-studio-titlebar">
+                        <h2>🎼 MELODY STUDIO</h2>
+                        <span class="melody-studio-tag">PRO · piano + score</span>
+                    </div>
+                    <div class="melody-studio-track-row">
+                        <label>Track</label>
                         <select id="melodyTrackSelect"></select>
-                        <label style="margin-left:12px;">Engine:</label>
+                        <label>Engine</label>
                         <select id="melodyEngineSelect" disabled>
                             <option value="-1">— Engine —</option>
                             <option value="3">303 Acid</option>
@@ -1532,27 +1537,44 @@
                         </select>
                         <span id="melodyTrackEngine" class="melody-engine-badge">—</span>
                     </div>
+                    <div id="melodyTabPresets" class="melody-tab-presets"></div>
                 </div>
-                <div id="melodyTabPresets" class="melody-tab-presets"></div>
-                <div class="melody-tab-controls">
-                    <button id="melodyTabPlay" class="melody-ctrl-btn">▶ Preview</button>
-                    <label class="melody-flag-label"><input type="checkbox" id="melodyTabAccent"> Accent</label>
-                    <label class="melody-flag-label"><input type="checkbox" id="melodyTabSlide"> Slide</label>
-                    <button id="melodyTabClear" class="melody-ctrl-btn">🗑️ Clear Track</button>
-                    <span class="melody-hint">Click = set note | Right-click = rest | Presets auto-fill</span>
-                </div>
-                <div class="melody-live-panel">
-                    <div class="melody-live-toolbar">
-                        <button id="melodyLiveRecord" class="melody-ctrl-btn melody-record-btn">REC</button>
-                        <button id="melodyLiveReset" class="melody-ctrl-btn">Reset Rec</button>
-                        <select id="melodyAssignPadSelect" class="melody-pad-select"></select>
-                        <button id="melodyAssignPad" class="melody-ctrl-btn">Assign to Pad</button>
-                        <button id="melodyClearPadAssign" class="melody-ctrl-btn">Clear Pad</button>
-                        <span id="melodyLiveStatus" class="melody-live-status">Note —</span>
+
+                <div class="melody-studio-grid">
+                    <!-- LEFT: PARTITURA / PIANO ROLL -->
+                    <div class="melody-studio-pane melody-studio-left">
+                        <div class="melody-studio-section-title">📜 Score · Piano Roll</div>
+                        <div class="melody-studio-controls">
+                            <button id="melodyTabPlay" class="melody-ctrl-btn">▶ Preview</button>
+                            <button id="melodyTabClear" class="melody-ctrl-btn">🗑️ Clear</button>
+                            <span class="melody-hint">click = set · right-click = rest · presets auto-fill</span>
+                        </div>
+                        <div id="melodyTabPianoRoll" class="melody-tab-piano-roll"></div>
                     </div>
-                    <div id="melodyVisualPiano" class="melody-visual-piano"></div>
+
+                    <!-- RIGHT: LIVE KEYBOARD -->
+                    <div class="melody-studio-pane melody-studio-right">
+                        <div class="melody-studio-section-title">🎹 Live Keyboard</div>
+                        <div class="melody-live-toolbar">
+                            <button id="melodyLiveRecord" class="melody-ctrl-btn melody-record-btn">● REC</button>
+                            <button id="melodyLiveReset" class="melody-ctrl-btn">↻ Reset</button>
+                            <label class="melody-flag-label"><input type="checkbox" id="melodyTabAccent"> Accent</label>
+                            <label class="melody-flag-label"><input type="checkbox" id="melodyTabSlide"> Slide</label>
+                            <span id="melodyLiveStatus" class="melody-live-status">Note —</span>
+                            <button id="melodyPanicBtn" class="melody-ctrl-btn melody-panic-btn" title="Apagar todas las notas colgadas">🛑 Panic</button>
+                        </div>
+                        <div class="melody-assign-row">
+                            <label>1️⃣ Toca una tecla &nbsp;·&nbsp; 2️⃣ Asignar a pad:</label>
+                            <select id="melodyAssignPadSelect" class="melody-pad-select"></select>
+                            <button id="melodyAssignPad" class="melody-ctrl-btn">→ Asignar</button>
+                            <button id="melodyClearPadAssign" class="melody-ctrl-btn">Quitar</button>
+                        </div>
+                        <div id="melodyVisualPiano" class="melody-visual-piano melody-visual-piano-pro"></div>
+                        <div class="melody-keyboard-hint">
+                            <b>PC keys:</b> Z S X D C V G B H N J M <span class="kh-sep">·</span> Q 2 W 3 E R 5 T 6 Y 7 U I <span class="kh-sep">·</span> ← / → octave
+                        </div>
+                    </div>
                 </div>
-                <div id="melodyTabPianoRoll" class="melody-tab-piano-roll"></div>
             </section>
         </div>
 

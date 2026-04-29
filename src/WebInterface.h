@@ -94,6 +94,9 @@ private:
   void sendUdpStateSync(IPAddress ip, uint16_t port);
   void broadcastUdpStateSync();
   bool shouldSendUdpStateSync(const char* cmd) const;
+  /* v2.6 — Push pattern + selected index to all UDP slaves (P4/S3).
+   * Fixes bug where slaves displayed stale pattern after web changed it. */
+  void broadcastUdpPatternSync(int patternNum);
   
   // File upload handlers
   void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);

@@ -1207,6 +1207,41 @@ input:focus-visible {
   transform: scale(1.1);
 }
 
+/* ── Pad Melody menu (popup) ── */
+.pad-melody-menu {
+  position: fixed;
+  z-index: 9999;
+  background: #161616;
+  border: 1px solid #ff4444;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.7);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+}
+.pad-melody-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #1f1f1f;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  color: #eee;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.12s;
+}
+.pad-melody-menu-item:hover {
+  background: #2a1414;
+  border-color: #ff4444;
+}
+.pad-melody-menu .pmm-icon { font-size: 22px; }
+.pad-melody-menu .pmm-text { display:flex; flex-direction:column; line-height:1.2; }
+.pad-melody-menu .pmm-text small { color:#aaa; font-size: 11px; margin-top: 2px; }
+
 /* ── Mobile ── */
 @media (max-width: 768px) {
   .melody-editor-panel {
@@ -1232,6 +1267,159 @@ input:focus-visible {
 
 .melody-tab-section {
   padding: 10px;
+}
+
+/* ── Melody Studio (split layout) ── */
+.melody-studio {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: calc(100vh - 140px);
+}
+.melody-studio-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, rgba(255,68,68,0.08), rgba(0,0,0,0.4));
+  border: 1px solid rgba(255,68,68,0.25);
+  border-radius: 10px;
+}
+.melody-studio-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.melody-studio-titlebar h2 {
+  margin: 0;
+  color: #ff4444;
+  font-size: 16px;
+  letter-spacing: 1px;
+}
+.melody-studio-tag {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: #ff8888;
+  background: rgba(255,68,68,0.12);
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.melody-studio-track-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.melody-studio-track-row label {
+  color: #aaa;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.melody-studio-track-row select {
+  background: #1a1a1a;
+  color: #fff;
+  border: 1px solid #ff444466;
+  border-radius: 5px;
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+  min-width: 160px;
+}
+.melody-studio-track-row select:focus { border-color: #ff4444; }
+.melody-studio-grid {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  gap: 12px;
+  flex: 1;
+  min-height: 480px;
+}
+.melody-studio-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: linear-gradient(165deg, rgba(12,12,16,0.95), rgba(4,4,8,0.95));
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 10px 12px;
+  min-height: 0;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 4px 18px rgba(0,0,0,0.45);
+}
+.melody-studio-section-title {
+  color: #ff8888;
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(255,68,68,0.18);
+  padding-bottom: 6px;
+}
+.melody-studio-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.melody-studio-left .melody-tab-piano-roll {
+  flex: 1;
+  min-height: 280px;
+  max-height: none;
+}
+.melody-assign-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  background: rgba(255,68,68,0.06);
+  border: 1px dashed rgba(255,68,68,0.25);
+  border-radius: 6px;
+}
+.melody-assign-row label {
+  color: #ddd;
+  font-size: 12px;
+  font-weight: 600;
+}
+.melody-keyboard-hint {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 11px;
+  color: #aaa;
+  background: rgba(0,0,0,0.4);
+  padding: 6px 10px;
+  border-radius: 5px;
+  border-left: 3px solid #ff4444;
+}
+.melody-keyboard-hint b { color: #ff8888; }
+.melody-keyboard-hint .kh-sep { color: #555; margin: 0 4px; }
+
+/* Pro keyboard: bigger and with glossy finish */
+.melody-visual-piano-pro {
+  height: 200px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: inset 0 6px 14px rgba(0,0,0,0.7), 0 4px 12px rgba(0,0,0,0.5);
+  background: linear-gradient(180deg, #0a0a0d, #050507);
+}
+.melody-visual-piano-pro .melody-piano-white {
+  background: linear-gradient(180deg, #fafafa 0%, #ececec 60%, #c8ccd2 100%);
+  border-right: 1px solid rgba(0,0,0,0.4);
+  box-shadow: inset 0 -8px 12px rgba(0,0,0,0.08);
+}
+.melody-visual-piano-pro .melody-piano-black {
+  width: 28px;
+  height: 120px;
+  background: linear-gradient(180deg, #2a2a30 0%, #0a0a0c 100%);
+  box-shadow: inset 0 -3px 6px rgba(255,255,255,0.06), 0 3px 6px rgba(0,0,0,0.6);
+  border-radius: 0 0 6px 6px;
+}
+.melody-visual-piano-pro .melody-piano-key.pressed,
+.melody-visual-piano-pro .melody-piano-key.selected {
+  background: linear-gradient(180deg, #ff5555, #cc2222) !important;
+  color: #fff !important;
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.25), 0 0 22px rgba(255,68,68,0.6) !important;
 }
 
 .melody-tab-header {
@@ -1323,6 +1511,29 @@ input:focus-visible {
   border-color: #ff6666;
   color: #fff;
   box-shadow: 0 0 14px rgba(255, 34, 34, 0.55);
+}
+
+.melody-panic-btn {
+  background: rgba(255, 60, 60, 0.18);
+  border-color: rgba(255, 80, 80, 0.55);
+  color: #ff9090;
+  font-weight: 800;
+}
+
+.melody-panic-btn:hover {
+  background: #ff3030;
+  color: #fff;
+  box-shadow: 0 0 14px rgba(255, 60, 60, 0.65);
+}
+
+.melody-assign-row label {
+  font-weight: 700;
+  color: #ffd0d0;
+}
+
+.melody-live-status.has-note {
+  color: #ffd066;
+  font-weight: 700;
 }
 
 .melody-pad-select {
@@ -1470,4 +1681,14 @@ input:focus-visible {
     width: 100%;
     margin-left: 0;
   }
+}
+
+/* Studio split → stacked on tablet/phone */
+@media (max-width: 1100px) {
+  .melody-studio-grid { grid-template-columns: 1fr; min-height: 0; }
+  .melody-studio-left .melody-tab-piano-roll { min-height: 220px; }
+  .melody-visual-piano-pro { height: 160px; }
+}
+@media (max-width: 768px) {
+  .melody-visual-piano-pro { height: 130px; overflow-x: auto; }
 }

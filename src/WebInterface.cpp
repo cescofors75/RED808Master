@@ -1903,6 +1903,41 @@ void WebInterface::broadcastUdpStateSync() {
   }
 }
 
+/* v2.6 — Push the active pattern (drum steps + selected index) to every
+ * known UDP slave. Triggered whenever the active pattern changes via web/UI
+ * so the LCD slaves don't show a stale pattern. */
+void WebInterface::broadcastUdpPatternSync(int patternNum) {
+  if (udpClients.empty()) return;
+  if (patternNum < 0 || patternNum >= MAX_PATTERNS) return;
+  if (ESP.getFreeHeap() < 30000) return;
+
+  PsramJsonDocument response(8192);
+  response["cmd"]       = "pattern_sync";
+  response["pattern"]   = patternNum;
+  response["active"]    = true;   /* hint to slaves: this IS the active pattern */
+  response["stepCount"] = sequencer.getPatternLength();
+
+  JsonArray data = response.createNestedArray("data");
+  for (int t = 0; t < MAX_TRACKS; t++) {
+    JsonArray track = data.createNestedArray();
+    for (int s = 0; s < STEPS_PER_PATTERN; s++) {
+      track.add(sequencer.getStep(patternNum, t, s) ? 1 : 0);
+    }
+  }
+
+  if (!_patternBuf) _patternBuf = (char*)ps_malloc(kPatternBufSize);
+  if (!_patternBuf) return;
+  size_t jsonLen = serializeJson(response, _patternBuf, kPatternBufSize);
+  if (jsonLen == 0 || jsonLen >= kPatternBufSize) return;
+
+  for (auto& entry : udpClients) {
+    udp.beginPacket(entry.second.ip, entry.second.port);
+    udp.write((uint8_t*)_patternBuf, jsonLen);
+    udp.endPacket();
+    yield();
+  }
+}
+
 void WebInterface::sendSequencerStateToClient(AsyncWebSocketClient* client) {
   if (!initialized || !ws || !isClientReady(client)) return;
   
@@ -2311,6 +2346,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     syslog("CMD", "selPat idx=%d heap=%u", pattern, ESP.getFreeHeap());
     sequencer.selectPattern(pattern);
     dsqUploadPatternDeferred(pattern);
+    /* v2.6 — Push to UDP slaves so LCD pattern display always matches master */
+    broadcastUdpPatternSync(pattern);
     
     // broadcastSequencerState + pattern JSON — no SPI blocking now
     if (ESP.getFreeHeap() > 50000) {
@@ -4334,6 +4371,28 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     bool    accent   = doc["accent"]   | false;
     bool    slide    = doc["slide"]    | false;
     spiMaster.synthNoteOnEx(engine, note, velocity, accent, slide);
+  }
+
+  // v2.7 — {"cmd":"melodyRecNote","engine":4,"note":60}
+  // Forwarded to all UDP slaves so the S3 melody screen can capture P4 piano
+  // keystrokes when its REC mode is enabled. Master itself takes no action.
+  else if (cmd == "melodyRecNote") {
+    if (!udpClients.empty()) {
+      uint8_t engine = doc["engine"] | 3;
+      uint8_t note   = doc["note"]   | 60;
+      char fwd[96];
+      int n = snprintf(fwd, sizeof(fwd),
+                       "{\"cmd\":\"melodyRecNote\",\"engine\":%u,\"note\":%u}",
+                       (unsigned)engine, (unsigned)note);
+      if (n > 0 && n < (int)sizeof(fwd)) {
+        for (auto& entry : udpClients) {
+          udp.beginPacket(entry.second.ip, entry.second.port);
+          udp.write((uint8_t*)fwd, (size_t)n);
+          udp.endPacket();
+          yield();
+        }
+      }
+    }
   }
 
   // {"cmd":"synth303NoteOff"}

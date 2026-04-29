@@ -2792,6 +2792,7 @@ function triggerPad(padIndex) {
 }
 
 // Disparar engine synth de la Daisy para un pad
+const _synthPadAutoOffTimers = new Array(16).fill(null);
 function triggerSynthPad(padIndex) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const engine = padSynthEngine[padIndex];
@@ -2809,6 +2810,12 @@ function triggerSynthPad(padIndex) {
             accent: !!(assignment && assignment.accent),
             slide: !!(assignment && assignment.slide)
         }));
+        // Safety: auto NoteOff tras 2s si no llega pointerup (clicks fantasma)
+        if (_synthPadAutoOffTimers[padIndex]) clearTimeout(_synthPadAutoOffTimers[padIndex]);
+        _synthPadAutoOffTimers[padIndex] = setTimeout(() => {
+            _synthPadAutoOffTimers[padIndex] = null;
+            sendSynthNoteOffForPad(padIndex, engine);
+        }, 2000);
     } else {
         // TR-808/909/505: trigger percusivo
         ws.send(JSON.stringify({
@@ -2827,6 +2834,10 @@ function isMelodicSynthEngine(engine) {
 function sendSynthNoteOffForPad(padIndex, engine) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     if (padIndex < 0 || padIndex >= 16 || !isMelodicSynthEngine(engine)) return;
+    if (_synthPadAutoOffTimers[padIndex]) {
+        clearTimeout(_synthPadAutoOffTimers[padIndex]);
+        _synthPadAutoOffTimers[padIndex] = null;
+    }
     ws.send(JSON.stringify({ cmd: 'synthNoteOff', track: padIndex, engine }));
 }
 
@@ -3700,6 +3711,13 @@ function _applyStepUpdate(step) {
     currentStep = step;
 
     if (step === lastCurrentStep) return;
+
+    // Header step indicator
+    const hdrStep = document.getElementById('headerStepIndicator');
+    if (hdrStep) {
+        hdrStep.textContent = 'S' + String(step + 1).padStart(2, '0') + '/' + String(currentStepCount).padStart(2, '0');
+        hdrStep.classList.toggle('playing', !!isPlaying);
+    }
 
     if (lastCurrentStep !== null) {
         const prevDot = stepDots[lastCurrentStep];
@@ -4772,6 +4790,11 @@ function updateHeaderTransportUI() {
     playBtn.classList.toggle('playing', isPlaying);
     playBtn.textContent = isPlaying ? 'PAUSE' : 'PLAY';
     playBtn.title = isPlaying ? 'Pause' : 'Play';
+    const hdrStep = document.getElementById('headerStepIndicator');
+    if (hdrStep) {
+        hdrStep.classList.toggle('playing', !!isPlaying);
+        if (!isPlaying) hdrStep.textContent = 'S--';
+    }
 }
 
 function updateHeaderPatternDisplay(index, name) {
@@ -5195,9 +5218,34 @@ function setupKeyboardControls() {
         headerPatternNextBtn.addEventListener('click', () => changePattern(1));
     }
 
+    const headerPanicBtn = document.getElementById('headerPanicBtn');
+    if (headerPanicBtn) {
+        headerPanicBtn.addEventListener('click', panicAllNotes);
+    }
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !e.repeat) {
+            const tag = (document.activeElement && document.activeElement.tagName) || '';
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+            panicAllNotes();
+        }
+    });
+
     updateHeaderTransportUI();
     updateHeaderPatternDisplay(currentPatternIndex);
 }
+
+// Panic: send NoteOff for all melodic engines on all 16 tracks (kills hung 303/WT/SH101/FM2 notes)
+function panicAllNotes() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    for (let track = 0; track < 16; track++) {
+        for (let engine = 3; engine <= 6; engine++) {
+            try { ws.send(JSON.stringify({ cmd: 'synthNoteOff', track, engine })); } catch (_) {}
+        }
+    }
+    try { ws.send(JSON.stringify({ cmd: 'synth303NoteOff' })); } catch (_) {}
+    if (window.showToast) window.showToast('🛑 Notas apagadas (Panic)', 'warning', 1200);
+}
+window.panicAllNotes = panicAllNotes;
 
 function changePattern(delta) {
     const totalPatterns = Math.max(PATTERN_NAMES.length, 6);

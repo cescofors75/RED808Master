@@ -1126,7 +1126,7 @@ function createKeyboardSidebar() {
       </div>
       
       <div class="key-section">
-        <h3>🎵 Patterns</h3>
+        <h3>🎵 Patterns (1-6)</h3>
         <div class="key-list">
           <div class="key-item"><kbd>Q</kbd><span>HIP HOP</span></div>
           <div class="key-item"><kbd>W</kbd><span>TECHNO</span></div>
@@ -1134,9 +1134,21 @@ function createKeyboardSidebar() {
           <div class="key-item"><kbd>R</kbd><span>BREAK</span></div>
           <div class="key-item"><kbd>T</kbd><span>HOUSE</span></div>
           <div class="key-item"><kbd>Y</kbd><span>TRAP</span></div>
-          <div class="key-item"><kbd>N</kbd><span>Next Pattern</span></div>
-          <div class="key-item"><kbd>B</kbd><span>Prev Pattern</span></div>
         </div>
+        <div class="key-note">Use N / B for next / prev (see Transport).</div>
+      </div>
+      
+      <div class="key-section">
+        <h3>🎹 Melody Piano (MELODY tab only)</h3>
+        <div class="key-list compact">
+          <div class="key-item"><kbd>Z S X D C V G B H N J M</kbd><span>Octava baja: C C# D … B</span></div>
+          <div class="key-item"><kbd>Q 2 W 3 E R 5 T 6 Y 7 U</kbd><span>Octava alta: C C# D … B</span></div>
+          <div class="key-item"><kbd>I</kbd><span>C de la octava siguiente</span></div>
+          <div class="key-item"><kbd>←</kbd><span>Bajar octava base</span></div>
+          <div class="key-item"><kbd>→</kbd><span>Subir octava base</span></div>
+        </div>
+        <div class="key-note">Mientras MELODY esté activa, las teclas suenan piano. Mantén <kbd>Shift</kbd> para usar el atajo original (patterns, vol, color, etc.).</div>
+        <div class="key-note">REC ON en MELODY → cada tecla escribe la nota en el step actual.</div>
       </div>
       
       <div class="key-section">
@@ -1147,6 +1159,7 @@ function createKeyboardSidebar() {
           <div class="key-item"><kbd>C</kbd><span>Medium (100)</span></div>
           <div class="key-item"><kbd>V</kbd><span>Accent (127)</span></div>
         </div>
+        <div class="key-note">Sólo activo con un step seleccionado en el sequencer.</div>
       </div>
       
       <div class="key-section">

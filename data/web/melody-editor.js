@@ -516,15 +516,82 @@ function addMelodyPadButtons() {
       const btn = document.createElement('button');
       btn.className = 'melody-pad-btn';
       btn.textContent = '🎹';
-      btn.title = 'Melody Editor';
+      btn.title = 'Melody options';
       btn.addEventListener('click', e => {
         e.stopPropagation();
         e.preventDefault();
-        showMelodyEditor(padIdx);
+        showPadMelodyMenu(btn, padIdx);
       });
       btn.addEventListener('mousedown', e => e.stopPropagation());
       btn.addEventListener('touchstart', e => e.stopPropagation());
       pad.appendChild(btn);
+    }
+  });
+}
+
+// ── Mini popup: choose between Step Editor or Live Note assignment ──
+function showPadMelodyMenu(anchorBtn, padIdx) {
+  // Close any existing
+  const old = document.getElementById('pad-melody-menu');
+  if (old) { old.remove(); return; }
+
+  const menu = document.createElement('div');
+  menu.id = 'pad-melody-menu';
+  menu.className = 'pad-melody-menu';
+  menu.innerHTML = `
+    <button class="pad-melody-menu-item" data-action="step">
+      <span class="pmm-icon">🎼</span>
+      <div class="pmm-text"><b>Step Editor</b><small>Edit notes per step</small></div>
+    </button>
+    <button class="pad-melody-menu-item" data-action="live">
+      <span class="pmm-icon">🎹</span>
+      <div class="pmm-text"><b>Live Note</b><small>Assign note to pad</small></div>
+    </button>
+  `;
+  document.body.appendChild(menu);
+
+  // Position next to button
+  const rect = anchorBtn.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  let left = rect.right + 6;
+  let top = rect.top;
+  if (left + menuRect.width > window.innerWidth) left = rect.left - menuRect.width - 6;
+  if (top + menuRect.height > window.innerHeight) top = window.innerHeight - menuRect.height - 8;
+  if (top < 8) top = 8;
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
+
+  function close() {
+    menu.remove();
+    document.removeEventListener('click', onDocClick, true);
+  }
+  function onDocClick(e) {
+    if (!menu.contains(e.target)) close();
+  }
+  setTimeout(() => document.addEventListener('click', onDocClick, true), 10);
+
+  menu.addEventListener('click', e => {
+    const btn = e.target.closest('.pad-melody-menu-item');
+    if (!btn) return;
+    const action = btn.dataset.action;
+    close();
+    if (action === 'step') {
+      showMelodyEditor(padIdx);
+    } else if (action === 'live') {
+      // Switch to MELODY tab and select this pad
+      const tabBtn = document.querySelector('.tab-btn[data-tab="melody"]');
+      if (tabBtn) tabBtn.click();
+      setTimeout(() => {
+        const sel = document.getElementById('melodyTrackSelect');
+        if (sel) {
+          sel.value = String(padIdx);
+          sel.dispatchEvent(new Event('change'));
+        }
+        // Pre-fill assign dropdown to this pad
+        const assignSel = document.getElementById('melodyAssignPadSelect');
+        if (assignSel) assignSel.value = String(padIdx);
+        if (window.showToast) window.showToast(`Pad ${padIdx + 1}: toca una tecla y pulsa "Assign to Pad"`, 'info', 2200);
+      }, 50);
     }
   });
 }
@@ -679,6 +746,11 @@ function initMelodyTab() {
   const clearAssignBtn = document.getElementById('melodyClearPadAssign');
   if (clearAssignBtn) clearAssignBtn.addEventListener('click', clearSelectedPadAssignment);
 
+  const panicBtn = document.getElementById('melodyPanicBtn');
+  if (panicBtn) panicBtn.addEventListener('click', () => {
+    if (typeof window.panicAllNotes === 'function') window.panicAllNotes();
+  });
+
   // Preset row delegation
   const presetRow = document.getElementById('melodyTabPresets');
   if (presetRow) {
@@ -791,8 +863,10 @@ function updateLivePianoStatus() {
   const status = document.getElementById('melodyLiveStatus');
   if (!status) return;
   const trackLabel = melodyTabTrack >= 0 ? `${melodyTabTrack + 1}. ${TRACK_NAMES[melodyTabTrack]}` : 'No track';
-  const recLabel = melodyRecordEnabled ? `REC S${melodyRecordStep + 1}` : 'Ready';
-  status.textContent = `${recLabel} | ${trackLabel} | ${midiNoteName(selectedLiveNote)}`;
+  const recLabel = melodyRecordEnabled ? `REC S${melodyRecordStep + 1}` : 'Live';
+  const noteLabel = selectedLiveNote ? `🎵 ${midiNoteName(selectedLiveNote)}` : 'toca una tecla';
+  status.textContent = `${recLabel} · ${trackLabel} · ${noteLabel}`;
+  status.classList.toggle('has-note', !!selectedLiveNote);
 }
 
 function updateVisualPianoSelection() {
@@ -1051,6 +1125,88 @@ function initMelodyEditor() {
     refreshMelodyTabTrackSelect();
   }, 2000);
 }
+
+// ═══════════════════════════════════════════════════════
+// PC keyboard → Visual Piano (only when MELODY tab is active)
+// Tracker-style two-row layout (Renoise/FL):
+//   Lower octave: Z S X D C V G B H N J M  → C C# D D# E F F# G G# A A# B
+//   Upper octave: Q 2 W 3 E R 5 T 6 Y 7 U  → C C# D D# E F F# G G# A A# B
+//   Top:          I → C (next octave)
+//   ←/→ : octave shift, ↓/↑ : semitone shift, Space passthrough
+// Capture phase: intercepts BEFORE keyboard-controls.js so existing letter
+// shortcuts are suppressed while the Melody tab is open. Hold Shift to
+// fall back to the original action (Q-Y patterns, A/S vol, M color, …).
+// ═══════════════════════════════════════════════════════
+const PIANO_KEY_MAP = {
+  'z':0,  's':1,  'x':2,  'd':3,  'c':4,  'v':5,
+  'g':6,  'b':7,  'h':8,  'n':9,  'j':10, 'm':11,
+  'q':12, '2':13, 'w':14, '3':15, 'e':16, 'r':17,
+  '5':18, 't':19, '6':20, 'y':21, '7':22, 'u':23,
+  'i':24
+};
+let pianoBaseOctave = 4; // base = octave * 12 → 48 (C3) by default
+const _pianoHeldKeys = new Set();
+
+function isMelodyTabActive() {
+  const btn = document.querySelector('.tab-btn[data-tab="melody"]');
+  if (btn && btn.classList.contains('active')) return true;
+  // Also accept popup editor visible
+  return !!melodyEditorVisible;
+}
+
+function sendSynthNoteOff() {
+  if (melodyTabTrack < 0 || !window.padSynthEngine) return;
+  const eng = window.padSynthEngine[melodyTabTrack];
+  if (typeof eng === 'number' && eng >= 3) {
+    sendWS({cmd:'synthNoteOff', track: melodyTabTrack, engine: eng});
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (!isMelodyTabActive()) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+  // Octave shift (no shift)
+  if (!e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    if (e.repeat) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+    pianoBaseOctave = Math.max(0, Math.min(8, pianoBaseOctave + (e.key === 'ArrowRight' ? 1 : -1)));
+    if (window.showToast) window.showToast(`🎹 Octave base: C${pianoBaseOctave - 1}`, 'info', 900);
+    e.preventDefault(); e.stopImmediatePropagation();
+    return;
+  }
+
+  // Shift+key → let the global keyboard-controls handler run (patterns, vol, etc.)
+  if (e.shiftKey) return;
+
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (!(k in PIANO_KEY_MAP)) return;
+
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (e.repeat || _pianoHeldKeys.has(k)) return;
+  _pianoHeldKeys.add(k);
+
+  const note = PIANO_KEY_MAP[k] + pianoBaseOctave * 12;
+  if (note < 0 || note > 127) return;
+  playLivePianoNote(note);
+}, true);
+
+document.addEventListener('keyup', e => {
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (!_pianoHeldKeys.has(k)) return;
+  _pianoHeldKeys.delete(k);
+  if (_pianoHeldKeys.size === 0) sendSynthNoteOff();
+}, true);
+
+// Stop any held synth note when the tab loses focus or browser blurs
+window.addEventListener('blur', () => {
+  if (_pianoHeldKeys.size > 0) {
+    _pianoHeldKeys.clear();
+    sendSynthNoteOff();
+  }
+});
 
 // Export
 window.initMelodyEditor = initMelodyEditor;

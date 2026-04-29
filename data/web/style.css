@@ -293,6 +293,42 @@ body {
     letter-spacing: 0;
 }
 
+.hdr-step-readout {
+    min-width: 56px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: rgba(255, 30, 60, 0.10);
+    border: 1px solid rgba(255, 60, 90, 0.30);
+    color: rgba(255, 200, 200, 0.55);
+    font-family: var(--font-mono);
+    font-size: 0.78em;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-align: center;
+    transition: color 0.08s, background 0.08s, box-shadow 0.08s;
+}
+
+.hdr-step-readout.playing {
+    color: #fff;
+    background: linear-gradient(180deg, rgba(255, 60, 90, 0.55), rgba(220, 20, 50, 0.85));
+    border-color: #ff4060;
+    box-shadow: 0 0 10px rgba(255, 60, 90, 0.65), inset 0 0 6px rgba(255, 200, 200, 0.25);
+}
+
+.hdr-panic-btn {
+    background: rgba(255, 60, 60, 0.15);
+    border-color: rgba(255, 80, 80, 0.5);
+    color: #ff8080;
+    font-size: 1.05em;
+    padding: 4px 9px;
+}
+
+.hdr-panic-btn:hover {
+    background: #ff3030;
+    color: #fff;
+    box-shadow: 0 0 14px rgba(255, 60, 60, 0.7);
+}
+
 
 .hdr-btn-m {
     background: rgba(255,140,0,0.18);
