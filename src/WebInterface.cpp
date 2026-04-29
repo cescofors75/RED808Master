@@ -92,6 +92,7 @@ extern volatile int8_t gTrackSynthEngine[16];
 extern void setTrackSynthEngine(int track, int8_t engine);
 extern void setAllTrackSynthEngines(int8_t engine);
 static char gDaisyPadFiles[MAX_PADS][32];
+static void clearTrackLoopStateForSynth(int track, AsyncWebSocket* ws);
 
 static void clearTrackLoopStateForSynth(int track, AsyncWebSocket* ws) {
   if (track < 0 || track >= 16) {
@@ -4338,6 +4339,15 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   // {"cmd":"synth303NoteOff"}
   else if (cmd == "synth303NoteOff") {
     spiMaster.synth303NoteOff();
+  }
+
+  // {"cmd":"synthNoteOff","engine":4,"track":0}
+  else if (cmd == "synthNoteOff") {
+    uint8_t engine = doc["engine"] | 3;
+    uint8_t track  = doc["track"]  | 0;
+    if (track < 16 && engine <= 6) {
+      spiMaster.synthNoteOff(engine, track);
+    }
   }
 
   // {"cmd":"synth303Param","paramId":0,"value":800.0}

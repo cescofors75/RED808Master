@@ -388,6 +388,7 @@ public:
     void synth303NoteOff();
     void synth303Param(uint8_t paramId, float value);
     void synthNoteOnEx(uint8_t engine, uint8_t midiNote, uint8_t velocity, bool accent = false, bool slide = false);
+    void synthNoteOff(uint8_t engine, uint8_t track);
     void synthSetActive(uint8_t engineMask);
     void synthSetActive16(uint16_t engineMask16); // 2-byte mask for 9 engines
     void synthPreset(uint8_t engine, uint8_t preset);

@@ -8,8 +8,9 @@ let padLoopState = {};
 let padFxState = new Array(24).fill(null); // Per-pad FX state (16 main + 8 xtra)
 let trackFxState = new Array(16).fill(null); // Per-track FX state
 let isPlaying = false;
-const SYNTH_SWITCH_DEBOUNCE_MS = 220;
+const SYNTH_SWITCH_DEBOUNCE_MS = 90;
 let lastSynthSwitchMs = new Array(16).fill(0);
+let synthSwitchPendingTimers = new Array(16).fill(null);
 let currentPatternIndex = 0; // Track current pattern for keyboard nav
 
 const PATTERN_NAMES = ['HIP HOP', 'TECHNO', 'DnB', 'BREAK', 'HOUSE', 'TRAP'];
@@ -279,7 +280,6 @@ document.addEventListener('DOMContentLoaded', () => {
     initInstrumentTabs();
     initTabSystem();
     initSyncLeds();
-    initGlobalKitControls();
     // Load feature modules sequentially after core UI is ready
     setTimeout(loadDeferredModules, 200);
 });
@@ -535,11 +535,13 @@ function handleWebSocketMessage(data) {
         case 'trackSynthEngineSet':
             if (data.track !== undefined && data.engine !== undefined) {
                 (window.setSynthEngineExact || setSynthEngineExact)(data.track, data.engine, false);
+                setPadEnginePending(data.track, false);
             }
             break;
         case 'trackSynthEngines':
             if (Array.isArray(data.engines)) {
                 syncTrackSynthEnginesFromState(data.engines);
+                for (let track = 0; track < 16; track++) setPadEnginePending(track, false);
             }
             break;
         case 'trackMuted':
@@ -1220,12 +1222,12 @@ function createPads() {
             <button class="pad-upload-btn" data-pad="${i}" title="Load Sample">+</button>
             <button class="pad-filter-btn" data-pad="${i}" title="Filter">F</button>
             <button class="pad-fx-btn" data-pad="${i}" title="FX (Distortion/BitCrush)">🎸</button>
-            <button class="loop-btn" data-pad="${i}" title="Toggle Loop">🔁</button>
             <div class="pad-content">
                 <div class="pad-name">${padNames[i]}</div>
                 <div class="pad-sample-info" id="sampleInfo-${i}"><span class="sample-file">—</span><span class="sample-quality"></span></div>
                 <span class="pad-filter-indicator" data-pad="${i}" style="display:none;"></span>
             </div>
+            <span class="pad-engine-spinner" aria-hidden="true"></span>
             <div class="pad-corona" aria-hidden="true"></div>
         `;
         
@@ -1314,24 +1316,6 @@ function createPads() {
             });
         }
         
-        // Event listener para botón de loop
-        const loopBtn = pad.querySelector('.loop-btn');
-        if (loopBtn) {
-            loopBtn.addEventListener('touchstart', (e) => {
-                e.stopPropagation();
-            });
-            loopBtn.addEventListener('touchend', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                showLoopTypePopup(i);
-            });
-            loopBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                showLoopTypePopup(i);
-            });
-        }
-
         // Event listeners para botones de synth engine
         const synthStrip = document.createElement('div');
         synthStrip.className = 'pad-synth-strip';
@@ -1416,12 +1400,7 @@ function stopTremolo(padIndex, padElement) {
         delete tremoloIntervals[padIndex];
     }
 
-    // 303 note-off al soltar el pad
-    if (padIndex < 16 && padSynthEngine[padIndex] === 3) {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ cmd: 'synth303NoteOff' }));
-        }
-    }
+    sendSynthNoteOffForPad(padIndex, padSynthEngine[padIndex]);
     
     // Limpiar estados visuales
     padElement.classList.remove('active');
@@ -2820,6 +2799,37 @@ function triggerSynthPad(padIndex) {
     }
 }
 
+function isMelodicSynthEngine(engine) {
+    return engine === 3 || engine === 4 || engine === 5 || engine === 6;
+}
+
+function sendSynthNoteOffForPad(padIndex, engine) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (padIndex < 0 || padIndex >= 16 || !isMelodicSynthEngine(engine)) return;
+    ws.send(JSON.stringify({ cmd: 'synthNoteOff', track: padIndex, engine }));
+}
+
+function setPadEnginePending(padIndex, pending) {
+    if (padIndex < 0 || padIndex >= 16) return;
+    const pad = document.querySelector(`.pad[data-pad="${padIndex}"]`);
+    if (pad) pad.classList.toggle('engine-switching', !!pending);
+    const strip = document.querySelector(`.pad-synth-strip[data-pad="${padIndex}"]`);
+    if (strip) strip.classList.toggle('engine-switching', !!pending);
+    if (synthSwitchPendingTimers[padIndex]) {
+        clearTimeout(synthSwitchPendingTimers[padIndex]);
+        synthSwitchPendingTimers[padIndex] = null;
+    }
+    if (pending) {
+        synthSwitchPendingTimers[padIndex] = setTimeout(() => {
+            const currentPad = document.querySelector(`.pad[data-pad="${padIndex}"]`);
+            const currentStrip = document.querySelector(`.pad-synth-strip[data-pad="${padIndex}"]`);
+            if (currentPad) currentPad.classList.remove('engine-switching');
+            if (currentStrip) currentStrip.classList.remove('engine-switching');
+            synthSwitchPendingTimers[padIndex] = null;
+        }, 1600);
+    }
+}
+
 function updatePadSynthVisual(padIndex, engine) {
     const pad = document.querySelector(`.pad[data-pad="${padIndex}"]`);
     if (!pad) return;
@@ -2842,32 +2852,15 @@ function updatePadSynthVisual(padIndex, engine) {
     }
 }
 
-function refreshGlobalKitButtons() {
-    const controls = document.getElementById('globalKitControls');
-    if (!controls) return;
-    const first = padSynthEngine[0];
-    const isUniform = padSynthEngine.every(engine => engine === first);
-    controls.querySelectorAll('.global-kit-btn').forEach(btn => {
-        const btnEngine = parseInt(btn.dataset.engine, 10);
-        btn.classList.toggle('active', isUniform && btnEngine === first);
-    });
-}
-
 function setSynthEngineExact(padIndex, engine, notifyBackend = true, refreshGlobal = true) {
     if (padIndex < 0 || padIndex >= 16) return;
     const normalizedEngine = (typeof engine === 'number' && engine >= 0 && engine <= 6) ? engine : -1;
+    const previousEngine = padSynthEngine[padIndex];
     if (padSynthEngine[padIndex] === normalizedEngine) {
-        if (refreshGlobal) refreshGlobalKitButtons();
         return;
     }
 
-    // BUG FIX: si el pad estaba en modo 303, enviar NoteOff antes de cambiar
-    // para evitar que el acid bass quede en bucle infinito.
-    if (padSynthEngine[padIndex] === 3 && normalizedEngine !== 3) {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ cmd: 'synth303NoteOff' }));
-        }
-    }
+    sendSynthNoteOffForPad(padIndex, previousEngine);
 
     padSynthEngine[padIndex] = normalizedEngine;
     updatePadSynthVisual(padIndex, normalizedEngine);
@@ -2875,10 +2868,10 @@ function setSynthEngineExact(padIndex, engine, notifyBackend = true, refreshGlob
     if (typeof window.onSynthEngineChanged === 'function') window.onSynthEngineChanged(padIndex, normalizedEngine);
 
     if (notifyBackend) {
+        setPadEnginePending(padIndex, true);
         sendWebSocket({ cmd: 'setTrackSynthEngine', track: padIndex, engine: normalizedEngine });
     }
 
-    if (refreshGlobal) refreshGlobalKitButtons();
 }
 
 function syncTrackSynthEnginesFromState(engines) {
@@ -2887,7 +2880,6 @@ function syncTrackSynthEnginesFromState(engines) {
         const engine = parseInt(engines[track], 10);
         (window.setSynthEngineExact || setSynthEngineExact)(track, Number.isFinite(engine) ? engine : -1, false, false);
     }
-    refreshGlobalKitButtons();
     // Notify melody editor that engines changed
     if (typeof window.onSynthEnginesRefreshed === 'function') window.onSynthEnginesRefreshed();
 }
@@ -2904,36 +2896,6 @@ function setSynthEngine(padIndex, engine) {
     const nextEngine = (padSynthEngine[padIndex] === engine) ? -1 : engine;
     setSynthEngineExact(padIndex, nextEngine, true);
 }
-
-function applyGlobalKitToAllPads(engine) {
-    const normalizedEngine = (typeof engine === 'number' && engine >= 0 && engine <= 6) ? engine : -1;
-    // BUG FIX: si algún pad estaba en 303, parar la nota antes de cambiar kit
-    const any303Active = padSynthEngine.some(e => e === 3);
-    if (any303Active && normalizedEngine !== 3) {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ cmd: 'synth303NoteOff' }));
-        }
-    }
-    sendWebSocket({ cmd: 'applyKitToAllPads', engine: normalizedEngine });
-    for (let pad = 0; pad < 16; pad++) {
-        setSynthEngineExact(pad, normalizedEngine, false, false);
-    }
-    refreshGlobalKitButtons();
-}
-
-function initGlobalKitControls() {
-    const controls = document.getElementById('globalKitControls');
-    if (!controls) return;
-    controls.querySelectorAll('.global-kit-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const engine = parseInt(btn.dataset.engine, 10);
-            applyGlobalKitToAllPads(Number.isFinite(engine) ? engine : -1);
-        });
-    });
-    refreshGlobalKitButtons();
-}
-
-
 
 function flashPad(padIndex) {
     const pad = document.querySelector(`[data-pad="${padIndex}"]`);

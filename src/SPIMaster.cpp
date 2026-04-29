@@ -1709,6 +1709,11 @@ void SPIMaster::synth303NoteOff() {
     sendCommand(CMD_SYNTH_NOTE_OFF, nullptr, 0);
 }
 
+void SPIMaster::synthNoteOff(uint8_t engine, uint8_t track) {
+    uint8_t payload[2] = { engine, track };
+    sendCommand(CMD_SYNTH_NOTE_OFF, payload, sizeof(payload));
+}
+
 void SPIMaster::synth303Param(uint8_t paramId, float value) {
     Synth303ParamPayload p;
     p.paramId    = paramId;
