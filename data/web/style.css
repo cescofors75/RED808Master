@@ -236,6 +236,63 @@ body {
     position: relative;
 }
 
+.hdr-transport {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(0, 0, 0, 0.32);
+}
+
+.hdr-transport-btn {
+    min-width: 58px;
+    height: 34px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: linear-gradient(165deg, rgba(18, 18, 22, 0.95), rgba(8, 8, 12, 0.95));
+    color: rgba(255, 255, 255, 0.84);
+    font-family: var(--font-mono);
+    font-size: 0.72em;
+    font-weight: 800;
+    letter-spacing: 0;
+    cursor: pointer;
+    transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.hdr-transport-btn:hover {
+    transform: translateY(-1px);
+    border-color: rgba(255, 255, 255, 0.36);
+    color: #fff;
+}
+
+.hdr-play-btn {
+    min-width: 74px;
+    color: #22ff88;
+    border-color: rgba(34, 255, 136, 0.38);
+}
+
+.hdr-play-btn.playing {
+    background: #22ff88;
+    border-color: #22ff88;
+    color: #02180c;
+    box-shadow: 0 0 14px rgba(34, 255, 136, 0.48);
+}
+
+.hdr-pattern-readout {
+    min-width: 92px;
+    max-width: 138px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.68);
+    font-family: var(--font-mono);
+    font-size: 0.72em;
+    font-weight: 700;
+    letter-spacing: 0;
+}
+
 
 .hdr-btn-m {
     background: rgba(255,140,0,0.18);
@@ -692,6 +749,30 @@ h2 {
     position: relative;
     overflow: visible;
     contain: layout style;
+}
+
+.pad.muted {
+    border-color: rgba(255, 140, 0, 0.72);
+    filter: saturate(0.45) brightness(0.62);
+    box-shadow: inset 0 0 0 2px rgba(255, 140, 0, 0.28), 0 0 14px rgba(255, 140, 0, 0.22);
+}
+
+.pad.muted::after {
+    content: 'MUTED';
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(255, 140, 0, 0.86);
+    color: #160900;
+    font-family: var(--font-mono);
+    font-size: 0.62em;
+    font-weight: 900;
+    letter-spacing: 0;
+    z-index: 4;
+    pointer-events: none;
 }
 
 .pad-corona {
@@ -1454,6 +1535,42 @@ body:not(.mono-mode) .pad.tremolo-active {
     opacity: 0.65;
     line-height: 1;
     isolation: isolate;
+}
+
+.pad-mute-toggle {
+    background: linear-gradient(145deg, rgba(255, 140, 0, 0.78), rgba(120, 60, 0, 0.92));
+    border: 1px solid rgba(255, 190, 80, 0.7);
+    color: rgba(255, 255, 255, 0.94);
+    font-size: 0.76em;
+    font-weight: 900;
+    padding: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    z-index: 110 !important;
+    position: absolute !important;
+    top: 6px !important;
+    left: 6px !important;
+    pointer-events: auto !important;
+    touch-action: manipulation !important;
+    width: 22px;
+    height: 22px;
+    min-width: 44px;
+    min-height: 44px;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.76;
+    line-height: 1;
+}
+
+.pad-mute-toggle:hover,
+.pad-mute-toggle.muted {
+    background: #ff8c00;
+    border-color: #ffb24d;
+    color: #fff;
+    opacity: 1;
+    box-shadow: 0 0 12px rgba(255, 140, 0, 0.56);
 }
 
 .pad-upload-btn:hover {
@@ -3815,6 +3932,7 @@ body.mono-mode .info-item {
     
     /* Ensure touch targets are adequate on tablets */
     .pad-upload-btn,
+    .pad-mute-toggle,
     .pad-filter-btn,
     .pad-select-btn,
     .loop-btn {
@@ -3908,6 +4026,7 @@ body.mono-mode .info-item {
     
     /* Ensure touch targets are large enough on mobile */
     .pad-upload-btn,
+    .pad-mute-toggle,
     .pad-filter-btn,
     .pad-select-btn,
     .loop-btn {
@@ -3929,6 +4048,11 @@ body.mono-mode .info-item {
         bottom: 4px !important;
         left: 4px !important;
         right: auto !important;
+    }
+
+    .pad-mute-toggle {
+        top: 4px !important;
+        left: 4px !important;
     }
     
     .pad-filter-btn {

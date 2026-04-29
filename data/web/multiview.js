@@ -51,7 +51,7 @@ const PANELS = [
   { id: 'seq',    label: 'SEQUENCER',  sub: 'Secuenciador',  icon: '🎵', url: '/?embed=1&tab=sequencer' },
   { id: 'vol',    label: 'VOLUMES',    sub: 'Mezclador',     icon: '🎚', url: '/?embed=1&tab=volumes' },
   { id: 'fx',     label: 'FX',         sub: 'Efectos',       icon: '🔊', url: '/?embed=1&tab=fx' },
-  { id: 'path',   label: 'PATH',       sub: 'Signal routing',icon: '⬡',  url: '/patchbay?embed=1' },
+  { id: 'path',   label: 'PATCH',      sub: 'Signal routing',icon: '⬡',  url: '/patchbay?embed=1' },
   { id: 'midi',   label: 'MIDI',       sub: 'Control MIDI',  icon: '🎼', url: '/?embed=1&tab=midi' },
   { id: 'info',   label: 'INFO',       sub: 'Sistema',       icon: '📊', url: '/?embed=1&tab=info' }
 ];

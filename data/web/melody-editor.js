@@ -23,6 +23,31 @@ function midiNoteName(n) {
 const PIANO_LOW = 36;  // C2
 const PIANO_HIGH = 72; // C5
 const OCTAVE_LABELS = ['C2','C3','C4','C5'];
+const LIVE_PIANO_LOW = 48;  // C3
+const LIVE_PIANO_HIGH = 72; // C5
+const BLACK_NOTES = [1, 3, 6, 8, 10];
+const ASSIGN_STORAGE_KEY = 'red808_pad_melody_assignments_v1';
+
+let selectedLiveNote = 60;
+let melodyRecordEnabled = false;
+let melodyRecordStep = 0;
+let padMelodyAssignments = loadPadMelodyAssignments();
+
+function isBlackNote(note) {
+  return BLACK_NOTES.includes(note % 12);
+}
+
+function loadPadMelodyAssignments() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(ASSIGN_STORAGE_KEY) || '[]');
+    if (Array.isArray(saved)) return Array.from({length: 16}, (_, i) => saved[i] || null);
+  } catch (_) {}
+  return new Array(16).fill(null);
+}
+
+function savePadMelodyAssignments() {
+  try { localStorage.setItem(ASSIGN_STORAGE_KEY, JSON.stringify(padMelodyAssignments)); } catch (_) {}
+}
 
 // Check if a track has a melodic synth engine (303/WT/SH101/FM)
 function isMelodicTrack(track) {
@@ -76,14 +101,15 @@ function previewNote(track, note, accent, slide) {
   const eng = window.padSynthEngine ? window.padSynthEngine[track] : -1;
   if (eng < 0) { console.warn('[MelodyPreview] No engine for track', track); return; }
   console.log('[MelodyPreview] track:', track, 'engine:', eng, 'note:', note);
-  // 303 needs explicit NoteOff — send one before new note to reset envelope
-  if (eng === 3) sendWS({cmd: 'synth303NoteOff'});
+  sendWS({cmd: 'synthNoteOff', track, engine: eng});
   sendWS({cmd: 'synthNoteOnEx', engine: eng, note: note, velocity: 100,
           accent: !!accent, slide: !!slide});
-  // Auto NoteOff for 303 after brief duration (unless in preview playback)
-  if (eng === 3 && !_previewPlaying) {
+  if (!_previewPlaying) {
     if (_previewNoteOffTimer) clearTimeout(_previewNoteOffTimer);
-    _previewNoteOffTimer = setTimeout(() => { sendWS({cmd: 'synth303NoteOff'}); _previewNoteOffTimer = null; }, 300);
+    _previewNoteOffTimer = setTimeout(() => {
+      sendWS({cmd: 'synthNoteOff', track, engine: eng});
+      _previewNoteOffTimer = null;
+    }, 350);
   }
 }
 
@@ -95,8 +121,9 @@ function stopMelodyPreview() {
   if (_previewTimer) { clearTimeout(_previewTimer); _previewTimer = null; }
   if (_previewNoteOffTimer) { clearTimeout(_previewNoteOffTimer); _previewNoteOffTimer = null; }
   _previewPlaying = false;
-  // Send 303 NoteOff in case it was playing
-  sendWS({cmd: 'synth303NoteOff'});
+  const offTrack = melodyEditorTrack >= 0 ? melodyEditorTrack : melodyTabTrack;
+  const offEngine = offTrack >= 0 && window.padSynthEngine ? window.padSynthEngine[offTrack] : -1;
+  if (offEngine >= 3) sendWS({cmd: 'synthNoteOff', track: offTrack, engine: offEngine});
   document.querySelectorAll('.pr-cell.pr-preview').forEach(c => c.classList.remove('pr-preview'));
   const pb1 = document.getElementById('melody-play-btn');
   const pb2 = document.getElementById('melodyTabPlay');
@@ -129,9 +156,8 @@ function playMelodyPreview(track) {
     const eng = window.padSynthEngine ? window.padSynthEngine[track] : -1;
     if (note > 0) {
       previewNote(track, note, !!(flags & 1), !!(flags & 2));
-    } else if (eng === 3) {
-      // 303: silence on empty steps
-      sendWS({cmd: 'synth303NoteOff'});
+    } else if (eng >= 3) {
+      sendWS({cmd: 'synthNoteOff', track, engine: eng});
     }
     document.querySelectorAll('.pr-cell.pr-preview').forEach(c => c.classList.remove('pr-preview'));
     document.querySelectorAll('.pr-cell[data-step="' + idx + '"]').forEach(c => c.classList.add('pr-preview'));
@@ -507,6 +533,7 @@ function addMelodyPadButtons() {
 window.onSynthEnginesRefreshed = function() {
   addMelodyButtons();
   addMelodyPadButtons();
+  updatePadMelodyAssignmentBadges();
   updateAllNoteIndicators();
 };
 
@@ -520,6 +547,7 @@ window.onSynthEngineChanged = function(padIndex, engine) {
   setTimeout(() => {
     addMelodyButtons();
     addMelodyPadButtons();
+    updatePadMelodyAssignmentBadges();
     updateAllNoteIndicators();
     refreshMelodyTabTrackSelect();
   }, 80);
@@ -605,6 +633,52 @@ function initMelodyTab() {
     roll.addEventListener('contextmenu', handleTabPianoRightClick);
   }
 
+  const livePiano = document.getElementById('melodyVisualPiano');
+  if (livePiano) {
+    livePiano.addEventListener('pointerdown', e => {
+      const key = e.target.closest('.melody-piano-key[data-note]');
+      if (!key) return;
+      e.preventDefault();
+      key.setPointerCapture?.(e.pointerId);
+      key.classList.add('pressed');
+      playLivePianoNote(parseInt(key.dataset.note));
+    });
+    livePiano.addEventListener('pointerup', e => {
+      const key = e.target.closest('.melody-piano-key[data-note]');
+      if (key) key.classList.remove('pressed');
+      if (melodyTabTrack >= 0 && window.padSynthEngine) {
+        const eng = window.padSynthEngine[melodyTabTrack];
+        if (typeof eng === 'number' && eng >= 3) sendWS({cmd:'synthNoteOff', track: melodyTabTrack, engine: eng});
+      }
+    });
+    livePiano.addEventListener('pointerleave', () => {
+      livePiano.querySelectorAll('.pressed').forEach(k => k.classList.remove('pressed'));
+    });
+  }
+
+  const recordBtn = document.getElementById('melodyLiveRecord');
+  if (recordBtn) {
+    recordBtn.addEventListener('click', () => {
+      melodyRecordEnabled = !melodyRecordEnabled;
+      recordBtn.classList.toggle('recording', melodyRecordEnabled);
+      updateLivePianoStatus();
+    });
+  }
+
+  const resetBtn = document.getElementById('melodyLiveReset');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      melodyRecordStep = 0;
+      updateLivePianoStatus();
+    });
+  }
+
+  const assignBtn = document.getElementById('melodyAssignPad');
+  if (assignBtn) assignBtn.addEventListener('click', assignSelectedNoteToPad);
+
+  const clearAssignBtn = document.getElementById('melodyClearPadAssign');
+  if (clearAssignBtn) clearAssignBtn.addEventListener('click', clearSelectedPadAssignment);
+
   // Preset row delegation
   const presetRow = document.getElementById('melodyTabPresets');
   if (presetRow) {
@@ -622,6 +696,10 @@ function initMelodyTab() {
       }
     });
   }
+
+  renderVisualPiano();
+  renderPadAssignSelect();
+  updatePadMelodyAssignmentBadges();
 }
 
 function refreshMelodyTabTrackSelect() {
@@ -652,6 +730,9 @@ function refreshMelodyEngineSelect() {
     engSel.disabled = true;
     return;
   }
+
+  renderPadAssignSelect();
+  updateLivePianoStatus();
   const eng = window.padSynthEngine ? window.padSynthEngine[melodyTabTrack] : -1;
   engSel.disabled = false;
   // If current engine is one of the melodic options, select it
@@ -660,6 +741,155 @@ function refreshMelodyEngineSelect() {
   } else {
     engSel.value = '-1';
   }
+}
+
+function renderPadAssignSelect() {
+  const sel = document.getElementById('melodyAssignPadSelect');
+  if (!sel) return;
+  const previous = sel.value;
+  sel.innerHTML = '';
+  for (let t = 0; t < 16; t++) {
+    const assignment = padMelodyAssignments[t];
+    const opt = document.createElement('option');
+    opt.value = String(t);
+    opt.textContent = `${t + 1}. ${TRACK_NAMES[t]}${assignment ? ' ' + midiNoteName(assignment.note) : ''}`;
+    sel.appendChild(opt);
+  }
+  if (previous !== '') sel.value = previous;
+  if ((sel.value === '' || sel.value === '-1') && melodyTabTrack >= 0) sel.value = String(melodyTabTrack);
+}
+
+function renderVisualPiano() {
+  const piano = document.getElementById('melodyVisualPiano');
+  if (!piano) return;
+
+  const whiteNotes = [];
+  for (let n = LIVE_PIANO_LOW; n <= LIVE_PIANO_HIGH; n++) {
+    if (!isBlackNote(n)) whiteNotes.push(n);
+  }
+
+  let html = '<div class="melody-piano-white-row">';
+  whiteNotes.forEach(note => {
+    html += `<button class="melody-piano-key melody-piano-white${note === selectedLiveNote ? ' selected' : ''}" data-note="${note}">`
+      + `<span>${midiNoteName(note)}</span></button>`;
+  });
+  html += '</div><div class="melody-piano-black-layer">';
+
+  for (let n = LIVE_PIANO_LOW; n <= LIVE_PIANO_HIGH; n++) {
+    if (!isBlackNote(n)) continue;
+    const whiteBefore = whiteNotes.filter(w => w < n).length;
+    const left = (whiteBefore / whiteNotes.length) * 100;
+    html += `<button class="melody-piano-key melody-piano-black${n === selectedLiveNote ? ' selected' : ''}" data-note="${n}" style="left:${left}%">`
+      + `<span>${NOTE_NAMES[n % 12]}</span></button>`;
+  }
+  html += '</div>';
+  piano.innerHTML = html;
+  updateLivePianoStatus();
+}
+
+function updateLivePianoStatus() {
+  const status = document.getElementById('melodyLiveStatus');
+  if (!status) return;
+  const trackLabel = melodyTabTrack >= 0 ? `${melodyTabTrack + 1}. ${TRACK_NAMES[melodyTabTrack]}` : 'No track';
+  const recLabel = melodyRecordEnabled ? `REC S${melodyRecordStep + 1}` : 'Ready';
+  status.textContent = `${recLabel} | ${trackLabel} | ${midiNoteName(selectedLiveNote)}`;
+}
+
+function updateVisualPianoSelection() {
+  document.querySelectorAll('#melodyVisualPiano .melody-piano-key').forEach(key => {
+    key.classList.toggle('selected', parseInt(key.dataset.note) === selectedLiveNote);
+  });
+  updateLivePianoStatus();
+}
+
+function recordLiveNote(note) {
+  if (!melodyRecordEnabled || melodyTabTrack < 0 || !isMelodicTrack(melodyTabTrack)) return;
+  const stepCount = window.currentStepCount || 16;
+  const step = melodyRecordStep % stepCount;
+  const accentChk = document.getElementById('melodyTabAccent');
+  const slideChk = document.getElementById('melodyTabSlide');
+  const flags = ((accentChk && accentChk.checked) ? 1 : 0) |
+                ((slideChk && slideChk.checked) ? 2 : 0);
+
+  stepNotesData[melodyTabTrack][step] = note;
+  stepFlagsData[melodyTabTrack][step] = flags;
+  sendWS({cmd:'setStepNote', track: melodyTabTrack, step, note, flags});
+  sendWS({cmd:'setStep', track: melodyTabTrack, step, active: true, noteLen: 1});
+
+  const seqStep = document.querySelector(`.seq-step[data-track="${melodyTabTrack}"][data-step="${step}"]`);
+  if (seqStep) seqStep.classList.add('active');
+
+  updateTabPianoColumn(step);
+  updateNoteIndicators(melodyTabTrack);
+  melodyRecordStep = (step + 1) % stepCount;
+  updateLivePianoStatus();
+}
+
+function playLivePianoNote(note) {
+  selectedLiveNote = note;
+  updateVisualPianoSelection();
+  if (melodyTabTrack < 0) return;
+  if (!isMelodicTrack(melodyTabTrack)) return;
+  const accentChk = document.getElementById('melodyTabAccent');
+  const slideChk = document.getElementById('melodyTabSlide');
+  previewNote(melodyTabTrack, note, !!(accentChk && accentChk.checked), !!(slideChk && slideChk.checked));
+  recordLiveNote(note);
+}
+
+function assignSelectedNoteToPad() {
+  const sel = document.getElementById('melodyAssignPadSelect');
+  const pad = sel ? parseInt(sel.value) : melodyTabTrack;
+  if (isNaN(pad) || pad < 0 || pad >= 16) return;
+
+  let engine = window.padSynthEngine ? window.padSynthEngine[pad] : -1;
+  if (!isMelodicTrack(pad)) {
+    const sourceEngine = melodyTabTrack >= 0 && window.padSynthEngine ? window.padSynthEngine[melodyTabTrack] : -1;
+    engine = sourceEngine >= 3 ? sourceEngine : 4;
+    const fn = window.setSynthEngineExact || window.setSynthEngine;
+    if (typeof fn === 'function') fn(pad, engine);
+  }
+
+  const accentChk = document.getElementById('melodyTabAccent');
+  const slideChk = document.getElementById('melodyTabSlide');
+  padMelodyAssignments[pad] = {
+    note: selectedLiveNote,
+    accent: !!(accentChk && accentChk.checked),
+    slide: !!(slideChk && slideChk.checked),
+    velocity: 127
+  };
+  savePadMelodyAssignments();
+  renderPadAssignSelect();
+  updatePadMelodyAssignmentBadges();
+  if (window.showToast) window.showToast(`Pad ${pad + 1} -> ${midiNoteName(selectedLiveNote)}`, 'success', 1400);
+}
+
+function clearSelectedPadAssignment() {
+  const sel = document.getElementById('melodyAssignPadSelect');
+  const pad = sel ? parseInt(sel.value) : melodyTabTrack;
+  if (isNaN(pad) || pad < 0 || pad >= 16) return;
+  padMelodyAssignments[pad] = null;
+  savePadMelodyAssignments();
+  renderPadAssignSelect();
+  updatePadMelodyAssignmentBadges();
+}
+
+function updatePadMelodyAssignmentBadges() {
+  document.querySelectorAll('.pad').forEach(padEl => {
+    const pad = parseInt(padEl.dataset.pad);
+    if (isNaN(pad) || pad < 0 || pad >= 16) return;
+    let badge = padEl.querySelector('.pad-melody-assignment');
+    const assignment = padMelodyAssignments[pad];
+    if (!assignment) {
+      if (badge) badge.remove();
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'pad-melody-assignment';
+      padEl.appendChild(badge);
+    }
+    badge.textContent = midiNoteName(assignment.note);
+  });
 }
 
 function renderMelodyTab() {
@@ -808,6 +1038,7 @@ function initMelodyEditor() {
   setTimeout(() => {
     addMelodyButtons();
     addMelodyPadButtons();
+    updatePadMelodyAssignmentBadges();
     updateAllNoteIndicators();
     refreshMelodyTabTrackSelect();
   }, 500);
@@ -815,6 +1046,7 @@ function initMelodyEditor() {
   setTimeout(() => {
     addMelodyButtons();
     addMelodyPadButtons();
+    updatePadMelodyAssignmentBadges();
     updateAllNoteIndicators();
     refreshMelodyTabTrackSelect();
   }, 2000);
@@ -827,5 +1059,9 @@ window.hideMelodyEditor = hideMelodyEditor;
 window.stepNotesData = stepNotesData;
 window.stepFlagsData = stepFlagsData;
 window.updateAllNoteIndicators = updateAllNoteIndicators;
+window.getPadMelodyAssignment = function(pad) {
+  return pad >= 0 && pad < 16 ? padMelodyAssignments[pad] : null;
+};
+window.updatePadMelodyAssignmentBadges = updatePadMelodyAssignmentBadges;
 
 })();

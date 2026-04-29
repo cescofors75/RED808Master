@@ -424,6 +424,7 @@ function handleWebSocketMessage(data) {
                 if (nameEl) nameEl.textContent = patternName;
                 const circularPatternName = document.getElementById('circularPatternName');
                 if (circularPatternName) circularPatternName.textContent = patternName;
+                updateHeaderPatternDisplay(data.index, patternName);
             }
             break;
         case 'sampleCounts':
@@ -1219,6 +1220,7 @@ function createPads() {
         pad.dataset.pad = i;
         
         pad.innerHTML = `
+            <button class="pad-mute-toggle" data-pad="${i}" title="Mute Pad">M</button>
             <button class="pad-upload-btn" data-pad="${i}" title="Load Sample">+</button>
             <button class="pad-filter-btn" data-pad="${i}" title="Filter">F</button>
             <button class="pad-fx-btn" data-pad="${i}" title="FX (Distortion/BitCrush)">🎸</button>
@@ -1261,6 +1263,20 @@ function createPads() {
         pad.addEventListener('mouseleave', () => {
             stopTremolo(i, pad);
         });
+
+        const mutePadBtn = pad.querySelector('.pad-mute-toggle');
+        if (mutePadBtn) {
+            const stopEvt = (e) => { e.stopPropagation(); };
+            mutePadBtn.addEventListener('touchstart', stopEvt);
+            mutePadBtn.addEventListener('mousedown', stopEvt);
+            const togglePadMute = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setTrackMuted(i, !trackMutedState[i], true);
+            };
+            mutePadBtn.addEventListener('touchend', togglePadMute);
+            mutePadBtn.addEventListener('click', togglePadMute);
+        }
         
         // Event listener para botón de upload
         const uploadBtn = pad.querySelector('.pad-upload-btn');
@@ -2780,13 +2796,18 @@ function triggerSynthPad(padIndex) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const engine = padSynthEngine[padIndex];
     if (engine < 0) return;
-    if (engine === 3) {
-        // TB-303: note on (nota escalada según posición del pad)
+    if (isMelodicSynthEngine(engine)) {
+        const assignment = (typeof window.getPadMelodyAssignment === 'function')
+            ? window.getPadMelodyAssignment(padIndex)
+            : null;
+        const note = assignment && assignment.note ? assignment.note : (PAD_303_NOTES[padIndex] || 48);
         ws.send(JSON.stringify({
-            cmd: 'synth303NoteOn',
-            note:   PAD_303_NOTES[padIndex] || 48,
-            accent: false,
-            slide:  false
+            cmd: 'synthNoteOnEx',
+            engine: engine,
+            note: note,
+            velocity: assignment && assignment.velocity ? assignment.velocity : 127,
+            accent: !!(assignment && assignment.accent),
+            slide: !!(assignment && assignment.slide)
         }));
     } else {
         // TR-808/909/505: trigger percusivo
@@ -2945,6 +2966,17 @@ function setTrackMuted(track, isMuted, sendCommand) {
     document.querySelectorAll(`.seq-step[data-track="${track}"]`).forEach(step => {
         step.classList.toggle('track-muted', isMuted);
     });
+
+    const padEl = document.querySelector(`.pad[data-pad="${track}"]`);
+    if (padEl) {
+        padEl.classList.toggle('muted', isMuted);
+    }
+    const padMuteBtn = document.querySelector(`.pad-mute-toggle[data-pad="${track}"]`);
+    if (padMuteBtn) {
+        padMuteBtn.classList.toggle('muted', isMuted);
+        padMuteBtn.setAttribute('aria-pressed', isMuted ? 'true' : 'false');
+        padMuteBtn.title = isMuted ? 'Unmute Pad' : 'Mute Pad';
+    }
     
     // Update volume muted state in volumes section
     if (window.updateVolumeMutedState) {
@@ -4209,6 +4241,7 @@ function setupControls() {
             
             // Actualizar display del patrón
             document.getElementById('currentPatternName').textContent = patternName;
+            updateHeaderPatternDisplay(pattern, patternName);
             
             // Update circular pattern name
             const circularPatternName = document.getElementById('circularPatternName');
@@ -4709,6 +4742,7 @@ function updateLiveVolumeMeter(value) {
 
 let _lastStatusPlaying = null;
 function updateSequencerStatusMeter() {
+    updateHeaderTransportUI();
     if (_lastStatusPlaying === isPlaying) return;
     _lastStatusPlaying = isPlaying;
     const meterValue = document.getElementById('meterSequencerStatus');
@@ -4730,6 +4764,21 @@ function updateSequencerStatusMeter() {
             barWrapper.classList.remove('active');
         }
     }
+}
+
+function updateHeaderTransportUI() {
+    const playBtn = document.getElementById('headerPlayPauseBtn');
+    if (!playBtn) return;
+    playBtn.classList.toggle('playing', isPlaying);
+    playBtn.textContent = isPlaying ? 'PAUSE' : 'PLAY';
+    playBtn.title = isPlaying ? 'Pause' : 'Play';
+}
+
+function updateHeaderPatternDisplay(index, name) {
+    const readout = document.getElementById('headerPatternReadout');
+    if (!readout) return;
+    const patternName = name || (index < PATTERN_NAMES.length ? PATTERN_NAMES[index] : `PATTERN ${index + 1}`);
+    readout.textContent = `P${String(index + 1).padStart(2, '0')} ${patternName}`;
 }
 
 function syncLedMonoMode() {
@@ -4904,6 +4953,7 @@ function updateSequencerState(data) {
             if (nameEl) nameEl.textContent = patternName;
             const circEl = document.getElementById('circularPatternName');
             if (circEl) circEl.textContent = patternName;
+            updateHeaderPatternDisplay(data.pattern, patternName);
             setTimeout(() => {
                 sendWebSocket({ cmd: 'getPattern' });
             }, 100);
@@ -4992,6 +5042,7 @@ function handleSongPatternChange(pattern, songLen) {
     if (patternNameEl) patternNameEl.textContent = patternName;
     const circularPatternName = document.getElementById('circularPatternName');
     if (circularPatternName) circularPatternName.textContent = patternName;
+    updateHeaderPatternDisplay(pattern, patternName);
 }
 
 function exitSongMode() {
@@ -5128,6 +5179,24 @@ function setupKeyboardControls() {
     
     // Sync toggle event handlers
     setupSyncToggles();
+
+    const headerPlayPauseBtn = document.getElementById('headerPlayPauseBtn');
+    if (headerPlayPauseBtn) {
+        headerPlayPauseBtn.addEventListener('click', () => {
+            togglePlayPause();
+        });
+    }
+    const headerPatternPrevBtn = document.getElementById('headerPatternPrevBtn');
+    if (headerPatternPrevBtn) {
+        headerPatternPrevBtn.addEventListener('click', () => changePattern(-1));
+    }
+    const headerPatternNextBtn = document.getElementById('headerPatternNextBtn');
+    if (headerPatternNextBtn) {
+        headerPatternNextBtn.addEventListener('click', () => changePattern(1));
+    }
+
+    updateHeaderTransportUI();
+    updateHeaderPatternDisplay(currentPatternIndex);
 }
 
 function changePattern(delta) {
@@ -5149,6 +5218,7 @@ function selectPattern(index) {
     if (el) el.textContent = name;
     const circEl = document.getElementById('circularPatternName');
     if (circEl) circEl.textContent = name;
+    updateHeaderPatternDisplay(index, name);
 
     // Request pattern data from server
     setTimeout(() => sendWebSocket({ cmd: 'getPattern' }), 50);

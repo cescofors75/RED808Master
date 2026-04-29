@@ -1302,6 +1302,127 @@ input:focus-visible {
   flex-wrap: wrap;
 }
 
+.melody-live-panel {
+  margin: 6px 0 10px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: linear-gradient(165deg, rgba(12, 12, 16, 0.9), rgba(4, 4, 8, 0.95));
+}
+
+.melody-live-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.melody-record-btn.recording {
+  background: #ff2222;
+  border-color: #ff6666;
+  color: #fff;
+  box-shadow: 0 0 14px rgba(255, 34, 34, 0.55);
+}
+
+.melody-pad-select {
+  background: #141414;
+  color: #fff;
+  border: 1px solid rgba(255, 68, 68, 0.45);
+  border-radius: 5px;
+  padding: 5px 9px;
+  font-size: 12px;
+  min-height: 30px;
+}
+
+.melody-live-status {
+  margin-left: auto;
+  color: rgba(255, 255, 255, 0.72);
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.melody-visual-piano {
+  position: relative;
+  height: 124px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: #060608;
+  touch-action: none;
+  user-select: none;
+}
+
+.melody-piano-white-row {
+  display: flex;
+  height: 100%;
+}
+
+.melody-piano-key {
+  cursor: pointer;
+  border: 0;
+  font-family: 'Consolas', 'Monaco', monospace;
+  letter-spacing: 0;
+  transition: transform 0.08s ease, box-shadow 0.12s ease, background 0.12s ease;
+  touch-action: none;
+}
+
+.melody-piano-white {
+  flex: 1 1 0;
+  min-width: 34px;
+  height: 100%;
+  border-right: 1px solid rgba(0, 0, 0, 0.35);
+  background: linear-gradient(180deg, #f7f7f7, #bfc2c8);
+  color: #222;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 8px;
+  font-size: 10px;
+}
+
+.melody-piano-black-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.melody-piano-black {
+  position: absolute;
+  top: 0;
+  width: 26px;
+  height: 74px;
+  transform: translateX(-50%);
+  border-radius: 0 0 5px 5px;
+  background: linear-gradient(180deg, #1b1b20, #020204);
+  color: #eee;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  pointer-events: auto;
+  z-index: 2;
+  font-size: 9px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 6px;
+}
+
+.melody-piano-key:hover,
+.melody-piano-key.selected,
+.melody-piano-key.pressed {
+  background: #ff4444;
+  color: #fff;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.22), 0 0 18px rgba(255, 68, 68, 0.42);
+}
+
+.melody-piano-key.pressed {
+  transform: translateY(2px);
+}
+
+.melody-piano-black.pressed {
+  transform: translateX(-50%) translateY(2px);
+}
+
 .melody-tab-piano-roll {
   overflow: auto;
   max-height: calc(100vh - 280px);
@@ -1309,6 +1430,22 @@ input:focus-visible {
   border-radius: 6px;
   background: rgba(10,10,15,0.8);
   -webkit-overflow-scrolling: touch;
+}
+
+.pad-melody-assignment {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 12;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(255, 68, 68, 0.9);
+  color: #fff;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 10px;
+  font-weight: 800;
+  pointer-events: none;
+  box-shadow: 0 0 10px rgba(255, 68, 68, 0.45);
 }
 
 @media (max-width: 768px) {
@@ -1319,7 +1456,18 @@ input:focus-visible {
   .melody-tab-piano-roll {
     max-height: calc(100vh - 320px);
   }
+  .melody-visual-piano {
+    height: 104px;
+    overflow-x: auto;
+  }
+  .melody-piano-white-row {
+    min-width: 620px;
+  }
   .melody-tab-track-selector select {
     min-width: 140px;
+  }
+  .melody-live-status {
+    width: 100%;
+    margin-left: 0;
   }
 }
