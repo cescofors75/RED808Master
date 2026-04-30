@@ -97,6 +97,25 @@ private:
   /* v2.6 — Push pattern + selected index to all UDP slaves (P4/S3).
    * Fixes bug where slaves displayed stale pattern after web changed it. */
   void broadcastUdpPatternSync(int patternNum);
+
+  /* v2.9 — Melody (P4 piano + S3 melody screen) authoritative state.
+   * Master holds the currently-edited grid + per-pad bindings, broadcasts
+   * `melody_sync` to every UDP slave so P4 piano and S3 melody screen stay
+   * locked in lockstep just like the drum pattern. */
+  uint8_t  melodyEngine     = 3;
+  uint8_t  melodyOctave     = 4;
+  bool     melodyRecActive  = false;
+  uint8_t  melodyStep       = 0;
+  uint8_t  melodyPad        = 0;
+  bool     melodyGrid[16][12] = {{false}};
+  // per-pad binding (set on melodyAssign)
+  bool     melodyPadAssigned[16]      = {false};
+  uint8_t  melodyPadEngine[16]        = {3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3};
+  uint8_t  melodyPadOctave[16]        = {4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4};
+  bool     melodyPadGrid[16][16][12]  = {};
+  void     broadcastMelodySync();
+  void     sendMelodySyncTo(IPAddress ip, uint16_t port);
+  void     melodyClearGrid();
   
   // File upload handlers
   void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);

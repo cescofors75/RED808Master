@@ -1893,12 +1893,68 @@ void WebInterface::sendUdpStateSync(IPAddress ip, uint16_t port) {
   udp.beginPacket(ip, port);
   udp.write((uint8_t*)_stateBuf, len);
   udp.endPacket();
+
+  // v2.9 — also push the current authoritative melody state to this slave so
+  // newly-joined or reconnected slaves immediately see the right grid/pad.
+  sendMelodySyncTo(ip, port);
 }
 
 void WebInterface::broadcastUdpStateSync() {
   if (udpClients.empty()) return;
   for (auto& entry : udpClients) {
     sendUdpStateSync(entry.second.ip, entry.second.port);
+    yield();
+  }
+}
+
+// v2.9 — Build & send melody_sync packet (engine/octave/rec/step/pad/grid)
+// to a single UDP slave. Used both for broadcast and on-hello replies so any
+// slave that joins/reconnects immediately sees the authoritative melody state.
+void WebInterface::melodyClearGrid() {
+  for (int c = 0; c < 16; c++) for (int r = 0; r < 12; r++) melodyGrid[c][r] = false;
+}
+
+void WebInterface::sendMelodySyncTo(IPAddress ip, uint16_t port) {
+  // Compact stack buffer — grid is 16*12=192 chars + JSON overhead < 700 bytes.
+  char buf[800];
+  int n = snprintf(buf, sizeof(buf),
+                   "{\"cmd\":\"melody_sync\",\"engine\":%u,\"octave\":%u,\"rec\":%d,\"step\":%u,\"pad\":%u,\"grid\":[",
+                   (unsigned)melodyEngine, (unsigned)melodyOctave,
+                   melodyRecActive ? 1 : 0, (unsigned)melodyStep,
+                   (unsigned)melodyPad);
+  if (n <= 0 || n >= (int)sizeof(buf)) return;
+  for (int c = 0; c < 16; c++) {
+    if (n + 2 >= (int)sizeof(buf)) return;
+    if (c) buf[n++] = ',';
+    buf[n++] = '[';
+    for (int r = 0; r < 12; r++) {
+      if (n + 2 >= (int)sizeof(buf)) return;
+      if (r) buf[n++] = ',';
+      buf[n++] = melodyGrid[c][r] ? '1' : '0';
+    }
+    if (n + 1 >= (int)sizeof(buf)) return;
+    buf[n++] = ']';
+  }
+  if (n + 2 >= (int)sizeof(buf)) return;
+  buf[n++] = ']';
+  buf[n++] = '}';
+  udp.beginPacket(ip, port);
+  udp.write((uint8_t*)buf, (size_t)n);
+  udp.endPacket();
+}
+
+void WebInterface::broadcastMelodySync() {
+  if (udpClients.empty()) return;
+  static unsigned long lastLog = 0;
+  unsigned long nowMs = millis();
+  if (nowMs - lastLog > 5000) {
+    lastLog = nowMs;
+    Serial.printf("[MASTER broadcastMelodySync] clients=%u rec=%d eng=%u oct=%u pad=%u step=%u\n",
+                  (unsigned)udpClients.size(), (int)melodyRecActive,
+                  melodyEngine, melodyOctave, melodyPad, melodyStep);
+  }
+  for (auto& entry : udpClients) {
+    sendMelodySyncTo(entry.second.ip, entry.second.port);
     yield();
   }
 }
@@ -2063,6 +2119,13 @@ void WebInterface::update() {
   if (!pageLoading && !udpClients.empty() && now - lastUdpStateSync >= 2000) {
     lastUdpStateSync = now;
     broadcastUdpStateSync();
+  }
+
+  // v2.9 — periodic melody_sync so newly-joined slaves and any missed packet recover
+  static unsigned long lastUdpMelodySync = 0;
+  if (!pageLoading && !udpClients.empty() && now - lastUdpMelodySync >= 3000) {
+    lastUdpMelodySync = now;
+    broadcastMelodySync();
   }
 
   // ── Heap monitor: log cada 10s para diagnosticar fugas ──
@@ -4376,23 +4439,64 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   // v2.7 — {"cmd":"melodyRecNote","engine":4,"note":60}
   // Forwarded to all UDP slaves so the S3 melody screen can capture P4 piano
   // keystrokes when its REC mode is enabled. Master itself takes no action.
+  // v2.9 — Melody authoritative state. Master keeps engine/octave/grid/rec
+  // and broadcasts melody_sync to ALL UDP slaves on every change so P4 piano
+  // and S3 melody screen mirror each other automatically (just like pads).
+  else if (cmd == "melodyRecToggle") {
+    uint8_t e = doc["engine"] | melodyEngine; if (e <= 6) melodyEngine = e;
+    int o     = doc["octave"] | (int)melodyOctave; if (o >= 0 && o <= 9) melodyOctave = (uint8_t)o;
+    melodyRecActive = doc["active"] | !melodyRecActive;
+    if (melodyRecActive) { melodyClearGrid(); melodyStep = 0; }
+    broadcastMelodySync();
+  }
+  else if (cmd == "melodySetEngine") {
+    uint8_t e = doc["engine"] | melodyEngine;
+    if (e <= 6) melodyEngine = e;
+    broadcastMelodySync();
+  }
+  else if (cmd == "melodySetOctave") {
+    int o = doc["octave"] | (int)melodyOctave;
+    if (o < 0) o = 0; if (o > 9) o = 9;
+    melodyOctave = (uint8_t)o;
+    broadcastMelodySync();
+  }
+  else if (cmd == "melodySetPad") {
+    int p = doc["pad"] | (int)melodyPad;
+    if (p >= 0 && p < 16) melodyPad = (uint8_t)p;
+    broadcastMelodySync();
+  }
   else if (cmd == "melodyRecNote") {
-    if (!udpClients.empty()) {
-      uint8_t engine = doc["engine"] | 3;
-      uint8_t note   = doc["note"]   | 60;
-      char fwd[96];
-      int n = snprintf(fwd, sizeof(fwd),
-                       "{\"cmd\":\"melodyRecNote\",\"engine\":%u,\"note\":%u}",
-                       (unsigned)engine, (unsigned)note);
-      if (n > 0 && n < (int)sizeof(fwd)) {
-        for (auto& entry : udpClients) {
-          udp.beginPacket(entry.second.ip, entry.second.port);
-          udp.write((uint8_t*)fwd, (size_t)n);
-          udp.endPacket();
-          yield();
-        }
+    int note = doc["note"] | -1;
+    Serial.printf("[MASTER melodyRecNote] rec=%d note=%d step=%u\n", (int)melodyRecActive, note, melodyStep);
+    if (note >= 0 && note <= 127 && melodyRecActive) {
+      // map midi -> S3 row table: row r where (11-r) == midi%12
+      int pc  = note % 12;
+      int row = 11 - pc;
+      int col = melodyStep;
+      if (col >= 0 && col < 16 && row >= 0 && row < 12) {
+        melodyGrid[col][row] = true;
+        melodyStep = (uint8_t)((col + 1) % 16);
       }
+      broadcastMelodySync();
     }
+  }
+  else if (cmd == "melodyAssign") {
+    uint8_t e = doc["engine"] | melodyEngine; if (e <= 6) melodyEngine = e;
+    int o     = doc["octave"] | (int)melodyOctave; if (o >= 0 && o <= 9) melodyOctave = (uint8_t)o;
+    int pad = doc["pad"] | (int)melodyPad;
+    if (pad >= 0 && pad < 16) {
+      melodyPad = (uint8_t)pad;
+      melodyPadAssigned[pad] = true;
+      melodyPadEngine[pad]   = melodyEngine;
+      melodyPadOctave[pad]   = melodyOctave;
+      memcpy(melodyPadGrid[pad], melodyGrid, sizeof(melodyGrid));
+      Serial.printf("[MASTER melodyAssign] pad=%d eng=%u oct=%u\n", pad, melodyEngine, melodyOctave);
+      broadcastMelodySync();
+    }
+  }
+  else if (cmd == "melodyClear") {
+    melodyClearGrid(); melodyStep = 0;
+    broadcastMelodySync();
   }
 
   // {"cmd":"synth303NoteOff"}
