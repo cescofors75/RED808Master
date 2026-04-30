@@ -687,12 +687,17 @@ void setup() {
         if (engine >= 3) {
             int pat = sequencer.getCurrentPattern();
             int step = sequencer.getCurrentStep();
-            uint8_t note = sequencer.getStepNote(pat, track, step);
             uint8_t flags = sequencer.getStepFlags(pat, track, step);
-            if (note == 0) return; // no melody note assigned → skip (silence)
             bool accent = (flags & 0x01) != 0;
             bool slide  = (flags & 0x02) != 0;
-            spiMaster.synthNoteOnEx((uint8_t)engine, note, synthVel, accent, slide);
+            bool anyNote = false;
+            for (int voice = 0; voice < MELODY_STEP_VOICES; voice++) {
+                uint8_t note = sequencer.getStepNoteVoice(pat, track, step, voice);
+                if (note == 0) continue;
+                anyNote = true;
+                spiMaster.synthNoteOnEx((uint8_t)engine, note, synthVel, accent, slide);
+            }
+            if (!anyNote) return;
         } else {
             // Percussion engines (808/909/505): trigger by instrument
             spiMaster.synthTrigger((uint8_t)engine, (uint8_t)track, synthVel);

@@ -1605,10 +1605,16 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
 
             // Melody: per-step MIDI notes (0 = rest)
             JsonObject notesObj = responseDoc.createNestedObject("stepNotes");
+            JsonObject noteVoicesObj = responseDoc.createNestedObject("stepNoteVoices");
             for (int track = 0; track < 16; track++) {
               JsonArray trackNotes = notesObj.createNestedArray(String(track));
+              JsonArray trackVoices = noteVoicesObj.createNestedArray(String(track));
               for (int step = 0; step < stepCount; step++) {
                 trackNotes.add(sequencer.getStepNote(track, step));
+                JsonArray stepVoices = trackVoices.createNestedArray();
+                for (int voice = 0; voice < MELODY_STEP_VOICES; voice++) {
+                  stepVoices.add(sequencer.getStepNoteVoice(track, step, voice));
+                }
               }
             }
 
@@ -3992,6 +3998,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int step = doc["step"];
     int note = doc.containsKey("note") ? doc["note"].as<int>() : 0;
     int flags = doc.containsKey("flags") ? doc["flags"].as<int>() : -1;
+    JsonArrayConst voices = doc["voices"].as<JsonArrayConst>();
     if (track < 0 || track >= MAX_TRACKS || step < 0 || step >= STEPS_PER_PATTERN) return;
     if (note < 0) note = 0;
     if (note > 127) note = 127;
@@ -3999,11 +4006,35 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     if (doc.containsKey("pattern")) {
       int pattern = doc["pattern"].as<int>();
       if (pattern >= 0 && pattern < MAX_PATTERNS) {
-        sequencer.setStepNote(pattern, track, step, (uint8_t)note);
+        sequencer.clearStepNoteVoices(pattern, track, step);
+        if (!voices.isNull()) {
+          int voice = 0;
+          for (JsonVariantConst v : voices) {
+            if (voice >= MELODY_STEP_VOICES) break;
+            int voiceNote = v.as<int>();
+            if (voiceNote < 0) voiceNote = 0;
+            if (voiceNote > 127) voiceNote = 127;
+            sequencer.setStepNoteVoice(pattern, track, step, voice++, (uint8_t)voiceNote);
+          }
+        } else {
+          sequencer.setStepNote(pattern, track, step, (uint8_t)note);
+        }
         if (flags >= 0) sequencer.setStepFlags(pattern, track, step, (uint8_t)flags);
       }
     } else {
-      sequencer.setStepNote(track, step, (uint8_t)note);
+      sequencer.clearStepNoteVoices(track, step);
+      if (!voices.isNull()) {
+        int voice = 0;
+        for (JsonVariantConst v : voices) {
+          if (voice >= MELODY_STEP_VOICES) break;
+          int voiceNote = v.as<int>();
+          if (voiceNote < 0) voiceNote = 0;
+          if (voiceNote > 127) voiceNote = 127;
+          sequencer.setStepNoteVoice(track, step, voice++, (uint8_t)voiceNote);
+        }
+      } else {
+        sequencer.setStepNote(track, step, (uint8_t)note);
+      }
       if (flags >= 0) sequencer.setStepFlags(track, step, (uint8_t)flags);
     }
 
@@ -4013,7 +4044,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       resp["type"] = "stepNoteSet";
       resp["track"] = track;
       resp["step"] = step;
-      resp["note"] = note;
+      resp["note"] = sequencer.getStepNote(track, step);
+      JsonArray outVoices = resp.createNestedArray("voices");
+      int respPattern = doc.containsKey("pattern") ? doc["pattern"].as<int>() : sequencer.getCurrentPattern();
+      for (int voice = 0; voice < MELODY_STEP_VOICES; voice++) {
+        outVoices.add(sequencer.getStepNoteVoice(respPattern, track, step, voice));
+      }
       if (flags >= 0) resp["flags"] = flags;
       String out; serializeJson(resp, out);
       if (ws) ws->textAll(out);
@@ -4486,10 +4522,54 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int pad = doc["pad"] | (int)melodyPad;
     if (pad >= 0 && pad < 16) {
       melodyPad = (uint8_t)pad;
+      JsonArrayConst steps = doc["steps"].as<JsonArrayConst>();
+      if (!steps.isNull()) {
+        melodyClearGrid();
+        int col = 0;
+        for (JsonVariantConst stepArr : steps) {
+          if (col >= 16) break;
+          if (stepArr.is<JsonArrayConst>()) {
+            for (JsonVariantConst v : stepArr.as<JsonArrayConst>()) {
+              int note = v.as<int>();
+              if (note < 0 || note > 127) continue;
+              int row = 11 - (note % 12);
+              if (row >= 0 && row < 12) melodyGrid[col][row] = true;
+            }
+          }
+          col++;
+        }
+      }
       melodyPadAssigned[pad] = true;
       melodyPadEngine[pad]   = melodyEngine;
       melodyPadOctave[pad]   = melodyOctave;
       memcpy(melodyPadGrid[pad], melodyGrid, sizeof(melodyGrid));
+      setTrackSynthEngine(pad, (int8_t)melodyEngine);
+      spiMaster.dsqSetTrackEngine((uint8_t)pad, (int8_t)melodyEngine);
+      int curPat = sequencer.getCurrentPattern();
+      for (int step = 0; step < 16; step++) {
+        bool active = false;
+        int voice = 0;
+        sequencer.clearStepNoteVoices(pad, step);
+        for (int row = 0; row < 12; row++) {
+          if (!melodyGrid[step][row]) continue;
+          active = true;
+          if (voice < MELODY_STEP_VOICES) {
+            int pc = 11 - row;
+            int midi = ((int)melodyOctave + 1) * 12 + pc;
+            if (midi < 0) midi = 0;
+            if (midi > 127) midi = 127;
+            sequencer.setStepNoteVoice(pad, step, voice, (uint8_t)midi);
+            voice++;
+          }
+        }
+        sequencer.setStep(pad, step, active);
+        sequencer.setStepNoteLen(pad, step, 1);
+        spiMaster.dsqSetStep((uint8_t)curPat, (uint8_t)pad, (uint8_t)step,
+            active ? 1 : 0,
+            sequencer.getStepVelocity(curPat, pad, step),
+            1,
+            sequencer.getStepProbability(curPat, pad, step));
+      }
       Serial.printf("[MASTER melodyAssign] pad=%d eng=%u oct=%u\n", pad, melodyEngine, melodyOctave);
       broadcastMelodySync();
     }

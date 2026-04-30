@@ -12,6 +12,7 @@
 #define MAX_PATTERNS 128
 #define STEPS_PER_PATTERN 64
 #define MAX_TRACKS 16
+#define MELODY_STEP_VOICES 4
 
 // Loop types for pads
 enum LoopType {
@@ -38,8 +39,9 @@ struct PatternData {
   uint16_t stepCutoffLockHz[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
   bool    stepReverbSendLockEnabled[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
   uint8_t stepReverbSendLockValue[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
-  // Melody: per-step MIDI note (0 = rest/inherit) and flags (bit0=accent, bit1=slide)
+  // Melody: per-step MIDI note voices (0 = rest/inherit) and flags (bit0=accent, bit1=slide)
   uint8_t stepNotes[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
+  uint8_t stepNoteVoices[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN][MELODY_STEP_VOICES];
   uint8_t stepFlags[MAX_PATTERNS][MAX_TRACKS][STEPS_PER_PATTERN];
 };
 // sizeof(PatternData) ≈ 229 KB  →  allocated from 8 MB PSRAM, not DRAM
@@ -122,6 +124,12 @@ public:
   void setStepNote(int pattern, int track, int step, uint8_t midiNote);
   uint8_t getStepNote(int track, int step);
   uint8_t getStepNote(int pattern, int track, int step);
+  void setStepNoteVoice(int track, int step, int voice, uint8_t midiNote);
+  void setStepNoteVoice(int pattern, int track, int step, int voice, uint8_t midiNote);
+  uint8_t getStepNoteVoice(int track, int step, int voice);
+  uint8_t getStepNoteVoice(int pattern, int track, int step, int voice);
+  void clearStepNoteVoices(int track, int step);
+  void clearStepNoteVoices(int pattern, int track, int step);
   // Melody flags per step (bit0=accent, bit1=slide)
   void setStepFlags(int track, int step, uint8_t flags);
   void setStepFlags(int pattern, int track, int step, uint8_t flags);

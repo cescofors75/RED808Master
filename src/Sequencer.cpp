@@ -286,6 +286,7 @@ void Sequencer::clearPattern(int pattern) {
   memset(pd->stepReverbSendLockEnabled[pattern], 0, sizeof(pd->stepReverbSendLockEnabled[pattern]));
   memset(pd->stepReverbSendLockValue[pattern],   0, sizeof(pd->stepReverbSendLockValue[pattern]));
   memset(pd->stepNotes[pattern],                  0, sizeof(pd->stepNotes[pattern]));              // 0 = rest
+  memset(pd->stepNoteVoices[pattern],             0, sizeof(pd->stepNoteVoices[pattern]));
   memset(pd->stepFlags[pattern],                  0, sizeof(pd->stepFlags[pattern]));              // no accent/slide
   // stepCutoffLockHz is uint16_t — memset can't set 1000, need loop
   for (int t = 0; t < MAX_TRACKS; t++) {
@@ -364,6 +365,7 @@ void Sequencer::setStepNote(int track, int step, uint8_t midiNote) {
   if (track < 0 || track >= MAX_TRACKS) return;
   if (step < 0 || step >= STEPS_PER_PATTERN) return;
   pd->stepNotes[currentPattern][track][step] = midiNote;
+  pd->stepNoteVoices[currentPattern][track][step][0] = midiNote;
 }
 
 void Sequencer::setStepNote(int pattern, int track, int step, uint8_t midiNote) {
@@ -371,6 +373,7 @@ void Sequencer::setStepNote(int pattern, int track, int step, uint8_t midiNote) 
   if (track < 0 || track >= MAX_TRACKS) return;
   if (step < 0 || step >= STEPS_PER_PATTERN) return;
   pd->stepNotes[pattern][track][step] = midiNote;
+  pd->stepNoteVoices[pattern][track][step][0] = midiNote;
 }
 
 uint8_t Sequencer::getStepNote(int track, int step) {
@@ -384,6 +387,43 @@ uint8_t Sequencer::getStepNote(int pattern, int track, int step) {
   if (track < 0 || track >= MAX_TRACKS) return 0;
   if (step < 0 || step >= STEPS_PER_PATTERN) return 0;
   return pd->stepNotes[pattern][track][step];
+}
+
+void Sequencer::setStepNoteVoice(int track, int step, int voice, uint8_t midiNote) {
+  setStepNoteVoice(currentPattern, track, step, voice, midiNote);
+}
+
+void Sequencer::setStepNoteVoice(int pattern, int track, int step, int voice, uint8_t midiNote) {
+  if (pattern < 0 || pattern >= MAX_PATTERNS) return;
+  if (track < 0 || track >= MAX_TRACKS) return;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return;
+  if (voice < 0 || voice >= MELODY_STEP_VOICES) return;
+  pd->stepNoteVoices[pattern][track][step][voice] = midiNote;
+  if (voice == 0) pd->stepNotes[pattern][track][step] = midiNote;
+}
+
+uint8_t Sequencer::getStepNoteVoice(int track, int step, int voice) {
+  return getStepNoteVoice(currentPattern, track, step, voice);
+}
+
+uint8_t Sequencer::getStepNoteVoice(int pattern, int track, int step, int voice) {
+  if (pattern < 0 || pattern >= MAX_PATTERNS) return 0;
+  if (track < 0 || track >= MAX_TRACKS) return 0;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return 0;
+  if (voice < 0 || voice >= MELODY_STEP_VOICES) return 0;
+  return pd->stepNoteVoices[pattern][track][step][voice];
+}
+
+void Sequencer::clearStepNoteVoices(int track, int step) {
+  clearStepNoteVoices(currentPattern, track, step);
+}
+
+void Sequencer::clearStepNoteVoices(int pattern, int track, int step) {
+  if (pattern < 0 || pattern >= MAX_PATTERNS) return;
+  if (track < 0 || track >= MAX_TRACKS) return;
+  if (step < 0 || step >= STEPS_PER_PATTERN) return;
+  memset(pd->stepNoteVoices[pattern][track][step], 0, MELODY_STEP_VOICES);
+  pd->stepNotes[pattern][track][step] = 0;
 }
 
 void Sequencer::setStepFlags(int track, int step, uint8_t flags) {
