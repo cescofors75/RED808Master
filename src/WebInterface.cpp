@@ -373,6 +373,10 @@ WebInterface::WebInterface() {
   ws = nullptr;
   initialized = false;
   midiController = nullptr;
+  memset(wsReassemblySlots, 0, sizeof(wsReassemblySlots));
+  for (auto& slot : wsReassemblySlots) {
+    slot.clientId = 0xFFFFFFFF;
+  }
   
   // Inicializar variables de rate limiting
   lastTriggerTime = 0;
@@ -382,8 +386,21 @@ WebInterface::WebInterface() {
 }
 
 WebInterface::~WebInterface() {
-  if (server) delete server;
-  if (ws) delete ws;
+  for (auto& slot : wsReassemblySlots) {
+    releaseWsReassemblySlot(&slot);
+  }
+  if (server) {
+    server->end();
+  }
+  if (ws) {
+    ws->closeAll();
+    delete ws;
+    ws = nullptr;
+  }
+  if (server) {
+    delete server;
+    server = nullptr;
+  }
 }
 
 bool WebInterface::begin(const char* apSsid, const char* apPassword,
@@ -479,7 +496,6 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   server->on("/", HTTP_GET, [this](AsyncWebServerRequest *request){
     // Pause periodic broadcasts during page transition to free TCP/Core0
     pageTransitionMs = millis();
-    if (ws) ws->cleanupClients(0);  // close all old WS clients immediately
     sendWebAsset(request, "/index.html", "text/html", "no-cache, no-store, must-revalidate");
   });
 
@@ -707,7 +723,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
       {"name":"Fm Bell","notes":[60,67,64,72,60,67,64,72,60,67,64,72,60,67,64,72],"accents":[1,0,0,1,0,0,1,0,1,0,0,1,0,0,1,0],"slides":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},
       {"name":"Octave Riff","notes":[36,48,36,48,38,50,38,50,41,53,41,53,43,55,43,55],"accents":[1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],"slides":[0,1,0,0,0,1,0,0,0,1,0,0,0,1,0,0]}
     ])json";
-    request->send_P(200, "application/json", MELODY_PRESETS);
+    request->send(200, "application/json", MELODY_PRESETS);
   });
 
   // === System Log: live viewer with auto-refresh ===
@@ -750,7 +766,7 @@ function startAuto(){clearInterval(timer);timer=setInterval(refresh,iv);}
 function clearLog(){if(confirm('Clear log?'))fetch('/api/log',{method:'DELETE'}).then(()=>refresh());}
 refresh();if(auto_)startAuto();
 </script></body></html>)rawliteral";
-    request->send_P(200, "text/html", LOG_HTML);
+    request->send(200, "text/html", LOG_HTML);
   });
 
   server->on("/api/sysinfo", HTTP_GET, [this](AsyncWebServerRequest *request){
@@ -1298,14 +1314,43 @@ refresh();if(auto_)startAuto();
   return true;
 }
 
+WebInterface::WsReassemblySlot* WebInterface::findWsReassemblySlot(uint32_t clientId, bool create) {
+  WsReassemblySlot* freeSlot = nullptr;
+  for (auto& slot : wsReassemblySlots) {
+    if (slot.clientId == clientId) {
+      return &slot;
+    }
+    if (create && !freeSlot && slot.clientId == 0xFFFFFFFF) {
+      freeSlot = &slot;
+    }
+  }
+  if (freeSlot) {
+    freeSlot->clientId = clientId;
+    freeSlot->buffer = nullptr;
+    freeSlot->size = 0;
+  }
+  return freeSlot;
+}
+
+void WebInterface::releaseWsReassemblySlot(uint32_t clientId) {
+  WsReassemblySlot* slot = findWsReassemblySlot(clientId, false);
+  if (slot) {
+    releaseWsReassemblySlot(slot);
+  }
+}
+
+void WebInterface::releaseWsReassemblySlot(WsReassemblySlot* slot) {
+  if (!slot) return;
+  if (slot->buffer) {
+    free(slot->buffer);
+  }
+  slot->buffer = nullptr;
+  slot->size = 0;
+  slot->clientId = 0xFFFFFFFF;
+}
+
 void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, 
                                      AwsEventType type, void *arg, uint8_t *data, size_t len) {
-  // Static reassembly buffer — declared at function level so both
-  // WS_EVT_DISCONNECT and WS_EVT_DATA can access them.
-  static uint8_t* _wsReassemblyBuf = nullptr;
-  static size_t   _wsReassemblySize = 0;
-  static uint32_t _wsReassemblyClientId = 0xFFFFFFFF;
-
   if (type == WS_EVT_CONNECT) {
     // ⚠️ LÍMITE DE 3 CLIENTES para estabilidad
     if (ws->count() > 3) {
@@ -1333,13 +1378,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
   } else if (type == WS_EVT_DISCONNECT) {
     syslog("WS", "client %u disconnected (remaining=%d) heap=%u",
            client->id(), ws->count() > 0 ? ws->count()-1 : 0, ESP.getFreeHeap());
-    // Free any orphaned reassembly buffer owned by this client
-    // (prevents 24KB leak if client disconnects mid-fragment)
-    if (_wsReassemblyBuf && _wsReassemblyClientId == client->id()) {
-      free(_wsReassemblyBuf);
-      _wsReassemblyBuf = nullptr;
-      _wsReassemblyClientId = 0xFFFFFFFF;
-    }
+    releaseWsReassemblySlot(client->id());
   } else if (type == WS_EVT_DATA) {
     AwsFrameInfo *info = (AwsFrameInfo*)arg;
 
@@ -1351,11 +1390,13 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
       return;
     }
     
-    // --- Frame reassembly for fragmented WebSocket messages ---
-    // NOTE: static vars are at function level (see top of onWebSocketEvent).
-    // We track client id to detect cross-client fragment interleaving.
-
     bool _wsFreeAfter = false;
+    WsReassemblySlot* reassemblySlot = nullptr;
+    auto cleanupWsReassembly = [&]() {
+      if (_wsFreeAfter && reassemblySlot) {
+        releaseWsReassemblySlot(reassemblySlot);
+      }
+    };
     
     // Safe buffer variables (used for WS_TEXT to avoid data[len]=0 overflow)
     char* safeData = nullptr;
@@ -1367,33 +1408,36 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
         if (info->opcode == WS_TEXT && info->len > kWsMaxTextBytes) {
           return;
         }
-        // If a different client already owns the buffer, discard it to avoid corruption
-        if (_wsReassemblyBuf && _wsReassemblyClientId != client->id()) {
-          free(_wsReassemblyBuf);
-          _wsReassemblyBuf = nullptr;
-        } else if (_wsReassemblyBuf) {
-          free(_wsReassemblyBuf); _wsReassemblyBuf = nullptr;
-        }
+        reassemblySlot = findWsReassemblySlot(client->id(), true);
+        if (!reassemblySlot) return;
+        releaseWsReassemblySlot(reassemblySlot);
+        reassemblySlot = findWsReassemblySlot(client->id(), true);
+        if (!reassemblySlot) return;
         if (ESP.getFreeHeap() < (uint32_t)(info->len + 4096)) {
           return;
         }
-        _wsReassemblyBuf = (uint8_t*)malloc(info->len + 2); // +2 for null terminator safety
-        if (!_wsReassemblyBuf) {
+        reassemblySlot->buffer = (uint8_t*)malloc(info->len + 2); // +2 for null terminator safety
+        if (!reassemblySlot->buffer) {
+          releaseWsReassemblySlot(reassemblySlot);
           return;
         }
-        _wsReassemblySize = info->len;
-        _wsReassemblyClientId = client->id();
-      } else if (_wsReassemblyClientId != client->id()) {
-        // Mid-frame data from wrong client — discard silently
+        reassemblySlot->size = info->len;
+      } else {
+        reassemblySlot = findWsReassemblySlot(client->id(), false);
+        if (!reassemblySlot || !reassemblySlot->buffer) {
+          return;
+        }
+      }
+      if (reassemblySlot->buffer && info->index + len <= reassemblySlot->size) {
+        memcpy(reassemblySlot->buffer + info->index, data, len);
+      } else {
+        releaseWsReassemblySlot(reassemblySlot);
         return;
       }
-      if (_wsReassemblyBuf && info->index + len <= _wsReassemblySize) {
-        memcpy(_wsReassemblyBuf + info->index, data, len);
-      }
-      if (info->final && (info->index + len) == info->len && _wsReassemblyBuf) {
-        _wsReassemblyBuf[_wsReassemblySize] = 0; // Safe null-terminate
-        data = _wsReassemblyBuf;
-        len = _wsReassemblySize;
+      if (info->final && (info->index + len) == info->len && reassemblySlot->buffer) {
+        reassemblySlot->buffer[reassemblySlot->size] = 0; // Safe null-terminate
+        data = reassemblySlot->buffer;
+        len = reassemblySlot->size;
         _wsFreeAfter = true;
       } else {
         return; // Still accumulating chunks
@@ -1413,7 +1457,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
     else if (info->opcode == WS_TEXT) {
       // Reject if heap critically low — prevent crash during JSON processing
       if (ESP.getFreeHeap() < 15000) {
-        if (_wsFreeAfter && _wsReassemblyBuf) { free(_wsReassemblyBuf); _wsReassemblyBuf = nullptr; }
+        cleanupWsReassembly();
         return;
       }
       
@@ -1425,6 +1469,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
         // Non-fragmented message: copy to safe buffer
         safeData = (char*)malloc(len + 1);
         if (!safeData) {
+          cleanupWsReassembly();
           return;
         }
         memcpy(safeData, data, len);
@@ -1443,7 +1488,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             String errStr; serializeJson(errDoc, errStr);
             if (isClientReady(client)) client->text(errStr);
             if (safeFreeNeeded) free(safeData);
-            if (_wsFreeAfter && _wsReassemblyBuf) { free(_wsReassemblyBuf); _wsReassemblyBuf = nullptr; }
+            cleanupWsReassembly();
             return;
           }
           PsramJsonDocument bulkDoc(32768);  // PSRAM — avoids 32KB spike on internal DRAM
@@ -1486,9 +1531,8 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
             }
           }
           // Cleanup reassembly buffer before early return
-          if (_wsFreeAfter && _wsReassemblyBuf) {
-            free(_wsReassemblyBuf);
-            _wsReassemblyBuf = nullptr;
+          if (_wsFreeAfter) {
+            cleanupWsReassembly();
           } else if (safeFreeNeeded) {
             free(safeData);
           }
@@ -1514,7 +1558,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
               String errStr; serializeJson(err, errStr);
               if (isClientReady(client)) client->text(errStr);
               if (safeFreeNeeded) free(safeData);
-              if (_wsFreeAfter && _wsReassemblyBuf) { free(_wsReassemblyBuf); _wsReassemblyBuf = nullptr; }
+              cleanupWsReassembly();
               return;
             }
             yield();
@@ -1680,7 +1724,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
               if (isClientReady(client)) client->text(emptyOut);
               else ws->textAll(emptyOut);
               if (safeFreeNeeded) free(safeData);
-              if (_wsFreeAfter && _wsReassemblyBuf) { free(_wsReassemblyBuf); _wsReassemblyBuf = nullptr; }
+              cleanupWsReassembly();
               return;
             }
 
@@ -1758,10 +1802,7 @@ void WebInterface::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient
       free(safeData);
     }
     // Cleanup reassembly buffer after processing
-    if (_wsFreeAfter && _wsReassemblyBuf) {
-      free(_wsReassemblyBuf);
-      _wsReassemblyBuf = nullptr;
-    }
+    cleanupWsReassembly();
   }
 }
 

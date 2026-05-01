@@ -90,6 +90,15 @@ private:
   
   void onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, 
                        AwsEventType type, void *arg, uint8_t *data, size_t len);
+  struct WsReassemblySlot {
+    uint32_t clientId;
+    uint8_t* buffer;
+    size_t size;
+  };
+  WsReassemblySlot* findWsReassemblySlot(uint32_t clientId, bool create);
+  void releaseWsReassemblySlot(uint32_t clientId);
+  void releaseWsReassemblySlot(WsReassemblySlot* slot);
+  WsReassemblySlot wsReassemblySlots[4];
   void processCommand(const JsonDocument& doc);  // Función común para procesar comandos
   void sendUdpStateSync(IPAddress ip, uint16_t port);
   void broadcastUdpStateSync();

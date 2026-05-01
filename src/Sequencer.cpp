@@ -30,12 +30,13 @@ Sequencer::Sequencer() :
 
   memset(songChain, 0, sizeof(songChain));
 
-  // ── Allocate pattern storage in PSRAM (~229 KB) ──────────────────────────
-  // ps_calloc → PSRAM heap (8 MB OPI).  Fallback to internal heap if PSRAM
-  // unavailable (dev/test without modules).
+  // ── Allocate pattern storage in PSRAM. Internal DRAM is too small for this
+  // block plus AsyncTCP/WebSocket/JSON, so PSRAM is a hard requirement.
   pd = (PatternData*)ps_calloc(1, sizeof(PatternData));
   if (!pd) {
-    pd = (PatternData*)calloc(1, sizeof(PatternData));
+    Serial.println("[SEQ] FATAL: PSRAM allocation failed for PatternData");
+    delay(100);
+    ESP.restart();
   }
   // steps[] already zeroed by calloc; set non-zero defaults
   for (int p = 0; p < MAX_PATTERNS; p++) {

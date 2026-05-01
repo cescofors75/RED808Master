@@ -125,7 +125,7 @@ bool SPIMaster::begin() {
     daisySpi.begin(DAISY_SPI_SCK, DAISY_SPI_MISO, DAISY_SPI_MOSI, DAISY_SPI_CS);
 
     if (!spiCmdQueue) {
-        spiCmdQueue = xQueueCreate(64, sizeof(SpiQueuedCmd));
+        spiCmdQueue = xQueueCreate(128, sizeof(SpiQueuedCmd));
     }
 
     

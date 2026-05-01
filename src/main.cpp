@@ -200,14 +200,17 @@ void setLedMonoMode(bool enabled) {
 // ESP32 solo sube el patrón una vez y envía CMD_DSQ_CONTROL play/stop.
 
 // ── Deferred upload: Core0 sets flag, Core1 executes ──
+static portMUX_TYPE _pendingDsqMux = portMUX_INITIALIZER_UNLOCKED;
 static volatile int8_t _pendingDsqUpload = -1;   // pattern index, -1 = idle
 static volatile bool   _pendingDsqSelect = false;
 
 void dsqUploadPatternDeferred(int pattern) {
-    // Safe to call from any core — just sets a flag
-    _pendingDsqSelect = true;                  // write select FIRST
-    __asm__ __volatile__("memw" ::: "memory"); // memory barrier
-    _pendingDsqUpload = (int8_t)pattern;       // write upload index LAST (consumer trigger)
+    if (pattern < 0) pattern = 0;
+    pattern %= DSQ_PATTERNS;
+    portENTER_CRITICAL(&_pendingDsqMux);
+    _pendingDsqSelect = true;
+    _pendingDsqUpload = (int8_t)pattern;
+    portEXIT_CRITICAL(&_pendingDsqMux);
 }
 
 // Helper: convierte un patrón del Sequencer ESP32 → DsqStepPkt y lo sube a Daisy
@@ -270,12 +273,21 @@ void spiAudioTask(void *pvParameters) {
 
     while (true) {
         // ── Check deferred pattern upload from Core0 ──
-        int8_t pat = _pendingDsqUpload;
+        int8_t pat;
+        bool selectAfterUpload;
+        portENTER_CRITICAL(&_pendingDsqMux);
+        pat = _pendingDsqUpload;
         if (pat >= 0) {
             _pendingDsqUpload = -1;
+            selectAfterUpload = _pendingDsqSelect;
+            _pendingDsqSelect = false;
+        } else {
+            selectAfterUpload = false;
+        }
+        portEXIT_CRITICAL(&_pendingDsqMux);
+        if (pat >= 0) {
             dsqUploadPattern(pat);
-            if (_pendingDsqSelect) {
-                _pendingDsqSelect = false;
+            if (selectAfterUpload) {
                 spiMaster.dsqSelectPattern((uint8_t)pat);
             }
         }
