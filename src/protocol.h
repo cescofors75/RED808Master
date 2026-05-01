@@ -171,8 +171,6 @@ typedef struct __attribute__((packed)) {
 #define CMD_PAD_REVERSE       0x75  // Reverse sample
 #define CMD_PAD_PITCH         0x76  // Per-pad pitch shift
 #define CMD_PAD_STUTTER       0x77  // Stutter effect
-#define CMD_PAD_SCRATCH       0x78  // Vinyl scratch
-#define CMD_PAD_TURNTABLISM   0x79  // DJ turntablism
 #define CMD_PAD_CLEAR_FX      0x7A  // Clear all pad FX
 
 // ═══════════════════════════════════════════════════════
@@ -442,6 +440,7 @@ typedef struct __attribute__((packed)) {
 #define CMD_GET_CPU_LOAD      0xE2  // Get CPU load
 #define CMD_GET_VOICES        0xE3  // Get active voices
 #define CMD_GET_EVENTS        0xE4  // Get pending notification events from slave
+#define CMD_DIAG_PERF_STRESS  0xE5  // Daisy performance stress mode / metrics reset
 #define CMD_PING              0xEE  // Ping/Pong
 #define CMD_RESET             0xEF  // Full DSP reset
 
@@ -608,29 +607,6 @@ typedef struct __attribute__((packed)) {
     uint8_t  active;         // 0/1
     uint16_t intervalMs;     // ms
 } PadStutterPayload;
-
-// --- Per-Pad Scratch ---
-typedef struct __attribute__((packed)) {
-    uint8_t  pad;            // 0-23
-    uint8_t  active;         // 0/1
-    uint8_t  reserved[2];
-    float    rate;           // Hz (0.5-20.0)
-    float    depth;          // 0.0-1.0
-    float    filterCutoff;   // Hz (500-12000)
-    float    crackle;        // 0.0-1.0
-} PadScratchPayload;
-
-// --- Per-Pad Turntablism ---
-typedef struct __attribute__((packed)) {
-    uint8_t  pad;            // 0-23
-    uint8_t  active;         // 0/1
-    uint8_t  autoMode;       // 0/1
-    int8_t   mode;           // -1=auto, 0-3=manual
-    uint16_t brakeMs;
-    uint16_t backspinMs;
-    float    transformRate;  // Hz
-    float    vinylNoise;     // 0.0-1.0
-} PadTurntablismPayload;
 
 // --- Per-Pad LFO ---
 typedef struct __attribute__((packed)) {
@@ -834,6 +810,13 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
     float    cpuLoad;        // 0.0-100.0 percent
     uint32_t uptime;         // milliseconds since boot
+    float    cpuAvg;         // smoothed CPU percent
+    float    cpuPeak;        // peak CPU percent since reset
+    uint8_t  activeVoices;
+    uint8_t  perfStressMode; // 0/1
+    uint16_t spiErrCnt;
+    uint16_t spiRingDrops;
+    float    masterPeak;
 } CpuLoadResponse;
 
 // --- Active Voices Response (CMD_GET_VOICES 0xE3) ---
@@ -879,7 +862,7 @@ typedef struct __attribute__((packed)) {
 // --- Legacy StatusResponse (kept for reference) ---
 // Was 20 bytes. Slave now sends 54 bytes (StatusResponseV2).
 
-// --- StatusResponse V2 (54 bytes — matches Daisy slave firmware) ---
+// --- StatusResponse V3 (58 bytes — first 54 bytes remain V2-compatible) ---
 typedef struct __attribute__((packed)) {
     uint8_t  activeVoices;       // byte 0: active polyphonic voices
     uint8_t  cpuLoadPercent;     // byte 1: CPU % (0-100)
@@ -889,13 +872,17 @@ typedef struct __attribute__((packed)) {
     uint8_t  xtraPadsMask;       // byte 9: bitmask pads 16-23 (XTRA)
     uint8_t  evtCount;           // byte 10: pending notification events
     uint16_t spiErrCnt;          // bytes 11-12: Daisy-side CRC/parse error count
-    uint8_t  reserved1;          // byte 13
+    uint8_t  spiRingDropsSat;    // byte 13: saturated Daisy SPI ring drops
     char     currentKitName[32]; // bytes 14-45: null-terminated kit name
     uint8_t  totalPadsLoaded;    // byte 46: total pads loaded count
     uint32_t totalBytesUsed;     // bytes 47-50: total bytes in SDRAM
     uint8_t  maxPads;            // byte 51: MAX_PADS value (=24)
-    uint8_t  reserved2[2];       // bytes 52-53
-} StatusResponse;  // 54 bytes total
+    uint8_t  cpuPeakPercent;     // byte 52: peak CPU % since reset
+    uint8_t  perfStressMode;     // byte 53: performance stress mode active
+    uint8_t  cpuAvgPercent;      // byte 54: smoothed CPU %
+    uint8_t  masterClipFlag;     // byte 55: master peak >= 1.0
+    uint16_t spiRingDrops;       // bytes 56-57: full Daisy SPI ring drop count
+} StatusResponse;  // 58 bytes total
 
 // --- Notification Event (32 bytes — returned by CMD_GET_EVENTS) ---
 #define EVT_SD_BOOT_DONE       0x01  // Boot: LIVE PADS loaded from SD
@@ -952,9 +939,6 @@ typedef struct __attribute__((packed)) {
 #define FTYPE_SVF_HP       12  // State Variable Filter HP
 #define FTYPE_SVF_BP       13  // State Variable Filter BP
 #define FTYPE_COMB         14  // Comb filter resonator
-// Legacy pad-FX pseudo-filter IDs (>=15)
-#define FTYPE_SCRATCH      15
-#define FTYPE_TURNTABLISM  16
 #define FTYPE_REVERSE      17
 #define FTYPE_HALFSPEED    18
 #define FTYPE_STUTTER      19

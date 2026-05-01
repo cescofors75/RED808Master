@@ -27,8 +27,6 @@ static const FilterPreset filterPresets[] = {
     {FILTER_LOWSHELF,   200,  0.7f, 6, "Low Shelf"},
     {FILTER_HIGHSHELF,  4000, 0.7f, 6, "High Shelf"},
     {FILTER_RESONANT,   800,  8.0f, 0, "Resonant"},
-    {FILTER_SCRATCH,    4000, 1.0f, 0, "Scratch"},
-    {FILTER_TURNTABLISM,4000, 1.0f, 0, "Turntablism"},
     {FILTER_REVERSE,    0,    0,    0, "Reverse"},
     {FILTER_HALFSPEED,  0,    0,    0, "Half Speed"},
     {FILTER_STUTTER,    0,    0,    0, "Stutter"}
@@ -1037,7 +1035,7 @@ void SPIMaster::clearSidechain() {
 }
 
 // ═══════════════════════════════════════════════════════
-// PAD CONTROL (loop, reverse, pitch, stutter, scratch)
+// PAD CONTROL (loop, reverse, pitch, stutter)
 // ═══════════════════════════════════════════════════════
 
 void SPIMaster::setPadLoop(int padIndex, bool enabled) {
@@ -1081,39 +1079,6 @@ void SPIMaster::setStutter(int padIndex, bool active, int intervalMs) {
     p.intervalMs = (uint16_t)intervalMs;
     
     sendCommand(CMD_PAD_STUTTER, &p, sizeof(p));
-}
-
-void SPIMaster::setScratchParams(int padIndex, bool active, float rate, float depth, 
-                                  float filterCutoff, float crackle) {
-    if (padIndex < 0 || padIndex >= MAX_PADS) return;
-    
-    PadScratchPayload p = {};
-    p.pad = (uint8_t)padIndex;
-    p.active = active ? 1 : 0;
-    p.rate = rate;
-    p.depth = depth;
-    p.filterCutoff = filterCutoff;
-    p.crackle = crackle;
-    
-    sendCommand(CMD_PAD_SCRATCH, &p, sizeof(p));
-}
-
-void SPIMaster::setTurntablismParams(int padIndex, bool active, bool autoMode, int mode, 
-                                      int brakeMs, int backspinMs, float transformRate, 
-                                      float vinylNoise) {
-    if (padIndex < 0 || padIndex >= MAX_PADS) return;
-    
-    PadTurntablismPayload p = {};
-    p.pad = (uint8_t)padIndex;
-    p.active = active ? 1 : 0;
-    p.autoMode = autoMode ? 1 : 0;
-    p.mode = (int8_t)mode;
-    p.brakeMs = (uint16_t)brakeMs;
-    p.backspinMs = (uint16_t)backspinMs;
-    p.transformRate = transformRate;
-    p.vinylNoise = vinylNoise;
-    
-    sendCommand(CMD_PAD_TURNTABLISM, &p, sizeof(p));
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1612,9 +1577,30 @@ bool SPIMaster::requestCpuLoad() {
     if (sendAndReceive(CMD_GET_CPU_LOAD, nullptr, 0, &resp, sizeof(resp))) {
         cachedStatus.cpuLoadPercent = (uint8_t)constrain((int)resp.cpuLoad, 0, 100);
         cachedStatus.uptime = resp.uptime / 1000;  // ms → s
+        cachedStatus.cpuAvgPercent = (uint8_t)constrain((int)resp.cpuAvg, 0, 100);
+        cachedStatus.cpuPeakPercent = (uint8_t)constrain((int)resp.cpuPeak, 0, 100);
+        cachedStatus.activeVoices = resp.activeVoices;
+        cachedStatus.perfStressMode = resp.perfStressMode;
+        cachedStatus.spiErrCnt = resp.spiErrCnt;
+        cachedStatus.spiRingDrops = resp.spiRingDrops;
         return true;
     }
     return false;
+}
+
+bool SPIMaster::setPerformanceStressMode(bool enabled, bool resetMetrics) {
+    if (!stm32Connected) return false;
+    uint8_t mode = resetMetrics ? 2 : (enabled ? 1 : 0);
+    uint8_t resp[4] = {};
+    bool ok = sendAndReceive(CMD_DIAG_PERF_STRESS, &mode, 1, resp, sizeof(resp));
+    if (ok) {
+        cachedStatus.perfStressMode = resp[0];
+        cachedStatus.cpuLoadPercent = resp[1];
+        cachedStatus.cpuAvgPercent = resp[1];
+        cachedStatus.cpuPeakPercent = resp[2];
+        cachedStatus.activeVoices = resp[3];
+    }
+    return ok;
 }
 
 bool SPIMaster::requestStatus() {

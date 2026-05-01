@@ -65,8 +65,6 @@ enum FilterType {
     FILTER_SVF_BP = 13,       // State Variable BP
     FILTER_COMB = 14,         // Comb filter resonator
     // Legacy pad-FX pseudo-filter IDs
-    FILTER_SCRATCH = 15,
-    FILTER_TURNTABLISM = 16,
     FILTER_REVERSE = 17,
     FILTER_HALFSPEED = 18,
     FILTER_STUTTER = 19
@@ -307,18 +305,13 @@ public:
     void clearSidechain();
     
     // ══════════════════════════════════════════════════
-    // PAD CONTROL (loop, reverse, pitch, stutter, scratch)
+    // PAD CONTROL (loop, reverse, pitch, stutter)
     // ══════════════════════════════════════════════════
     void setPadLoop(int padIndex, bool enabled);
     bool isPadLooping(int padIndex);
     void setReverseSample(int padIndex, bool reverse);
     void setTrackPitchShift(int padIndex, float pitch);
     void setStutter(int padIndex, bool active, int intervalMs = 100);
-    void setScratchParams(int padIndex, bool active, float rate = 5.0f, float depth = 0.85f, 
-                          float filterCutoff = 4000.0f, float crackle = 0.25f);
-    void setTurntablismParams(int padIndex, bool active, bool autoMode = true, int mode = -1, 
-                              int brakeMs = 350, int backspinMs = 450, float transformRate = 11.0f, 
-                              float vinylNoise = 0.35f);
     
     // ══════════════════════════════════════════════════
     // SAMPLE TRANSFER (ESP32 PSRAM → STM32)
@@ -353,9 +346,12 @@ public:
     bool requestPeaks();               // Request peaks from slave (updates cache)
     bool requestActiveVoices();        // Request active voice count from slave
     bool requestCpuLoad();             // Request CPU % from slave
-    bool requestStatus();              // Request full StatusResponse (54 bytes) from slave
+    bool requestStatus();              // Request full StatusResponse from slave
+    bool setPerformanceStressMode(bool enabled, bool resetMetrics = false);
     int getActiveVoices();             // Returns cached value
     float getCpuLoad();                // Returns cached value
+    float getCpuPeak() const { return (float)cachedStatus.cpuPeakPercent; }
+    bool isPerformanceStressMode() const { return cachedStatus.perfStressMode != 0; }
     bool getStatusSnapshot(StatusResponse& out); // Fills struct with latest cached status
     bool ping(uint32_t& roundtripUs);
     void resetDSP();

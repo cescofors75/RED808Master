@@ -834,6 +834,8 @@ refresh();if(auto_)startAuto();
     doc["daisyRttMs"] = spiMaster.getLastPingMs();
     doc["daisyVoices"] = spiMaster.getActiveVoices();
     doc["daisyCpu"] = spiMaster.getCpuLoad();
+    doc["daisyCpuPeak"] = spiMaster.getCpuPeak();
+    doc["daisyPerfStress"] = spiMaster.isPerformanceStressMode();
     doc["daisyMasterPeak"] = spiMaster.getMasterPeak();
     doc["daisyKit"] = String(spiMaster.getCurrentKitName());
     // Diagnostics
@@ -842,6 +844,8 @@ refresh();if(auto_)startAuto();
     doc["daisyPadsLoaded"]  = daisyStat.totalPadsLoaded;
     doc["daisyPadsMask"]    = daisyStat.padsLoadedMask;
     doc["daisySpiErrCnt"]   = (int)daisyStat.spiErrCnt;
+    doc["daisySpiRingDrops"] = (int)daisyStat.spiRingDrops;
+    doc["daisyMasterClip"] = daisyStat.masterClipFlag != 0;
 
     float peaks[16];
     spiMaster.getTrackPeaks(peaks, 16);
@@ -3509,33 +3513,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       }
     }
   }
-  // ============= SCRATCH Command (configurable) =============
-  else if (cmd == "setScratch") {
-    int track = doc["track"];
-    bool value = doc["value"];
-    if (track >= 0 && track < 24) {
-      float rate = doc.containsKey("rate") ? (float)doc["rate"] : 5.0f;
-      float depth = doc.containsKey("depth") ? (float)doc["depth"] : 0.85f;
-      float filter = doc.containsKey("filter") ? (float)doc["filter"] : 4000.0f;
-      float crackle = doc.containsKey("crackle") ? (float)doc["crackle"] : 0.25f;
-      spiMaster.setScratchParams(track, value, rate, depth, filter, crackle);
-    }
-  }
-  // ============= TURNTABLISM Command (configurable) =============
-  else if (cmd == "setTurntablism") {
-    int track = doc["track"];
-    bool value = doc["value"];
-    if (track >= 0 && track < 24) {
-      String control = doc.containsKey("control") ? doc["control"].as<String>() : "auto";
-      bool autoMode = (control == "auto");
-      int mode = doc.containsKey("mode") ? (int)doc["mode"] : -1;
-      int brakeSpeed = doc.containsKey("brakeSpeed") ? (int)doc["brakeSpeed"] : 350;
-      int backspinSpeed = doc.containsKey("backspinSpeed") ? (int)doc["backspinSpeed"] : 450;
-      float transformRate = doc.containsKey("transformRate") ? (float)doc["transformRate"] : 11.0f;
-      float vinylNoise = doc.containsKey("vinylNoise") ? (float)doc["vinylNoise"] : 0.35f;
-      spiMaster.setTurntablismParams(track, value, autoMode, mode, brakeSpeed, backspinSpeed, transformRate, vinylNoise);
-    }
-  }
   // ============= PER-TRACK LIVE FX (SLAVE Controller) =============
   else if (cmd == "setTrackEcho") {
     int track = doc["track"];
@@ -4460,6 +4437,20 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     StaticJsonDocument<64> resp;
     resp["type"] = "sdAbortAck";
     resp["ok"]   = true;
+    String output;
+    serializeJson(resp, output);
+    if (ws) ws->textAll(output);
+  }
+  else if (cmd == "setDaisyPerfStress") {
+    bool enabled = doc["enabled"] | false;
+    bool resetMetrics = doc["resetMetrics"] | false;
+    bool ok = spiMaster.setPerformanceStressMode(enabled, resetMetrics);
+    StaticJsonDocument<128> resp;
+    resp["type"] = "daisyPerfStressAck";
+    resp["ok"] = ok;
+    resp["enabled"] = spiMaster.isPerformanceStressMode();
+    resp["cpu"] = spiMaster.getCpuLoad();
+    resp["cpuPeak"] = spiMaster.getCpuPeak();
     String output;
     serializeJson(resp, output);
     if (ws) ws->textAll(output);
