@@ -6417,35 +6417,32 @@ setInterval(() => {
 // ============================================
 
 function showUploadDialog(padIndex) {
-    // Crear input file oculto
+    // Crear input file oculto — abre el Sample Editor modal antes de subir
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.wav';
     input.style.display = 'none';
-    
+
     input.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        
-        // Validar extensión
+
         if (!file.name.toLowerCase().endsWith('.wav')) {
             if (window.showToast) {
                 window.showToast('❌ Solo se permiten archivos WAV', window.TOAST_TYPES.ERROR, 3000);
             }
             return;
         }
-        
-        // Validar tamaño (max 2MB)
-        if (file.size > 2 * 1024 * 1024) {
-            if (window.showToast) {
-                window.showToast('❌ Archivo demasiado grande (max 2MB)', window.TOAST_TYPES.ERROR, 3000);
-            }
-            return;
+
+        // Abrir el editor de sample (trim, fade, preview) — él se encarga del upload
+        if (window.SampleEditor) {
+            SampleEditor.open(padIndex, file);
+        } else {
+            // fallback directo si el script no cargó
+            uploadSample(padIndex, file);
         }
-        
-        uploadSample(padIndex, file);
     });
-    
+
     document.body.appendChild(input);
     input.click();
     setTimeout(() => input.remove(), 1000);

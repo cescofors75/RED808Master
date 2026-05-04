@@ -64,8 +64,13 @@ bool SampleManager::loadSample(const char* filename, int padIndex) {
     }
   } else {
     // --- LOAD WAV (With Header Parsing) ---
-    // Parse WAV file
-    success = parseWavFile(file, padIndex);
+    String parseErr;
+    success = parseWavFile(file, padIndex, parseErr);
+    if (!success) {
+      // Store last error for caller to surface
+      strncpy(lastParseError, parseErr.c_str(), sizeof(lastParseError) - 1);
+      lastParseError[sizeof(lastParseError) - 1] = '\0';
+    }
   }
   
   file.close();
@@ -88,100 +93,161 @@ bool SampleManager::loadSample(const char* filename, int padIndex) {
   return true;
 }
 
-bool SampleManager::parseWavFile(fs::File& file, int padIndex) {
-  WavHeader header;
-  
+bool SampleManager::parseWavFile(fs::File& file, int padIndex, String& errOut) {
   size_t fileSize = file.size();
 
-  if (fileSize < 44) {
+  if (fileSize < 12) {
+    errOut = "File too small";
     return false;
   }
 
-  // Asegurarnos de estar al principio del archivo
   file.seek(0);
-  size_t readSize = file.read((uint8_t*)&header, 44);
 
-  if (readSize != 44) {
+  // Verificar RIFF + WAVE
+  uint8_t riff[12];
+  if (file.read(riff, 12) != 12) { errOut = "Read RIFF failed"; return false; }
+  if (memcmp(riff, "RIFF", 4) != 0 || memcmp(riff + 8, "WAVE", 4) != 0) {
+    errOut = "Not a WAV file";
     return false;
   }
-  
-  // Verify RIFF/WAVE (algunos archivos pueden tener "RIFFX")
-  if (memcmp(header.riff, "RIFF", 4) != 0 || memcmp(header.wave, "WAVE", 4) != 0) {
-    return false;
-  }
-  
-  // Check format
-  if (header.audioFormat != 1) {
-    return false;
-  }
-  
-  // Check bits per sample
-  if (header.bitsPerSample != 16) {
-    return false;
-  }
-  
-  // ===== BUSCAR EL CHUNK "data" (puede no estar en posición 44) =====
-  file.seek(36); // Empezar después del header básico RIFF/WAVE/fmt
-  
-  uint32_t actualDataSize = 0;
-  bool foundDataChunk = false;
-  
-  while (file.available() >= 8) {
-    char chunkId[4];
-    uint32_t chunkSize;
-    
-    if (file.read((uint8_t*)chunkId, 4) != 4) break;
-    if (file.read((uint8_t*)&chunkSize, 4) != 4) break;
-    
-    if (memcmp(chunkId, "data", 4) == 0) {
-      actualDataSize = chunkSize;
-      foundDataChunk = true;
-      break;
-    } else {
-      // Skip this chunk (puede ser LIST, INFO, etc.)
-      file.seek(file.position() + chunkSize);
+
+  // Caminar chunks para encontrar "fmt " y "data"
+  uint32_t pos = 12;
+  bool fmtFound  = false;
+  bool dataFound = false;
+
+  uint16_t audioFormat   = 0;
+  uint16_t numChannels   = 0;
+  uint16_t bitsPerSample = 0;
+  uint32_t dataPos       = 0;
+  uint32_t dataSize      = 0;
+
+  while (pos + 8 <= (uint32_t)fileSize) {
+    file.seek(pos);
+    uint8_t hdr[8];
+    if (file.read(hdr, 8) != 8) break;
+
+    uint32_t chunkSize = (uint32_t)hdr[4]
+                       | ((uint32_t)hdr[5] << 8)
+                       | ((uint32_t)hdr[6] << 16)
+                       | ((uint32_t)hdr[7] << 24);
+
+    if (memcmp(hdr, "fmt ", 4) == 0) {
+      if (chunkSize < 16) { errOut = "fmt chunk too small"; return false; }
+      uint8_t fmt[16];
+      if (file.read(fmt, 16) != 16) { errOut = "Read fmt failed"; return false; }
+
+      audioFormat   = (uint16_t)fmt[0]  | ((uint16_t)fmt[1]  << 8);
+      numChannels   = (uint16_t)fmt[2]  | ((uint16_t)fmt[3]  << 8);
+      bitsPerSample = (uint16_t)fmt[14] | ((uint16_t)fmt[15] << 8);
+      fmtFound = true;
+
+    } else if (memcmp(hdr, "data", 4) == 0) {
+      dataPos  = pos + 8;   // posición justo después del header del chunk
+      dataSize = chunkSize;
+      dataFound = true;
+      break;  // ya tenemos lo que necesitamos
     }
+
+    pos += 8 + chunkSize + (chunkSize & 1);  // alineado a 2 bytes
   }
-  
-  if (!foundDataChunk) {
+
+  if (!fmtFound)  { errOut = "No fmt chunk found";  return false; }
+  if (!dataFound) { errOut = "No data chunk found"; return false; }
+
+  // Aceptar PCM (1) y WAVE_FORMAT_EXTENSIBLE (0xFFFE, tratado como PCM 16-bit)
+  if (audioFormat != 1 && audioFormat != 0xFFFE) {
+    errOut = "Unsupported format " + String(audioFormat);
     return false;
   }
-  
-  // Calculate sample length usando el tamaño REAL del data chunk
-  uint32_t numSamples = actualDataSize / (header.bitsPerSample / 8);
-  
-  // If stereo, we'll mix down to mono
-  if (header.numChannels == 2) {
-    numSamples /= 2;
+
+  // Aceptamos 16-bit nativo y 24-bit convertido a 16-bit
+  if (bitsPerSample != 16 && bitsPerSample != 24) {
+    errOut = "Need 16/24-bit PCM, got " + String(bitsPerSample) + "-bit";
+    return false;
   }
-  
-  
-  // Allocate PSRAM buffer
+
+  if (numChannels < 1 || numChannels > 2) {
+    errOut = "Bad channel count " + String(numChannels);
+    return false;
+  }
+
+  // Número de frames (muestras mono)
+  uint32_t bytesPerSample = bitsPerSample / 8;
+  uint32_t numSamples = dataSize / (bytesPerSample * numChannels);
+
   if (!allocateSampleBuffer(padIndex, numSamples)) {
+    errOut = "No PSRAM for sample";
     return false;
   }
-  
-  // Read sample data (file está posicionado justo después del header del data chunk)
-  if (header.numChannels == 1) {
-    // Mono - direct read
-    size_t bytesRead = file.read((uint8_t*)sampleBuffers[padIndex], numSamples * 2);
-    if (bytesRead != numSamples * 2) {
-      freeSampleBuffer(padIndex);
-      return false;
-    }
-  } else if (header.numChannels == 2) {
-    // Stereo - mix down to mono
-    int16_t stereoBuffer[2];
-    for (uint32_t i = 0; i < numSamples; i++) {
-      if (file.read((uint8_t*)stereoBuffer, 4) != 4) {
+
+  file.seek(dataPos);
+
+  if (bitsPerSample == 16) {
+    if (numChannels == 1) {
+      size_t bytesRead = file.read((uint8_t*)sampleBuffers[padIndex], numSamples * 2);
+      if (bytesRead != numSamples * 2) {
+        errOut = "Short read mono16";
         freeSampleBuffer(padIndex);
         return false;
       }
-      // Mix: (L + R) / 2
-      sampleBuffers[padIndex][i] = (stereoBuffer[0] / 2) + (stereoBuffer[1] / 2);
+    } else {
+      // Stereo 16-bit → mixdown mono
+      int16_t stereoBuffer[2];
+      for (uint32_t i = 0; i < numSamples; i++) {
+        if (file.read((uint8_t*)stereoBuffer, 4) != 4) {
+          errOut = "Short read stereo16";
+          freeSampleBuffer(padIndex);
+          return false;
+        }
+        sampleBuffers[padIndex][i] = (stereoBuffer[0] / 2) + (stereoBuffer[1] / 2);
+        if ((i & 0x0FFF) == 0) {
+          yield();
+        }
+      }
+    }
+  } else {
+    // 24-bit PCM → convertir a 16-bit (descartar 8 bits menos significativos)
+    auto s24_to_s16 = [](const uint8_t* b) -> int16_t {
+      int32_t v = (int32_t)b[0] | ((int32_t)b[1] << 8) | ((int32_t)b[2] << 16);
+      if (v & 0x00800000) {
+        v |= ~0x00FFFFFF;  // sign-extend
+      }
+      return (int16_t)(v >> 8);
+    };
+
+    if (numChannels == 1) {
+      uint8_t mono24[3];
+      for (uint32_t i = 0; i < numSamples; i++) {
+        if (file.read(mono24, 3) != 3) {
+          errOut = "Short read mono24";
+          freeSampleBuffer(padIndex);
+          return false;
+        }
+        sampleBuffers[padIndex][i] = s24_to_s16(mono24);
+        if ((i & 0x0FFF) == 0) {
+          yield();
+        }
+      }
+    } else {
+      // Stereo 24-bit → mixdown mono
+      uint8_t stereo24[6];
+      for (uint32_t i = 0; i < numSamples; i++) {
+        if (file.read(stereo24, 6) != 6) {
+          errOut = "Short read stereo24";
+          freeSampleBuffer(padIndex);
+          return false;
+        }
+        int16_t l = s24_to_s16(&stereo24[0]);
+        int16_t r = s24_to_s16(&stereo24[3]);
+        sampleBuffers[padIndex][i] = (int16_t)(((int32_t)l + (int32_t)r) / 2);
+        if ((i & 0x0FFF) == 0) {
+          yield();
+        }
+      }
     }
   }
-  
+
   sampleLengths[padIndex] = numSamples;
   return true;
 }
@@ -290,6 +356,123 @@ bool SampleManager::applyFade(int padIndex, float fadeInSec, float fadeOutSec) {
     }
   }
   
+  return true;
+}
+
+// ─── loadSampleFromBuffer ────────────────────────────────────────────────────
+// Carga un WAV desde un buffer en PSRAM (sin LittleFS) y lo transfiere a Daisy
+bool SampleManager::loadSampleFromBuffer(const uint8_t* data, size_t size, int padIndex) {
+  if (!data || size < 12 || padIndex < 0 || padIndex >= MAX_SAMPLES) return false;
+
+  if (sampleBuffers[padIndex] != nullptr) {
+    unloadSample(padIndex);
+  }
+
+  String parseErr;
+  bool success = parseWavFromBuffer(data, size, padIndex, parseErr);
+  if (!success) {
+    strncpy(lastParseError, parseErr.c_str(), sizeof(lastParseError) - 1);
+    lastParseError[sizeof(lastParseError) - 1] = '\0';
+    return false;
+  }
+  lastParseError[0] = '\0';
+
+  snprintf(sampleNames[padIndex], 32, "pad%d", padIndex);
+  spiMaster.setSampleBuffer(padIndex, sampleBuffers[padIndex], sampleLengths[padIndex]);
+  return true;
+}
+
+// ─── parseWavFromBuffer ───────────────────────────────────────────────────────
+// Igual que parseWavFile pero opera sobre un bloque de memoria en PSRAM
+bool SampleManager::parseWavFromBuffer(const uint8_t* buf, size_t size, int padIndex, String& errOut) {
+  if (size < 12) { errOut = "File too small"; return false; }
+  if (memcmp(buf, "RIFF", 4) != 0 || memcmp(buf + 8, "WAVE", 4) != 0) {
+    errOut = "Not a WAV file"; return false;
+  }
+
+  uint32_t pos = 12;
+  bool fmtFound = false, dataFound = false;
+  uint16_t audioFormat = 0, numChannels = 0, bitsPerSample = 0;
+  uint32_t dataPos = 0, dataSize = 0;
+
+  while (pos + 8 <= (uint32_t)size) {
+    uint32_t chunkSize = (uint32_t)buf[pos+4]
+                       | ((uint32_t)buf[pos+5] << 8)
+                       | ((uint32_t)buf[pos+6] << 16)
+                       | ((uint32_t)buf[pos+7] << 24);
+
+    if (memcmp(buf + pos, "fmt ", 4) == 0) {
+      if (chunkSize < 16 || pos + 8 + 16 > (uint32_t)size) { errOut = "fmt chunk too small"; return false; }
+      const uint8_t* fmt = buf + pos + 8;
+      audioFormat   = (uint16_t)fmt[0]  | ((uint16_t)fmt[1]  << 8);
+      numChannels   = (uint16_t)fmt[2]  | ((uint16_t)fmt[3]  << 8);
+      bitsPerSample = (uint16_t)fmt[14] | ((uint16_t)fmt[15] << 8);
+      fmtFound = true;
+    } else if (memcmp(buf + pos, "data", 4) == 0) {
+      dataPos  = pos + 8;
+      dataSize = chunkSize;
+      dataFound = true;
+      break;
+    }
+    pos += 8 + chunkSize + (chunkSize & 1);
+  }
+
+  if (!fmtFound)  { errOut = "No fmt chunk found";  return false; }
+  if (!dataFound) { errOut = "No data chunk found"; return false; }
+  if (audioFormat != 1 && audioFormat != 0xFFFE) {
+    errOut = "Unsupported format " + String(audioFormat); return false;
+  }
+  if (bitsPerSample != 16 && bitsPerSample != 24) {
+    errOut = "Need 16/24-bit PCM, got " + String(bitsPerSample) + "-bit"; return false;
+  }
+  if (numChannels < 1 || numChannels > 2) {
+    errOut = "Bad channel count " + String(numChannels); return false;
+  }
+  if (dataPos + dataSize > (uint32_t)size) {
+    dataSize = (uint32_t)size - dataPos;  // truncar si el tamaño del chunk excede el buffer
+  }
+
+  uint32_t bytesPerSample = bitsPerSample / 8;
+  uint32_t numSamples = dataSize / (bytesPerSample * numChannels);
+
+  if (!allocateSampleBuffer(padIndex, numSamples)) {
+    errOut = "No PSRAM for sample"; return false;
+  }
+
+  const uint8_t* src = buf + dataPos;
+
+  if (bitsPerSample == 16) {
+    if (numChannels == 1) {
+      memcpy(sampleBuffers[padIndex], src, numSamples * 2);
+    } else {
+      // Stereo 16-bit → mixdown mono
+      const int16_t* s = (const int16_t*)src;
+      for (uint32_t i = 0; i < numSamples; i++) {
+        sampleBuffers[padIndex][i] = (int16_t)(((int32_t)s[i*2] + (int32_t)s[i*2+1]) / 2);
+        if ((i & 0x0FFF) == 0) yield();
+      }
+    }
+  } else {
+    // 24-bit → 16-bit
+    auto s24_to_s16 = [](const uint8_t* b) -> int16_t {
+      int32_t v = (int32_t)b[0] | ((int32_t)b[1] << 8) | ((int32_t)b[2] << 16);
+      if (v & 0x00800000) v |= ~0x00FFFFFF;
+      return (int16_t)(v >> 8);
+    };
+    uint32_t stride = (uint32_t)numChannels * 3;
+    for (uint32_t i = 0; i < numSamples; i++) {
+      if (numChannels == 1) {
+        sampleBuffers[padIndex][i] = s24_to_s16(src + i * 3);
+      } else {
+        int16_t l = s24_to_s16(src + i * stride);
+        int16_t r = s24_to_s16(src + i * stride + 3);
+        sampleBuffers[padIndex][i] = (int16_t)(((int32_t)l + (int32_t)r) / 2);
+      }
+      if ((i & 0x0FFF) == 0) yield();
+    }
+  }
+
+  sampleLengths[padIndex] = numSamples;
   return true;
 }
 

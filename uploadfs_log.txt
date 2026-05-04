@@ -1,0 +1,42 @@
+Processing redmaster-s3-r8n16 (platform: https://github.com/pioarduino/platform-espressif32/releases/download/55.03.37/platform-espressif32.zip; board: redmaster_esp32s3_r8n16; framework: arduino)
+--------------------------------------------------------------------------------
+Verbose mode can be enabled via `-v, --verbose` option
+[prepare_data_gz] data_gz listo. Generados 21 .gz, eliminados 21 assets web sin comprimir
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/redmaster_esp32s3_r8n16.html
+PLATFORM: Espressif 32 (55.3.37) > RED808 Master ESP32-S3 R8N16
+HARDWARE: ESP32S3 240MHz, 320KB RAM, 16MB Flash
+DEBUG: Current (cmsis-dap) External (cmsis-dap, esp-bridge, esp-builtin, esp-prog, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa)
+PACKAGES: 
+ - contrib-piohome @ 3.4.4 
+ - framework-arduinoespressif32 @ 3.3.7 
+ - framework-arduinoespressif32-libs @ 5.5.0+sha.87912cd291 
+ - tool-esp-rom-elfs @ 2024.10.11 
+ - tool-esptoolpy @ 5.1.2 
+ - tool-openocd-esp32 @ 2.1200.20251215 (12.0) 
+ - tool-xtensa-esp-elf-gdb @ 16.3.0+20250913 
+ - toolchain-xtensa-esp-elf @ 14.2.0+20251107
+*** Applied include path shortening for 336 framework paths ***
+*** Path length reduced from 39699 to ~13920 characters ***
+*** Estimated savings: 25200 characters ***
+LDF: Library Dependency Finder -> https://bit.ly/configure-pio-ldf
+LDF Modes: Finder ~ off, Compatibility ~ soft
+Found 47 compatible libraries
+Scanning dependencies...
+Dependency Graph
+|-- Adafruit NeoPixel @ 1.15.4
+|-- AsyncTCP @ 3.4.10
+|-- ESPAsyncWebServer @ 3.11.0
+|-- ArduinoJson @ 6.21.6
+Building in release mode
+Building FS image from 'data_gz' directory to .pio\build\redmaster-s3-r8n16\littlefs.bin
+Looking for upload port...
+Auto-detected: COM11
+Uploading .pio\build\redmaster-s3-r8n16\littlefs.bin
+esptool v5.1.2
+Serial port COM11:
+Connecting......................................
+
+A fatal error occurred: Failed to connect to ESP32-S3: No serial data received.
+For troubleshooting steps visit: https://docs.espressif.com/projects/esptool/en/latest/troubleshooting.html
+*** [uploadfs] Error 2
+========================= [FAILED] Took 16.60 seconds =========================

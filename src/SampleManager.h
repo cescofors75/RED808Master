@@ -12,7 +12,7 @@
 #include "SPIMaster.h"
 
 #define MAX_SAMPLES 24  // 16 sequencer + 8 XTRA pads
-#define MAX_SAMPLE_SIZE (2 * 1024 * 1024) // 2MB per sample (suficiente para samples largos)
+#define MAX_SAMPLE_SIZE (4 * 1024 * 1024) // 4MB per sample
 
 // WAV file header structure
 struct WavHeader {
@@ -41,6 +41,7 @@ public:
   
   // Sample loading
   bool loadSample(const char* filename, int padIndex);
+  bool loadSampleFromBuffer(const uint8_t* data, size_t size, int padIndex);  // Load WAV from PSRAM buffer
   bool trimSample(int padIndex, float startNorm, float endNorm);
   bool applyFade(int padIndex, float fadeInSec, float fadeOutSec);  // Apply fade in/out to buffer
   bool unloadSample(int padIndex);
@@ -51,6 +52,7 @@ public:
   uint32_t getSampleLength(int padIndex);
   const char* getSampleName(int padIndex);
   int getLoadedSamplesCount();
+  const char* getLastParseError() { return lastParseError; }
   
   // Waveform data access (for visualizer)
   int16_t* getSampleBuffer(int padIndex);
@@ -65,8 +67,10 @@ private:
   int16_t* sampleBuffers[MAX_SAMPLES];
   uint32_t sampleLengths[MAX_SAMPLES];
   char sampleNames[MAX_SAMPLES][32];
-  
-  bool parseWavFile(fs::File& file, int padIndex);
+  char lastParseError[64] = {};
+
+  bool parseWavFile(fs::File& file, int padIndex, String& errOut);
+  bool parseWavFromBuffer(const uint8_t* data, size_t size, int padIndex, String& errOut);
   bool allocateSampleBuffer(int padIndex, uint32_t size);
   void freeSampleBuffer(int padIndex);
 };

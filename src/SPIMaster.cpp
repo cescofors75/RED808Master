@@ -6,6 +6,7 @@
 
 #include "SPIMaster.h"
 #include <SPI.h>
+#include <esp_task_wdt.h>
 
 // Bus HSPI (SPI3) — separado del display ST7789 que usa FSPI/SPI2
 static SPIClass daisySpi(HSPI);
@@ -1135,13 +1136,18 @@ bool SPIMaster::transferSample(int padIndex, int16_t* buffer, uint32_t numSample
         memcpy(dataPkt + sizeof(SampleDataHeader), ((uint8_t*)buffer) + offset, chunkSize);
         
         sendCommand(CMD_SAMPLE_DATA, dataPkt, sizeof(SampleDataHeader) + chunkSize);
-        
+
         offset += chunkSize;
         chunkCount++;
-        
-        // Throttle slightly to avoid overwhelming STM32
+
+        // Throttle ligeramente para no saturar la STM32
         if (chunkCount % 16 == 0) {
             delayMicroseconds(100);
+        }
+
+        // Resetear TWDT cada 64 chunks (~512ms @ 1MHz) — evita WDT en samples grandes
+        if (chunkCount % 64 == 0) {
+            esp_task_wdt_reset();
         }
     }
     

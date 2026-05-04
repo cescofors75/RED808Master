@@ -128,7 +128,11 @@ private:
   
   // File upload handlers
   void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);
-  bool validateWavFile(File& file, uint32_t& sampleRate, uint16_t& channels, uint16_t& bitsPerSample);
+
+  // Deferred sample load — set by handleUpload callback, consumed by update() in main loop
+  volatile int  _pendingLoadPad  = -1;  // pad index to load, -1 = none
+  uint8_t*      _uploadBuf       = nullptr;  // PSRAM buffer con WAV raw (válido hasta after deferred load)
+  size_t        _uploadBufLen    = 0;
 };
 
 #endif

@@ -10,6 +10,7 @@
 #include "SysLog.h"
 #include <esp_wifi.h>
 #include <esp_heap_caps.h>
+#include <esp_task_wdt.h>
 
 #ifndef ENABLE_PHYSICAL_BUTTONS
 #define ENABLE_PHYSICAL_BUTTONS 1
@@ -507,6 +508,10 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   server->on("/app.js", HTTP_GET, [](AsyncWebServerRequest *request){
     sendWebAsset(request, "/app.js", "application/javascript", "no-cache");
   });
+
+  server->on("/sample-editor.js", HTTP_GET, [](AsyncWebServerRequest *request){
+    sendWebAsset(request, "/sample-editor.js", "application/javascript", "no-cache");
+  });
   
   server->on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
     sendWebAsset(request, "/style.css", "text/css", "no-cache");
@@ -679,6 +684,17 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   server->on("/api/log", HTTP_DELETE, [](AsyncWebServerRequest *request){
     syslogClear();
     request->send(200, "text/plain", "log cleared");
+  });
+
+  // === Storage info: free/used/total ===
+  server->on("/api/storage", HTTP_GET, [](AsyncWebServerRequest *request){
+    size_t total = LittleFS.totalBytes();
+    size_t used  = LittleFS.usedBytes();
+    char buf[128];
+    snprintf(buf, sizeof(buf),
+      "{\"total\":%u,\"used\":%u,\"free\":%u}",
+      (unsigned)total, (unsigned)used, (unsigned)(total - used));
+    request->send(200, "application/json", buf);
   });
 
   // === MIDI preset files: list + serve ===
@@ -2089,8 +2105,33 @@ void WebInterface::broadcastSongPattern(int pattern, int songLength) {
 
 void WebInterface::update() {
   if (!initialized || !ws || !server) return;
-  
+
   unsigned long now = millis();
+
+  // ── Deferred sample load — done here (systemTask, Core0) to avoid blocking AsyncWebServer task ──
+  // Note: loadSample calls transferSample() which feeds esp_task_wdt internally
+  int pendPad = _pendingLoadPad;
+  if (pendPad >= 0) {
+    _pendingLoadPad = -1;  // clear flag first
+    esp_task_wdt_reset();  // feed before starting long transfer
+
+    bool loaded = false;
+    if (_uploadBuf && _uploadBufLen > 0) {
+      loaded = sampleManager.loadSampleFromBuffer(_uploadBuf, _uploadBufLen, pendPad);
+    }
+    // Liberar buffer raw tras la carga (ya decodificado en PSRAM del sampleBuffer)
+    if (_uploadBuf) { free(_uploadBuf); _uploadBuf = nullptr; _uploadBufLen = 0; }
+
+    esp_task_wdt_reset();  // feed after (transfer may take several seconds)
+    if (loaded) {
+      broadcastUploadComplete(pendPad, true, "Sample uploaded and loaded successfully");
+      broadcastSequencerState();
+    } else {
+      String errDetail = String(sampleManager.getLastParseError());
+      String errMsg = errDetail.length() ? "Failed to load: " + errDetail : "Failed to load sample";
+      broadcastUploadComplete(pendPad, false, errMsg);
+    }
+  }
 
   // ── Consume deferred broadcasts from Core1 (thread-safe: only ws access from Core0) ──
   int step = _pendingBroadcastStep;
@@ -4984,220 +5025,102 @@ void WebInterface::broadcastMIDIDeviceStatus(bool connected, const MIDIDeviceInf
 // ========================================
 
 // Variables estáticas para mantener estado del upload
-static File uploadFile;
 static String uploadFilename;
 static int uploadPad = -1;
 static size_t uploadSize = 0;
 static size_t uploadReceived = 0;
 static bool uploadError = false;
 static String uploadErrorMsg = "";
+static int uploadLastPercent = -1;
+static constexpr bool UPLOAD_PROGRESS_WS_ENABLED = false;
 
 void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-  // Obtener pad del parámetro de la URL
   if (index == 0) {
-    // Primera parte del upload - reset de variables
-    uploadFilename = filename;
-    uploadReceived = 0;
-    uploadError = false;
-    uploadErrorMsg = "";
-    
-    
-    // Buscar el parámetro 'pad' en la query string (GET params)
+    // ── Primera parte: inicializar estado ──
+    uploadFilename    = filename;
+    uploadReceived    = 0;
+    uploadError       = false;
+    uploadErrorMsg    = "";
+    uploadLastPercent = -1;
+
+    // Pad
     if (!request->hasParam("pad", false)) {
-      uploadError = true;
-      uploadErrorMsg = "Missing pad parameter";
-      broadcastUploadComplete(-1, false, uploadErrorMsg);
-      return;
+      uploadError = true; uploadErrorMsg = "Missing pad parameter";
+      broadcastUploadComplete(-1, false, uploadErrorMsg); return;
     }
-    
     uploadPad = request->getParam("pad", false)->value().toInt();
-    
     if (uploadPad < 0 || uploadPad >= MAX_SAMPLES) {
-      uploadError = true;
-      uploadErrorMsg = "Invalid pad number";
-      broadcastUploadComplete(uploadPad, false, uploadErrorMsg);
-      return;
+      uploadError = true; uploadErrorMsg = "Invalid pad number";
+      broadcastUploadComplete(uploadPad, false, uploadErrorMsg); return;
     }
-    
-    // Validar extensión
+
+    // Extensión
     if (!filename.endsWith(".wav") && !filename.endsWith(".WAV")) {
-      uploadError = true;
-      uploadErrorMsg = "Only WAV files are supported";
-      broadcastUploadComplete(uploadPad, false, uploadErrorMsg);
-      return;
+      uploadError = true; uploadErrorMsg = "Only WAV files are supported";
+      broadcastUploadComplete(uploadPad, false, uploadErrorMsg); return;
     }
-    
-    // Obtener nombre de la familia del pad
-    const char* families[] = {"BD", "SD", "CH", "OH", "CP", "RS", "CL", "CY",
-                              "CB", "MA", "HC", "HT", "MC", "MT", "LC", "LT",
-                              "X0", "X1", "X2", "X3", "X4", "X5", "X6", "X7"};
-    String familyName = families[uploadPad];
-    
-    // Crear directorio si no existe
-    String dirPath = "/" + familyName;
-    if (!LittleFS.exists(dirPath)) {
-      LittleFS.mkdir(dirPath);
-    }
-    
-    // Crear path completo
-    String filePath = dirPath + "/" + filename;
-    
-    
-    // Abrir archivo para escritura
-    uploadFile = LittleFS.open(filePath, "w");
-    if (!uploadFile) {
-      uploadError = true;
-      uploadErrorMsg = "Failed to create file on flash";
-      broadcastUploadComplete(uploadPad, false, uploadErrorMsg);
-      return;
-    }
-    
+
+    // Tamaño
     uploadSize = request->contentLength();
-    
-    // Validar tamaño (max 2MB para seguridad)
-    if (uploadSize > 2 * 1024 * 1024) {
-      uploadFile.close();
-      uploadError = true;
-      uploadErrorMsg = "File too large (max 2MB)";
-      broadcastUploadComplete(uploadPad, false, uploadErrorMsg);
-      return;
+    if (uploadSize == 0) {
+      uploadError = true; uploadErrorMsg = "Unknown file size (Content-Length missing)";
+      broadcastUploadComplete(uploadPad, false, uploadErrorMsg); return;
     }
+    if (uploadSize > 4 * 1024 * 1024) {
+      uploadError = true; uploadErrorMsg = "File too large (max 4MB)";
+      broadcastUploadComplete(uploadPad, false, uploadErrorMsg); return;
+    }
+
+    // Liberar buffer anterior si existe
+    if (_uploadBuf) { free(_uploadBuf); _uploadBuf = nullptr; _uploadBufLen = 0; }
+
+    // Allocar en PSRAM
+    _uploadBuf = (uint8_t*)heap_caps_malloc(uploadSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!_uploadBuf) {
+      // fallback DRAM (solo para archivos pequeños)
+      _uploadBuf = (uint8_t*)heap_caps_malloc(uploadSize, MALLOC_CAP_8BIT);
+    }
+    if (!_uploadBuf) {
+      uploadError = true; uploadErrorMsg = "No memory for upload";
+      broadcastUploadComplete(uploadPad, false, uploadErrorMsg); return;
+    }
+    _uploadBufLen = 0;
   }
-  
-  // Si hay error previo, no procesar más chunks
+
   if (uploadError) {
-    if (final) {
-      request->send(400, "application/json", "{\"success\":false,\"message\":\"" + uploadErrorMsg + "\"}");
-    }
+    if (final) request->send(400, "application/json",
+      "{\"success\":false,\"message\":\"" + uploadErrorMsg + "\"}");
     return;
   }
-  
-  // Escribir chunk de datos
-  if (uploadFile && len) {
-    size_t written = uploadFile.write(data, len);
-    if (written != len) {
-      uploadFile.close();
-      uploadError = true;
-      uploadErrorMsg = "Write error";
-      broadcastUploadComplete(uploadPad, false, uploadErrorMsg);
-      if (final) {
-        request->send(500, "application/json", "{\"success\":false,\"message\":\"Write error\"}");
-      }
-      return;
-    }
-    
-    uploadReceived += len;
-    
-    // Progreso cada 10%
-    int percent = (uploadReceived * 100) / uploadSize;
-    static int lastPercent = -1;
-    if (percent != lastPercent && percent % 10 == 0) {
-      broadcastUploadProgress(uploadPad, percent);
-      lastPercent = percent;
-    }
-  }
-  
-  // Upload completado
-  if (final) {
-    if (uploadFile) {
-      uploadFile.close();
-      
-      
-      // Validar formato WAV
-      const char* allFamilies[] = {"BD", "SD", "CH", "OH", "CP", "RS", "CL", "CY",
-                                    "CB", "MA", "HC", "HT", "MC", "MT", "LC", "LT",
-                                    "X0", "X1", "X2", "X3", "X4", "X5", "X6", "X7"};
-      String filePath = "/" + String(allFamilies[uploadPad]) + "/" + uploadFilename;
-      File checkFile = LittleFS.open(filePath, "r");
-      
-      uint32_t sampleRate = 0;
-      uint16_t channels = 0;
-      uint16_t bitsPerSample = 0;
-      
-      if (!validateWavFile(checkFile, sampleRate, channels, bitsPerSample)) {
-        checkFile.close();
-        LittleFS.remove(filePath);
-        request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid WAV format\"}");
-        broadcastUploadComplete(uploadPad, false, "Invalid WAV format");
-        uploadPad = -1;
-        uploadFilename = "";
-        uploadSize = 0;
-        uploadReceived = 0;
-        uploadError = false;
-        uploadErrorMsg = "";
-        return;
-      }
-      
-      checkFile.close();
-      
-      
-      // Cargar sample en el pad
-      bool loaded = sampleManager.loadSample(filePath.c_str(), uploadPad);
-      
-      if (loaded) {
-        
-        // Enviar respuesta HTTP exitosa
-        request->send(200, "application/json", "{\"success\":true,\"message\":\"Sample uploaded successfully\"}");
-        
-        broadcastUploadComplete(uploadPad, true, "Sample uploaded and loaded successfully");
-        
-        // Broadcast state update
-        broadcastSequencerState();
-      } else {
-        LittleFS.remove(filePath);
-        
-        // Enviar respuesta HTTP de error
-        request->send(500, "application/json", "{\"success\":false,\"message\":\"Failed to load sample\"}");
-        
-        broadcastUploadComplete(uploadPad, false, "Failed to load sample");
-      }
-    }
-    
-    // Reset variables
-    uploadPad = -1;
-    uploadFilename = "";
-    uploadSize = 0;
-    uploadReceived = 0;
-    uploadError = false;
-    uploadErrorMsg = "";
-  }
-}
 
-bool WebInterface::validateWavFile(File& file, uint32_t& sampleRate, uint16_t& channels, uint16_t& bitsPerSample) {
-  if (!file || file.size() < 44) {
-    return false;
+  // ── Acumular datos en PSRAM ──
+  if (_uploadBuf && len > 0) {
+    size_t copy = len;
+    if (_uploadBufLen + copy > uploadSize) copy = uploadSize - _uploadBufLen;
+    memcpy(_uploadBuf + _uploadBufLen, data, copy);
+    _uploadBufLen += copy;
+    uploadReceived  = _uploadBufLen;
+
+    int percent = (uploadSize > 0) ? (int)(uploadReceived * 100 / uploadSize) : 0;
+    if (UPLOAD_PROGRESS_WS_ENABLED && percent != uploadLastPercent && percent % 25 == 0) {
+      broadcastUploadProgress(uploadPad, percent);
+      uploadLastPercent = percent;
+    }
+    yield();
   }
-  
-  file.seek(0);
-  uint8_t header[44];
-  if (file.read(header, 44) != 44) {
-    return false;
+
+  // ── Upload completo ──
+  if (final) {
+    // Responder HTTP 200 inmediatamente — no bloquear el task de AsyncWebServer
+    request->send(200, "application/json", "{\"success\":true,\"message\":\"Uploading...\"}");
+
+    // Activar carga diferida en update() (systemTask Core0)
+    _pendingLoadPad = uploadPad;
+
+    uploadPad = -1; uploadFilename = ""; uploadSize = 0;
+    uploadReceived = 0; uploadError = false; uploadErrorMsg = "";
+    uploadLastPercent = -1;
   }
-  
-  // Verificar firma RIFF
-  if (memcmp(header, "RIFF", 4) != 0 || memcmp(header + 8, "WAVE", 4) != 0) {
-    return false;
-  }
-  
-  // Extraer parámetros
-  channels = header[22] | (header[23] << 8);
-  sampleRate = header[24] | (header[25] << 8) | (header[26] << 16) | (header[27] << 24);
-  bitsPerSample = header[34] | (header[35] << 8);
-  
-  // Validar parámetros
-  if (sampleRate != 44100 && sampleRate != 48000) {
-    return false;
-  }
-  
-  if (channels < 1 || channels > 2) {
-    return false;
-  }
-  
-  if (bitsPerSample != 16) {
-    return false;
-  }
-  
-  return true;
 }
 
 void WebInterface::broadcastUploadProgress(int pad, int percent) {
