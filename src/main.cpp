@@ -118,6 +118,24 @@ static const uint8_t PAD_303_NOTES[16] = {
     62, 64, 65, 67, 69, 71, 72, 74
 };
 
+static bool   gSeqMelodicHeld[16] = {false};
+static int8_t gSeqMelodicHeldEngine[16] = {-1, -1, -1, -1, -1, -1, -1, -1,
+                                           -1, -1, -1, -1, -1, -1, -1, -1};
+
+void releaseSequencerMelodicHolds() {
+    for (int track = 0; track < 16; track++) {
+        if (!gSeqMelodicHeld[track]) continue;
+        int8_t engine = gSeqMelodicHeldEngine[track];
+        gSeqMelodicHeld[track] = false;
+        gSeqMelodicHeldEngine[track] = -1;
+        if (engine == 3) {
+            spiMaster.synth303NoteOff();
+        } else if (engine >= 4 && engine <= 6) {
+            spiMaster.synthNoteOff((uint8_t)engine, (uint8_t)track);
+        }
+    }
+}
+
 // Colores por instrumento - 16 instrumentos RGB (formato 0xRRGGBB estándar)
 const uint32_t instrumentColors[16] = {
     0xFF0000,  // 0: BD (KICK) - Rojo
@@ -703,6 +721,13 @@ void setup() {
             bool accent = (flags & 0x01) != 0;
             bool slide  = (flags & 0x02) != 0;
             bool anyNote = false;
+            if (gSeqMelodicHeld[track]) {
+                int8_t prevEngine = gSeqMelodicHeldEngine[track];
+                if (prevEngine == 3) spiMaster.synth303NoteOff();
+                else if (prevEngine >= 4 && prevEngine <= 6) spiMaster.synthNoteOff((uint8_t)prevEngine, (uint8_t)track);
+                gSeqMelodicHeld[track] = false;
+                gSeqMelodicHeldEngine[track] = -1;
+            }
             for (int voice = 0; voice < MELODY_STEP_VOICES; voice++) {
                 uint8_t note = sequencer.getStepNoteVoice(pat, track, step, voice);
                 if (note == 0) continue;
@@ -710,6 +735,8 @@ void setup() {
                 spiMaster.synthNoteOnEx((uint8_t)engine, note, synthVel, accent, slide);
             }
             if (!anyNote) return;
+            gSeqMelodicHeld[track] = true;
+            gSeqMelodicHeldEngine[track] = engine;
         } else {
             // Percussion engines (808/909/505): trigger by instrument
             spiMaster.synthTrigger((uint8_t)engine, (uint8_t)track, synthVel);
@@ -718,6 +745,7 @@ void setup() {
 
     // Callback para sincronización en tiempo real con la web
     sequencer.setStepChangeCallback([](int newStep) {
+        releaseSequencerMelodicHolds();
         webInterface.broadcastStep(newStep);
     });
     // Callback para cambio de patrón en song mode

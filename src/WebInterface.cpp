@@ -39,6 +39,12 @@ static constexpr size_t kStateBufSize = 8192;  // serialized JSON fits in ~5-6KB
 static char* _patternBuf = nullptr;
 static constexpr size_t kPatternBufSize = 40960;  // pattern JSON ~18-32KB (with melody data)
 
+// Endpoint of the UDP packet currently being processed. WiFiUDP::remoteIP()
+// can become unreliable after nested command handling / additional UDP writes,
+// so commands that need a direct reply use this latched endpoint.
+static IPAddress s_udpReplyIp(0, 0, 0, 0);
+static uint16_t  s_udpReplyPort = 0;
+
 // PSRAM allocator for ArduinoJson — documents allocated here never touch internal heap
 struct PsramAllocator {
   void* allocate(size_t size) {
@@ -92,6 +98,7 @@ extern void setLedMonoMode(bool enabled);
 extern volatile int8_t gTrackSynthEngine[16];
 extern void setTrackSynthEngine(int track, int8_t engine);
 extern void setAllTrackSynthEngines(int8_t engine);
+extern void releaseSequencerMelodicHolds();
 static char gDaisyPadFiles[MAX_PADS][32];
 static void clearTrackLoopStateForSynth(int track, AsyncWebSocket* ws);
 
@@ -2435,6 +2442,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "stop") {
     sequencer.stop();
     spiMaster.dsqControl(0);
+    releaseSequencerMelodicHolds();
     StaticJsonDocument<96> resp;
     resp["type"] = "playState";
     resp["playing"] = false;
@@ -2503,6 +2511,31 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     dsqUploadPatternDeferred(pattern);
     /* v2.6 — Push to UDP slaves so LCD pattern display always matches master */
     broadcastUdpPatternSync(pattern);
+    if (s_udpReplyIp != IPAddress(0, 0, 0, 0) && s_udpReplyPort != 0) {
+      // Also reply directly to the requester. This avoids the P4 timeout when
+      // the UDP client map is still empty/stale just after a Master reboot.
+      if (!_patternBuf) _patternBuf = (char*)ps_malloc(kPatternBufSize);
+      if (_patternBuf) {
+        PsramJsonDocument response(8192);
+        response["cmd"] = "pattern_sync";
+        response["pattern"] = pattern;
+        response["active"] = true;
+        response["stepCount"] = sequencer.getPatternLength();
+        JsonArray data = response.createNestedArray("data");
+        for (int t = 0; t < MAX_TRACKS; t++) {
+          JsonArray track = data.createNestedArray();
+          for (int s = 0; s < STEPS_PER_PATTERN; s++) {
+            track.add(sequencer.getStep(pattern, t, s) ? 1 : 0);
+          }
+        }
+        size_t jsonLen = serializeJson(response, _patternBuf, kPatternBufSize);
+        if (jsonLen > 0 && jsonLen < kPatternBufSize) {
+          udp.beginPacket(s_udpReplyIp, s_udpReplyPort);
+          udp.write((uint8_t*)_patternBuf, jsonLen);
+          udp.endPacket();
+        }
+      }
+    }
     
     // broadcastSequencerState + pattern JSON — no SPI blocking now
     if (ESP.getFreeHeap() > 50000) {
@@ -4200,12 +4233,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     }
     
     // Enviar UDP de vuelta al slave (solo si es una petición UDP)
-    if (udp.remoteIP() != IPAddress(0, 0, 0, 0)) {
+    if (s_udpReplyIp != IPAddress(0, 0, 0, 0) && s_udpReplyPort != 0) {
       if (!_patternBuf) _patternBuf = (char*)ps_malloc(kPatternBufSize);
       if (!_patternBuf) return;
       size_t jsonLen = serializeJson(response, _patternBuf, kPatternBufSize);
       if (jsonLen == 0 || jsonLen >= kPatternBufSize) return;
-      udp.beginPacket(udp.remoteIP(), udp.remotePort());
+      udp.beginPacket(s_udpReplyIp, s_udpReplyPort);
       udp.write((uint8_t*)_patternBuf, jsonLen);
       udp.endPacket();
       
@@ -4933,7 +4966,11 @@ void WebInterface::handleUdp() {
     bool syncAfter = shouldSendUdpStateSync(cmd);
     IPAddress remoteIp = udp.remoteIP();
     uint16_t remotePort = udp.remotePort();
+    s_udpReplyIp = remoteIp;
+    s_udpReplyPort = remotePort;
     processCommand(doc);
+    s_udpReplyIp = IPAddress(0, 0, 0, 0);
+    s_udpReplyPort = 0;
     udp.beginPacket(remoteIp, remotePort);
     udp.print("{\"s\":\"ok\"}");
     udp.endPacket();
