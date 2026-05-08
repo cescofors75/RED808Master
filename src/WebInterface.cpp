@@ -660,15 +660,64 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   
   server->on("/api/getPattern", HTTP_GET, [](AsyncWebServerRequest *request){
     int pattern = sequencer.getCurrentPattern();
+    if (request->hasParam("index")) {
+      pattern = request->getParam("index")->value().toInt();
+    } else if (request->hasParam("pattern")) {
+      pattern = request->getParam("pattern")->value().toInt();
+    }
+    if (pattern < 0 || pattern >= MAX_PATTERNS) {
+      request->send(400, "application/json", "{\"error\":\"bad_pattern\"}");
+      return;
+    }
     DynamicJsonDocument doc(4096);
     
     for (int track = 0; track < 16; track++) {
       JsonArray trackSteps = doc.createNestedArray(String(track));
       for (int step = 0; step < sequencer.getPatternLength(); step++) {
-        trackSteps.add(sequencer.getStep(track, step));
+        trackSteps.add(sequencer.getStep(pattern, track, step));
       }
     }
     
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+  });
+
+  server->on("/api/p4State", HTTP_GET, [](AsyncWebServerRequest *request){
+    StaticJsonDocument<4096> doc;
+    SdStatusResponse sdStat = {};
+    bool sdOk = spiMaster.getCachedSdStatus(sdStat);
+    uint32_t sdLoadedMask = sdOk ? sdStat.samplesLoaded : 0;
+
+    doc["pattern"] = sequencer.getCurrentPattern();
+    doc["playing"] = sequencer.isPlaying();
+    doc["tempo"] = sequencer.getTempo();
+    doc["step"] = sequencer.getCurrentStep();
+    doc["stepCount"] = sequencer.getPatternLength();
+    doc["masterVolume"] = spiMaster.getMasterVolume();
+    doc["sequencerVolume"] = spiMaster.getSequencerVolume();
+    doc["liveVolume"] = spiMaster.getLiveVolume();
+    doc["kit"] = sdOk ? String(sdStat.currentKit) : "";
+    doc["sdPresent"] = sdOk ? (bool)sdStat.present : false;
+    doc["sdLoadedMask"] = sdLoadedMask;
+
+    JsonArray mute = doc.createNestedArray("mute");
+    JsonArray solo = doc.createNestedArray("solo");
+    JsonArray volumes = doc.createNestedArray("trackVolumes");
+    for (int track = 0; track < MAX_TRACKS; track++) {
+      mute.add(sequencer.isTrackMuted(track) || spiMaster.getTrackMute(track));
+      solo.add(spiMaster.getTrackSolo(track));
+      volumes.add(sequencer.getTrackVolume(track));
+    }
+
+    JsonObject fx = doc.createNestedObject("fx");
+    fx["filterType"] = gMasterFilterType;
+    fx["filterCutoff"] = gMasterFilterCutoff;
+    fx["filterResonance"] = gMasterFilterResonance;
+    fx["distortion"] = gMasterDistortion;
+    fx["bitCrush"] = gMasterBitCrushBits;
+    fx["sampleRate"] = gMasterSampleRateReduction;
+
     String output;
     serializeJson(doc, output);
     request->send(200, "application/json", output);
@@ -908,6 +957,13 @@ refresh();if(auto_)startAuto();
     [this](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
       // Handler del upload (chunked)
       handleUpload(request, filename, index, data, len, final);
+    }
+  );
+
+  server->on("/api/uploadDaisy", HTTP_POST,
+    [](AsyncWebServerRequest *request){},
+    [this](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+      handleDaisyUpload(request, filename, index, data, len, final);
     }
   );
   
@@ -2036,34 +2092,39 @@ void WebInterface::broadcastMelodySync() {
 /* v2.6 — Push the active pattern (drum steps + selected index) to every
  * known UDP slave. Triggered whenever the active pattern changes via web/UI
  * so the LCD slaves don't show a stale pattern. */
-void WebInterface::broadcastUdpPatternSync(int patternNum) {
-  if (udpClients.empty()) return;
+void WebInterface::sendUdpPatternRows(IPAddress ip, uint16_t port, int patternNum) {
+  if (ip == IPAddress(0, 0, 0, 0) || port == 0) return;
   if (patternNum < 0 || patternNum >= MAX_PATTERNS) return;
-  if (ESP.getFreeHeap() < 30000) return;
-
-  PsramJsonDocument response(8192);
-  response["cmd"]       = "pattern_sync";
-  response["pattern"]   = patternNum;
-  response["active"]    = true;   /* hint to slaves: this IS the active pattern */
-  response["stepCount"] = sequencer.getPatternLength();
-
-  JsonArray data = response.createNestedArray("data");
+  int stepCount = constrain(sequencer.getPatternLength(), 16, STEPS_PER_PATTERN);
   for (int t = 0; t < MAX_TRACKS; t++) {
-    JsonArray track = data.createNestedArray();
-    for (int s = 0; s < STEPS_PER_PATTERN; s++) {
-      track.add(sequencer.getStep(patternNum, t, s) ? 1 : 0);
+    char rowHex[17];
+    int nibbles = (stepCount + 3) / 4;
+    for (int nib = 0; nib < nibbles; nib++) {
+      uint8_t value = 0;
+      for (int bit = 0; bit < 4; bit++) {
+        int step = nib * 4 + bit;
+        if (step < stepCount && sequencer.getStep(patternNum, t, step)) value |= (1U << bit);
+      }
+      rowHex[nib] = (value < 10) ? ('0' + value) : ('A' + value - 10);
+    }
+    rowHex[nibbles] = '\0';
+    char buf[128];
+    int len = snprintf(buf, sizeof(buf),
+      "{\"cmd\":\"pattern_row\",\"pattern\":%d,\"track\":%d,\"stepCount\":%d,\"row\":\"%s\"}",
+      patternNum, t, stepCount, rowHex);
+    if (len > 0 && len < (int)sizeof(buf)) {
+      udp.beginPacket(ip, port);
+      udp.write((const uint8_t*)buf, len);
+      udp.endPacket();
+      delay(1);
     }
   }
+}
 
-  if (!_patternBuf) _patternBuf = (char*)ps_malloc(kPatternBufSize);
-  if (!_patternBuf) return;
-  size_t jsonLen = serializeJson(response, _patternBuf, kPatternBufSize);
-  if (jsonLen == 0 || jsonLen >= kPatternBufSize) return;
-
+void WebInterface::broadcastUdpPatternSync(int patternNum) {
+  if (udpClients.empty()) return;
   for (auto& entry : udpClients) {
-    udp.beginPacket(entry.second.ip, entry.second.port);
-    udp.write((uint8_t*)_patternBuf, jsonLen);
-    udp.endPacket();
+    sendUdpPatternRows(entry.second.ip, entry.second.port, patternNum);
     yield();
   }
 }
@@ -2514,27 +2575,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     if (s_udpReplyIp != IPAddress(0, 0, 0, 0) && s_udpReplyPort != 0) {
       // Also reply directly to the requester. This avoids the P4 timeout when
       // the UDP client map is still empty/stale just after a Master reboot.
-      if (!_patternBuf) _patternBuf = (char*)ps_malloc(kPatternBufSize);
-      if (_patternBuf) {
-        PsramJsonDocument response(8192);
-        response["cmd"] = "pattern_sync";
-        response["pattern"] = pattern;
-        response["active"] = true;
-        response["stepCount"] = sequencer.getPatternLength();
-        JsonArray data = response.createNestedArray("data");
-        for (int t = 0; t < MAX_TRACKS; t++) {
-          JsonArray track = data.createNestedArray();
-          for (int s = 0; s < STEPS_PER_PATTERN; s++) {
-            track.add(sequencer.getStep(pattern, t, s) ? 1 : 0);
-          }
-        }
-        size_t jsonLen = serializeJson(response, _patternBuf, kPatternBufSize);
-        if (jsonLen > 0 && jsonLen < kPatternBufSize) {
-          udp.beginPacket(s_udpReplyIp, s_udpReplyPort);
-          udp.write((uint8_t*)_patternBuf, jsonLen);
-          udp.endPacket();
-        }
-      }
+      sendUdpPatternRows(s_udpReplyIp, s_udpReplyPort, pattern);
     }
     
     // broadcastSequencerState + pattern JSON — no SPI blocking now
@@ -4219,29 +4260,9 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     
     if (patternNum < 0 || patternNum >= MAX_PATTERNS) return;
 
-    PsramJsonDocument response(8192);
-    response["cmd"] = "pattern_sync";
-    response["pattern"] = patternNum;
-    response["stepCount"] = sequencer.getPatternLength();
-    
-    JsonArray data = response.createNestedArray("data");
-    for (int t = 0; t < MAX_TRACKS; t++) {
-      JsonArray track = data.createNestedArray();
-      for (int s = 0; s < STEPS_PER_PATTERN; s++) {
-        track.add(sequencer.getStep(patternNum, t, s) ? 1 : 0);
-      }
-    }
-    
     // Enviar UDP de vuelta al slave (solo si es una petición UDP)
     if (s_udpReplyIp != IPAddress(0, 0, 0, 0) && s_udpReplyPort != 0) {
-      if (!_patternBuf) _patternBuf = (char*)ps_malloc(kPatternBufSize);
-      if (!_patternBuf) return;
-      size_t jsonLen = serializeJson(response, _patternBuf, kPatternBufSize);
-      if (jsonLen == 0 || jsonLen >= kPatternBufSize) return;
-      udp.beginPacket(s_udpReplyIp, s_udpReplyPort);
-      udp.write((uint8_t*)_patternBuf, jsonLen);
-      udp.endPacket();
-      
+      sendUdpPatternRows(s_udpReplyIp, s_udpReplyPort, patternNum);
     }
   }
   // ============= NEW: Track Volume Commands =============
@@ -5157,6 +5178,209 @@ void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename,
     uploadPad = -1; uploadFilename = ""; uploadSize = 0;
     uploadReceived = 0; uploadError = false; uploadErrorMsg = "";
     uploadLastPercent = -1;
+  }
+}
+
+struct DaisyUploadStreamState {
+  int pad = -1;
+  bool active = false;
+  bool begun = false;
+  bool error = false;
+  char errorMsg[96] = "";
+  uint8_t header[4096] = {};
+  size_t headerLen = 0;
+  uint32_t dataPos = 0;
+  uint32_t dataSize = 0;
+  uint16_t channels = 0;
+  uint16_t bits = 0;
+  size_t fileOffset = 0;
+  uint8_t carry[8] = {};
+  size_t carryLen = 0;
+  uint32_t samplesSent = 0;
+  char filename[64] = "";
+};
+
+static DaisyUploadStreamState s_daisyUpload;
+
+static uint16_t le16(const uint8_t* p) {
+  return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+
+static uint32_t le32(const uint8_t* p) {
+  return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static int16_t wav_s24_to_s16(const uint8_t* p) {
+  int32_t v = (int32_t)p[0] | ((int32_t)p[1] << 8) | ((int32_t)p[2] << 16);
+  if (v & 0x00800000) v |= ~0x00FFFFFF;
+  return (int16_t)(v >> 8);
+}
+
+static void daisyUploadError(const char* msg) {
+  s_daisyUpload.error = true;
+  strncpy(s_daisyUpload.errorMsg, msg, sizeof(s_daisyUpload.errorMsg) - 1);
+  s_daisyUpload.errorMsg[sizeof(s_daisyUpload.errorMsg) - 1] = '\0';
+}
+
+static bool parseDaisyUploadHeader() {
+  DaisyUploadStreamState& st = s_daisyUpload;
+  if (st.headerLen < 44) return false;
+  if (memcmp(st.header, "RIFF", 4) != 0 || memcmp(st.header + 8, "WAVE", 4) != 0) {
+    daisyUploadError("Not a WAV file");
+    return false;
+  }
+
+  uint32_t pos = 12;
+  bool fmtFound = false;
+  bool dataFound = false;
+  while (pos + 8 <= st.headerLen) {
+    uint32_t chunkSize = le32(st.header + pos + 4);
+    if (memcmp(st.header + pos, "fmt ", 4) == 0) {
+      if (chunkSize < 16 || pos + 24 > st.headerLen) return false;
+      const uint8_t* fmt = st.header + pos + 8;
+      uint16_t audioFormat = le16(fmt);
+      st.channels = le16(fmt + 2);
+      st.bits = le16(fmt + 14);
+      if (audioFormat != 1 && audioFormat != 0xFFFE) {
+        daisyUploadError("Unsupported WAV format");
+        return false;
+      }
+      fmtFound = true;
+    } else if (memcmp(st.header + pos, "data", 4) == 0) {
+      st.dataPos = pos + 8;
+      st.dataSize = chunkSize;
+      dataFound = true;
+      break;
+    }
+    pos += 8 + chunkSize + (chunkSize & 1);
+  }
+
+  if (!fmtFound || !dataFound) return false;
+  if ((st.bits != 16 && st.bits != 24) || st.channels < 1 || st.channels > 2) {
+    daisyUploadError("Need mono/stereo 16/24-bit WAV");
+    return false;
+  }
+
+  uint32_t frameBytes = (st.bits / 8) * st.channels;
+  uint32_t totalSamples = st.dataSize / frameBytes;
+  if (totalSamples == 0) {
+    daisyUploadError("Empty WAV data");
+    return false;
+  }
+  st.begun = spiMaster.beginSampleStream(st.pad, totalSamples);
+  if (!st.begun) daisyUploadError("Daisy stream begin failed");
+  return st.begun;
+}
+
+static void processDaisyUploadPcm(const uint8_t* data, size_t len) {
+  DaisyUploadStreamState& st = s_daisyUpload;
+  if (st.error || !st.begun || len == 0) return;
+
+  const size_t frameBytes = (st.bits / 8) * st.channels;
+  int16_t pcm[256];
+  size_t pcmCount = 0;
+
+  auto flushPcm = [&]() {
+    if (pcmCount == 0) return;
+    if (!spiMaster.writeSampleStreamData(st.pad, pcm, (uint16_t)pcmCount, st.samplesSent)) {
+      daisyUploadError("Daisy data chunk failed");
+      return;
+    }
+    st.samplesSent += pcmCount;
+    pcmCount = 0;
+  };
+
+  size_t pos = 0;
+  uint8_t frame[8];
+  while (pos < len && !st.error) {
+    size_t need = frameBytes - st.carryLen;
+    size_t take = min(need, len - pos);
+    memcpy(st.carry + st.carryLen, data + pos, take);
+    st.carryLen += take;
+    pos += take;
+    if (st.carryLen < frameBytes) break;
+
+    memcpy(frame, st.carry, frameBytes);
+    st.carryLen = 0;
+    if (st.bits == 16) {
+      if (st.channels == 1) {
+        pcm[pcmCount++] = (int16_t)le16(frame);
+      } else {
+        int16_t l = (int16_t)le16(frame);
+        int16_t r = (int16_t)le16(frame + 2);
+        pcm[pcmCount++] = (int16_t)(((int32_t)l + (int32_t)r) / 2);
+      }
+    } else {
+      if (st.channels == 1) {
+        pcm[pcmCount++] = wav_s24_to_s16(frame);
+      } else {
+        int16_t l = wav_s24_to_s16(frame);
+        int16_t r = wav_s24_to_s16(frame + 3);
+        pcm[pcmCount++] = (int16_t)(((int32_t)l + (int32_t)r) / 2);
+      }
+    }
+    if (pcmCount == 256) flushPcm();
+    if ((st.samplesSent & 0x0FFF) == 0) yield();
+  }
+  flushPcm();
+}
+
+void WebInterface::handleDaisyUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+  if (index == 0) {
+    s_daisyUpload = DaisyUploadStreamState();
+    s_daisyUpload.active = true;
+    if (request->hasParam("pad")) {
+      s_daisyUpload.pad = request->getParam("pad")->value().toInt();
+    } else if (request->hasParam("pad", false)) {
+      s_daisyUpload.pad = request->getParam("pad", false)->value().toInt();
+    } else {
+      daisyUploadError("Missing pad parameter");
+    }
+    if (s_daisyUpload.pad < 0 || s_daisyUpload.pad >= MAX_SAMPLES) daisyUploadError("Invalid pad number");
+    if (!filename.endsWith(".wav") && !filename.endsWith(".WAV")) daisyUploadError("Only WAV files are supported");
+    strncpy(s_daisyUpload.filename, filename.c_str(), sizeof(s_daisyUpload.filename) - 1);
+  }
+
+  DaisyUploadStreamState& st = s_daisyUpload;
+  if (!st.error && len > 0) {
+    size_t chunkStart = st.fileOffset;
+    st.fileOffset += len;
+
+    if (!st.begun) {
+      size_t copy = min(len, sizeof(st.header) - st.headerLen);
+      memcpy(st.header + st.headerLen, data, copy);
+      st.headerLen += copy;
+      if (!parseDaisyUploadHeader() && !st.error && st.headerLen >= sizeof(st.header)) {
+        daisyUploadError("WAV header too large");
+      }
+    }
+
+    if (st.begun && !st.error) {
+      size_t dataStart = 0;
+      size_t dataEnd = len;
+      size_t chunkEnd = chunkStart + len;
+      if (chunkEnd <= st.dataPos || chunkStart >= st.dataPos + st.dataSize) {
+        dataEnd = 0;
+      } else {
+        if (chunkStart < st.dataPos) dataStart = st.dataPos - chunkStart;
+        if (chunkEnd > st.dataPos + st.dataSize) dataEnd = st.dataPos + st.dataSize - chunkStart;
+      }
+      if (dataEnd > dataStart) processDaisyUploadPcm(data + dataStart, dataEnd - dataStart);
+    }
+  }
+
+  if (final) {
+    bool ok = st.begun && !st.error && st.samplesSent > 0;
+    if (st.begun) spiMaster.endSampleStream(st.pad, ok, st.samplesSent);
+    if (ok) {
+      broadcastUploadComplete(st.pad, true, "Sample streamed to Daisy");
+      request->send(200, "application/json", "{\"success\":true,\"message\":\"Sample streamed to Daisy\"}");
+    } else {
+      const char* msg = st.errorMsg[0] ? st.errorMsg : "Daisy upload failed";
+      broadcastUploadComplete(st.pad, false, msg);
+      request->send(400, "application/json", String("{\"success\":false,\"message\":\"") + msg + "\"}");
+    }
+    s_daisyUpload = DaisyUploadStreamState();
   }
 }
 

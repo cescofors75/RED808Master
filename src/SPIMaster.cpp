@@ -1168,6 +1168,47 @@ bool SPIMaster::transferSample(int padIndex, int16_t* buffer, uint32_t numSample
     return true;
 }
 
+bool SPIMaster::beginSampleStream(int padIndex, uint32_t numSamples) {
+    if (padIndex < 0 || padIndex >= MAX_PADS || numSamples == 0) return false;
+
+    SampleBeginPayload beginP = {};
+    beginP.padIndex = (uint8_t)padIndex;
+    beginP.bitsPerSample = 16;
+    beginP.sampleRate = SAMPLE_RATE;
+    beginP.totalBytes = numSamples * sizeof(int16_t);
+    beginP.totalSamples = numSamples;
+    return sendCommand(CMD_SAMPLE_BEGIN, &beginP, sizeof(beginP));
+}
+
+bool SPIMaster::writeSampleStreamData(int padIndex, const int16_t* samples, uint16_t numSamples, uint32_t startSample) {
+    if (padIndex < 0 || padIndex >= MAX_PADS || !samples || numSamples == 0) return false;
+    const uint16_t chunkBytes = numSamples * sizeof(int16_t);
+    if (chunkBytes > 512) return false;
+
+    uint8_t dataPkt[sizeof(SampleDataHeader) + 512];
+    SampleDataHeader* hdr = (SampleDataHeader*)dataPkt;
+    hdr->padIndex = (uint8_t)padIndex;
+    hdr->reserved = 0;
+    hdr->chunkSize = chunkBytes;
+    hdr->offset = startSample * sizeof(int16_t);
+    memcpy(dataPkt + sizeof(SampleDataHeader), samples, chunkBytes);
+    return sendCommand(CMD_SAMPLE_DATA, dataPkt, sizeof(SampleDataHeader) + chunkBytes);
+}
+
+bool SPIMaster::endSampleStream(int padIndex, bool ok, uint32_t totalSamples) {
+    if (padIndex < 0 || padIndex >= MAX_PADS) return false;
+
+    SampleEndPayload endP = {};
+    endP.padIndex = (uint8_t)padIndex;
+    endP.status = ok ? 0 : 1;
+    endP.checksum = 0;
+    bool sent = sendCommand(CMD_SAMPLE_END, &endP, sizeof(endP));
+    uint32_t totalBytes = totalSamples * sizeof(int16_t);
+    uint32_t waitMs = totalBytes < 32768 ? 60 : (totalBytes < 131072 ? 120 : 200);
+    vTaskDelay(pdMS_TO_TICKS(waitMs));
+    return sent;
+}
+
 void SPIMaster::unloadSample(int padIndex) {
     SampleUnloadPayload p = {(uint8_t)padIndex};
     sendCommand(CMD_SAMPLE_UNLOAD, &p, sizeof(p));

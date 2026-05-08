@@ -318,6 +318,9 @@ public:
     // ══════════════════════════════════════════════════
     bool setSampleBuffer(int padIndex, int16_t* buffer, uint32_t length);
     bool transferSample(int padIndex, int16_t* buffer, uint32_t numSamples);
+    bool beginSampleStream(int padIndex, uint32_t numSamples);
+    bool writeSampleStreamData(int padIndex, const int16_t* samples, uint16_t numSamples, uint32_t startSample);
+    bool endSampleStream(int padIndex, bool ok, uint32_t totalSamples);
     void unloadSample(int padIndex);
     void unloadAllSamples();
 

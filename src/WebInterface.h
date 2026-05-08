@@ -105,6 +105,7 @@ private:
   bool shouldSendUdpStateSync(const char* cmd) const;
   /* v2.6 — Push pattern + selected index to all UDP slaves (P4/S3).
    * Fixes bug where slaves displayed stale pattern after web changed it. */
+  void sendUdpPatternRows(IPAddress ip, uint16_t port, int patternNum);
   void broadcastUdpPatternSync(int patternNum);
 
   /* v2.9 — Melody (P4 piano + S3 melody screen) authoritative state.
@@ -128,6 +129,7 @@ private:
   
   // File upload handlers
   void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);
+  void handleDaisyUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);
 
   // Deferred sample load — set by handleUpload callback, consumed by update() in main loop
   volatile int  _pendingLoadPad  = -1;  // pad index to load, -1 = none
