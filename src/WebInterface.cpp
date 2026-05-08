@@ -966,6 +966,22 @@ refresh();if(auto_)startAuto();
       handleDaisyUpload(request, filename, index, data, len, final);
     }
   );
+
+  server->on("/api/unloadDaisy", HTTP_POST, [this](AsyncWebServerRequest *request){
+    int pad = -1;
+    if (request->hasParam("pad")) {
+      pad = request->getParam("pad")->value().toInt();
+    } else if (request->hasParam("pad", false)) {
+      pad = request->getParam("pad", false)->value().toInt();
+    }
+    if (pad < 0 || pad >= MAX_SAMPLES) {
+      request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid pad\"}");
+      return;
+    }
+    spiMaster.unloadSample(pad);
+    broadcastUploadComplete(pad, true, "Daisy sample unloaded");
+    request->send(200, "application/json", "{\"success\":true,\"message\":\"Daisy sample unloaded\"}");
+  });
   
   // MIDI Mapping endpoints
   server->on("/api/midi/mapping", HTTP_GET, [this](AsyncWebServerRequest *request){
