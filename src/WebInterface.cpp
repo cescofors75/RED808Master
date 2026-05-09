@@ -1936,6 +1936,8 @@ bool WebInterface::shouldSendUdpStateSync(const char* cmd) const {
          strcmp(cmd, "tempo") == 0 ||
          strcmp(cmd, "mute") == 0 ||
          strcmp(cmd, "solo") == 0 ||
+         strcmp(cmd, "setMuteMask") == 0 ||
+         strcmp(cmd, "setSoloMask") == 0 ||
          strcmp(cmd, "setTrackSolo") == 0 ||
          strcmp(cmd, "setTrackVolume") == 0 ||
          strcmp(cmd, "getTrackVolumes") == 0 ||
@@ -2832,6 +2834,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     yield();
     bool muted = doc["value"];
     sequencer.muteTrack(track, muted);
+    spiMaster.setTrackMute(track, muted);
     spiMaster.dsqSetMute((uint8_t)track, muted);
     StaticJsonDocument<128> muteDoc;
     muteDoc["type"] = "trackMuted";
@@ -2853,6 +2856,45 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     String soloOutput;
     serializeJson(soloDoc, soloOutput);
     if (ws) ws->textAll(soloOutput);
+  }
+  else if (cmd == "setMuteMask" || cmd == "setSoloMask") {
+    // Atomic update of all 16 track mute/solo states in one shot, to avoid
+    // the per-track UDP flood that causes flicker when many packets are
+    // dropped/reordered. Accepts either a 16-bit "mask" integer or a 16-bool
+    // "values" array.
+    bool isSolo = (cmd == "setSoloMask");
+    uint32_t mask = 0;
+    bool haveMask = false;
+    if (doc.containsKey("mask")) {
+      mask = (uint32_t)(doc["mask"].as<uint32_t>() & 0xFFFFu);
+      haveMask = true;
+    } else if (doc["values"].is<JsonArrayConst>()) {
+      JsonArrayConst arr = doc["values"].as<JsonArrayConst>();
+      int t = 0;
+      for (JsonVariantConst v : arr) {
+        if (t >= 16) break;
+        if (v.as<bool>()) mask |= (1u << t);
+        t++;
+      }
+      haveMask = true;
+    }
+    if (!haveMask) return;
+    for (int t = 0; t < 16; t++) {
+      bool on = (mask >> t) & 1u;
+      if (isSolo) {
+        spiMaster.setTrackSolo(t, on);
+      } else {
+        sequencer.muteTrack(t, on);
+        spiMaster.setTrackMute(t, on);
+        spiMaster.dsqSetMute((uint8_t)t, on);
+      }
+    }
+    // Broadcast a single WS update for the whole mask
+    StaticJsonDocument<256> resp;
+    resp["type"] = isSolo ? "trackSoloMask" : "trackMuteMask";
+    resp["mask"] = mask;
+    String out; serializeJson(resp, out);
+    if (ws) ws->textAll(out);
   }
   else if (cmd == "toggleLoop") {
     int track = doc["track"];
@@ -4350,7 +4392,10 @@ void WebInterface::processCommand(const JsonDocument& doc) {
 
     setTrackSynthEngine(track, (int8_t)engine);
     spiMaster.dsqSetTrackEngine((uint8_t)track, (int8_t)engine);
-    spiMaster.dsqSetMute((uint8_t)track, engine >= 0);
+    // NOTE: do NOT auto-mute the track when assigning an engine. The Daisy
+    // routes triggers per-engine via dsqTrackEngine[], so the sampler stays
+    // silent automatically. Auto-muting here forced the user to manually
+    // toggle mute/unmute in the P4 sequencer to hear new selections.
 
     // Stack buffer — avoids String heap allocation
     char buf[96];
@@ -4386,7 +4431,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     setAllTrackSynthEngines((int8_t)engine);
     for (int i = 0; i < 16; i++) {
       spiMaster.dsqSetTrackEngine((uint8_t)i, (int8_t)engine);
-      spiMaster.dsqSetMute((uint8_t)i, engine >= 0);
+      // No auto-mute: the Daisy already routes per-engine via dsqTrackEngine[].
     }
 
     StaticJsonDocument<256> responseDoc;
