@@ -704,10 +704,12 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     JsonArray mute = doc.createNestedArray("mute");
     JsonArray solo = doc.createNestedArray("solo");
     JsonArray volumes = doc.createNestedArray("trackVolumes");
+    JsonArray trackSynthEngines = doc.createNestedArray("trackSynthEngines");
     for (int track = 0; track < MAX_TRACKS; track++) {
       mute.add(sequencer.isTrackMuted(track) || spiMaster.getTrackMute(track));
       solo.add(spiMaster.getTrackSolo(track));
       volumes.add(sequencer.getTrackVolume(track));
+      trackSynthEngines.add((int)gTrackSynthEngine[track]);
     }
 
     JsonObject fx = doc.createNestedObject("fx");
@@ -1981,10 +1983,12 @@ void WebInterface::sendUdpStateSync(IPAddress ip, uint16_t port) {
   JsonArray mute = doc.createNestedArray("mute");
   JsonArray solo = doc.createNestedArray("solo");
   JsonArray volumes = doc.createNestedArray("trackVolumes");
+  JsonArray trackSynthEngines = doc.createNestedArray("trackSynthEngines");
   for (int track = 0; track < MAX_TRACKS; track++) {
     mute.add(sequencer.isTrackMuted(track) || spiMaster.getTrackMute(track));
     solo.add(spiMaster.getTrackSolo(track));
     volumes.add(sequencer.getTrackVolume(track));
+    trackSynthEngines.add((int)gTrackSynthEngine[track]);
   }
 
   JsonObject fx = doc.createNestedObject("fx");
