@@ -9,8 +9,8 @@
 //  PAD → INSTRUMENT MAPPING (mirrors Daisy main.cpp padTo*)
 // ============================================================
 const PAD_TO_808 = [0,1,3,4,15,2,13,14,5,6,7,12,11,10,9,8];
-const PAD_TO_909 = [0,1,3,4,9,2,10,8,5,6,7,2,10,5,6,7];
-const PAD_TO_505 = [0,1,3,4,9,2,10,8,5,6,7,8,2,5,6,7];
+const PAD_TO_909 = [0,1,3,4,9,2,10,8,5,6,7,11,12,13,14,15];
+const PAD_TO_505 = [0,1,3,4,9,2,10,8,5,6,7,11,12,13,14,15];
 
 function padToInstrument(engine, padIndex) {
     if (engine === 0) return PAD_TO_808[padIndex] ?? padIndex;
@@ -29,11 +29,13 @@ const INST_NAMES_808 = {
 };
 const INST_NAMES_909 = {
     0:'Kick', 1:'Snare', 2:'Clap', 3:'HiHat Closed', 4:'HiHat Open',
-    5:'Low Tom', 6:'Mid Tom', 7:'Hi Tom', 8:'Ride', 9:'Crash', 10:'Rimshot'
+    5:'Low Tom', 6:'Mid Tom', 7:'Hi Tom', 8:'Ride', 9:'Crash', 10:'Rimshot',
+    11:'Shaker', 12:'Clave', 13:'Hi Perc', 14:'Mid Perc', 15:'Low Perc'
 };
 const INST_NAMES_505 = {
     0:'Kick', 1:'Snare', 2:'Clap', 3:'HiHat Closed', 4:'HiHat Open',
-    5:'Low Tom', 6:'Mid Tom', 7:'Hi Tom', 8:'Cowbell', 9:'Cymbal', 10:'Rimshot'
+    5:'Low Tom', 6:'Mid Tom', 7:'Hi Tom', 8:'Cowbell', 9:'Cymbal', 10:'Rimshot',
+    11:'Shaker', 12:'Clave', 13:'Hi Perc', 14:'Mid Perc', 15:'Low Perc'
 };
 
 function getInstrumentName(engine, instrument) {
@@ -109,6 +111,11 @@ const PARAMS_909 = {
     8:  [ P(0,'Decay',0,2,0.01,0.5), P(3,'Volume',0,1,0.01,0.8) ],
     9:  [ P(0,'Decay',0,2,0.01,0.8), P(3,'Volume',0,1,0.01,0.8) ],
     10: [ P(3,'Volume',0,1,0.01,0.8) ],
+    11: [ P(0,'Decay',0.02,0.45,0.005,0.085,'s'), P(2,'Tone',0,1,0.01,0.65), P(3,'Volume',0,1,0.01,0.75) ],
+    12: [ P(0,'Decay',0.015,0.25,0.005,0.055,'s'), P(1,'Pitch',900,3200,1,1750,'Hz'), P(3,'Volume',0,1,0.01,0.75) ],
+    13: [ P(0,'Decay',0.035,0.55,0.005,0.085,'s'), P(1,'Pitch',160,1600,1,820,'Hz'), P(2,'Metal',0,1,0.01,0.28), P(3,'Volume',0,1,0.01,0.7) ],
+    14: [ P(0,'Decay',0.035,0.55,0.005,0.12,'s'), P(1,'Pitch',160,1600,1,520,'Hz'), P(2,'Metal',0,1,0.01,0.2), P(3,'Volume',0,1,0.01,0.72) ],
+    15: [ P(0,'Decay',0.035,0.55,0.005,0.17,'s'), P(1,'Pitch',160,1600,1,310,'Hz'), P(2,'Metal',0,1,0.01,0.14), P(3,'Volume',0,1,0.01,0.74) ],
 };
 
 // TR-505 params per instrument index
@@ -124,6 +131,11 @@ const PARAMS_505 = {
     8:  [ P(0,'Decay',0,0.5,0.005,0.1), P(3,'Volume',0,1,0.01,0.8) ],
     9:  [ P(0,'Decay',0,2,0.01,0.8), P(3,'Volume',0,1,0.01,0.8) ],
     10: [ P(3,'Volume',0,1,0.01,0.8) ],
+    11: [ P(0,'Decay',0.02,0.45,0.005,0.095,'s'), P(2,'Tone',0,1,0.01,0.55), P(5,'LoFi',0,1,0.01,0.35), P(3,'Volume',0,1,0.01,0.76) ],
+    12: [ P(0,'Decay',0.015,0.25,0.005,0.05,'s'), P(1,'Pitch',800,2800,1,1650,'Hz'), P(5,'LoFi',0,1,0.01,0.3), P(3,'Volume',0,1,0.01,0.76) ],
+    13: [ P(0,'Decay',0.035,0.5,0.005,0.075,'s'), P(1,'Pitch',120,1400,1,760,'Hz'), P(2,'Click',0,1,0.01,0.34), P(5,'LoFi',0,1,0.01,0.34), P(3,'Volume',0,1,0.01,0.7) ],
+    14: [ P(0,'Decay',0.035,0.5,0.005,0.115,'s'), P(1,'Pitch',120,1400,1,480,'Hz'), P(2,'Click',0,1,0.01,0.26), P(5,'LoFi',0,1,0.01,0.34), P(3,'Volume',0,1,0.01,0.72) ],
+    15: [ P(0,'Decay',0.035,0.5,0.005,0.16,'s'), P(1,'Pitch',120,1400,1,300,'Hz'), P(2,'Click',0,1,0.01,0.18), P(5,'LoFi',0,1,0.01,0.34), P(3,'Volume',0,1,0.01,0.74) ],
 };
 
 // TB-303 params (shared across all pads when engine=303)

@@ -4781,8 +4781,13 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     uint8_t engine = doc["engine"] | 3;
     uint8_t track  = doc["track"]  | 0;
     uint8_t note   = doc.containsKey("note") ? (uint8_t)(doc["note"] | 0xFF) : (uint8_t)0xFF;
-    if (track < 16 && engine <= 8) {
+    if ((track < 16 || track == 0xFF) && engine <= 8) {
+      Serial.printf("[MASTER synthNoteOff] engine=%u track=%u note=%u\n",
+                    (unsigned)engine, (unsigned)track, (unsigned)note);
       spiMaster.synthNoteOff(engine, track, note);
+    } else {
+      Serial.printf("[MASTER synthNoteOff reject] engine=%u track=%u note=%u\n",
+                    (unsigned)engine, (unsigned)track, (unsigned)note);
     }
   }
 
