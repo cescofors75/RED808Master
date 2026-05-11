@@ -4381,8 +4381,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int track = doc["track"];
     int engine = doc["engine"];
     syslog("CMD", "setEngine trk=%d eng=%d heap=%u", track, engine, ESP.getFreeHeap());
-    if (track < 0 || track >= 16 || engine < -1 || engine > 6) {
-      return;  // Daisy supports engines 0-6 only
+    if (track < 0 || track >= 16 || engine < -1 || engine > 8) {
+      return;  // Daisy supports engines 0..8
     }
 
     // Si el pad estaba en 303 y cambia a otro motor, detener la nota
@@ -4412,8 +4412,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "applyKitToAllPads") {
     int engine = doc["engine"];
     syslog("CMD", "applyKitToAllPads engine=%d heap=%u", engine, ESP.getFreeHeap());
-    if (engine < -1 || engine > 6) {
-      return;  // Daisy supports engines 0-6 only
+    if (engine < -1 || engine > 8) {
+      return;  // Daisy supports engines 0..8
     }
 
     // Si algún track estaba en 303 y cambia a otro motor, detener la nota
@@ -4671,7 +4671,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   // and broadcasts melody_sync to ALL UDP slaves on every change so P4 piano
   // and S3 melody screen mirror each other automatically (just like pads).
   else if (cmd == "melodyRecToggle") {
-    uint8_t e = doc["engine"] | melodyEngine; if (e <= 6) melodyEngine = e;
+    uint8_t e = doc["engine"] | melodyEngine; if (e <= 8) melodyEngine = e;
     int o     = doc["octave"] | (int)melodyOctave; if (o >= 0 && o <= 9) melodyOctave = (uint8_t)o;
     melodyRecActive = doc["active"] | !melodyRecActive;
     if (melodyRecActive) { melodyClearGrid(); melodyStep = 0; }
@@ -4679,7 +4679,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "melodySetEngine") {
     uint8_t e = doc["engine"] | melodyEngine;
-    if (e <= 6) melodyEngine = e;
+    if (e <= 8) melodyEngine = e;
     broadcastMelodySync();
   }
   else if (cmd == "melodySetOctave") {
@@ -4709,7 +4709,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     }
   }
   else if (cmd == "melodyAssign") {
-    uint8_t e = doc["engine"] | melodyEngine; if (e <= 6) melodyEngine = e;
+    uint8_t e = doc["engine"] | melodyEngine; if (e <= 8) melodyEngine = e;
     int o     = doc["octave"] | (int)melodyOctave; if (o >= 0 && o <= 9) melodyOctave = (uint8_t)o;
     int pad = doc["pad"] | (int)melodyPad;
     if (pad >= 0 && pad < 16) {
@@ -4780,8 +4780,9 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "synthNoteOff") {
     uint8_t engine = doc["engine"] | 3;
     uint8_t track  = doc["track"]  | 0;
-    if (track < 16 && engine <= 6) {
-      spiMaster.synthNoteOff(engine, track);
+    uint8_t note   = doc.containsKey("note") ? (uint8_t)(doc["note"] | 0xFF) : (uint8_t)0xFF;
+    if (track < 16 && engine <= 8) {
+      spiMaster.synthNoteOff(engine, track, note);
     }
   }
 

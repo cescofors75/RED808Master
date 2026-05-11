@@ -325,7 +325,7 @@ typedef struct __attribute__((packed)) {
     uint8_t  slide;       // 0=normal, 1=slide/portamento
 } SynthNoteOnPayload;
 
-// CMD_SYNTH_NOTE_OFF (0xC3) — no payload
+// CMD_SYNTH_NOTE_OFF (0xC3) — legacy: no payload; v2.6+: [engine, track] or [engine, track, note]
 
 // CMD_SYNTH_NOTE_ON_EX (0xC7) — 5 bytes (generic melodic synth note-on)
 typedef struct __attribute__((packed)) {

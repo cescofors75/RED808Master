@@ -84,7 +84,7 @@ bool gLimiterActive  = true;
 bool gDistActive     = false;
 #endif
 // Track synth engine map for sequencer tracks:
-// -1 = sample, 0 = 808, 1 = 909, 2 = 505, 3 = 303, 4=WT, 5=SH101, 6=FM
+// -1 = sample, 0 = 808, 1 = 909, 2 = 505, 3 = 303, 4=WT, 5=SH101, 6=FM, 7=PHYS, 8=NOISE
 // volatile: written from Core0 (WS handler), read from Core1 (stepCallback)
 volatile int8_t gTrackSynthEngine[16] = {
     -1, -1, -1, -1,
@@ -95,14 +95,14 @@ volatile int8_t gTrackSynthEngine[16] = {
 
 void setTrackSynthEngine(int track, int8_t engine) {
     if (track < 0 || track >= 16) return;
-    if (engine < -1 || engine > 6) return;  // 0-6 valid engine IDs (Daisy supports 0-6 only)
+    if (engine < -1 || engine > 8) return;  // -1, 0..8 valid engine IDs
     gTrackSynthEngine[track] = engine;
     // Memory barrier to ensure Core1 sees the write immediately
     __asm__ __volatile__("memw" ::: "memory");
 }
 
 void setAllTrackSynthEngines(int8_t engine) {
-    if (engine < -1 || engine > 6) return;  // Daisy supports 0-6 only
+    if (engine < -1 || engine > 8) return;  // Daisy supports 0..8
     for (int i = 0; i < 16; i++) {
         gTrackSynthEngine[i] = engine;
     }
@@ -130,7 +130,7 @@ void releaseSequencerMelodicHolds() {
         gSeqMelodicHeldEngine[track] = -1;
         if (engine == 3) {
             spiMaster.synth303NoteOff();
-        } else if (engine >= 4 && engine <= 6) {
+        } else if (engine >= 4 && engine <= 8) {
             spiMaster.synthNoteOff((uint8_t)engine, (uint8_t)track);
         }
     }
@@ -388,13 +388,16 @@ void systemTask(void *pvParameters) {
 void triggerPadWithLED(int track, uint8_t velocity) {
     DBG_PRINTF("[TRIG] pad=%d vel=%d connected=%d\n", track, velocity, (int)spiMaster.isConnected());
     int8_t engine = getTrackSynthEngine(track);
-    if (track >= 0 && track < 16 && engine >= 0 && engine <= 6) {
+    if (track >= 0 && track < 16 && engine >= 0 && engine <= 8) {
         uint8_t liveVol = spiMaster.getLiveVolume();
         float scaled = (velocity / 127.0f) * (liveVol / 100.0f);
         uint8_t synthVelocity = (uint8_t)constrain((int)roundf(scaled * 127.0f), 1, 127);
         if (engine == 3) {
             uint8_t midiNote = PAD_303_NOTES[track];
             spiMaster.synth303NoteOn(midiNote, false, false);
+        } else if (engine >= 4) {
+            uint8_t midiNote = PAD_303_NOTES[track];
+            spiMaster.synthNoteOnEx((uint8_t)engine, midiNote, synthVelocity, false, false);
         } else {
             spiMaster.synthTrigger((uint8_t)engine, (uint8_t)track, synthVelocity);
         }
@@ -724,7 +727,7 @@ void setup() {
             if (gSeqMelodicHeld[track]) {
                 int8_t prevEngine = gSeqMelodicHeldEngine[track];
                 if (prevEngine == 3) spiMaster.synth303NoteOff();
-                else if (prevEngine >= 4 && prevEngine <= 6) spiMaster.synthNoteOff((uint8_t)prevEngine, (uint8_t)track);
+                else if (prevEngine >= 4 && prevEngine <= 8) spiMaster.synthNoteOff((uint8_t)prevEngine, (uint8_t)track);
                 gSeqMelodicHeld[track] = false;
                 gSeqMelodicHeldEngine[track] = -1;
             }
