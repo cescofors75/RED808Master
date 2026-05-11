@@ -100,8 +100,11 @@ private:
   void releaseWsReassemblySlot(WsReassemblySlot* slot);
   WsReassemblySlot wsReassemblySlots[4];
   void processCommand(const JsonDocument& doc);  // Función común para procesar comandos
+  void sendUdpJsonTo(IPAddress ip, uint16_t port, const JsonDocument& doc);
   void sendUdpStateSync(IPAddress ip, uint16_t port);
   void broadcastUdpStateSync();
+  void broadcastUdpMasterFx(const char* param, bool value);
+  void broadcastUdpMasterFx(const char* param, float value);
   bool shouldSendUdpStateSync(const char* cmd) const;
   /* v2.6 — Push pattern + selected index to all UDP slaves (P4/S3).
    * Fixes bug where slaves displayed stale pattern after web changed it. */

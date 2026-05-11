@@ -70,6 +70,9 @@ extern Sequencer sequencer;
 static volatile unsigned long pageTransitionMs = 0;
 static bool gMasterDelayActive = false;
 static bool gMasterPhaserActive = false;
+static float gMasterDelayMix = 0.0f;
+static float gMasterPhaserDepth = 0.0f;
+static float gMasterReverbMix = 0.3f;
 static bool gMasterFlangerActive = false;
 static bool gMasterCompressorActive = false;
 static int gMasterFilterType = 0;
@@ -719,6 +722,12 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     fx["distortion"] = gMasterDistortion;
     fx["bitCrush"] = gMasterBitCrushBits;
     fx["sampleRate"] = gMasterSampleRateReduction;
+    fx["delayActive"] = gMasterDelayActive;
+    fx["delayMix"] = gMasterDelayMix;
+    fx["reverbActive"] = spiMaster.isReverbActive();
+    fx["reverbMix"] = gMasterReverbMix;
+    fx["phaserActive"] = gMasterPhaserActive;
+    fx["phaserDepth"] = gMasterPhaserDepth;
 
     String output;
     serializeJson(doc, output);
@@ -1999,10 +2008,13 @@ void WebInterface::sendUdpStateSync(IPAddress ip, uint16_t port) {
   fx["bitCrush"] = gMasterBitCrushBits;
   fx["sampleRate"] = gMasterSampleRateReduction;
   fx["delayActive"] = gMasterDelayActive;
+  fx["delayMix"] = gMasterDelayMix;
   fx["phaserActive"] = gMasterPhaserActive;
+  fx["phaserDepth"] = gMasterPhaserDepth;
   fx["flangerActive"] = gMasterFlangerActive;
   fx["compressorActive"] = gMasterCompressorActive;
   fx["reverbActive"] = spiMaster.isReverbActive();
+  fx["reverbMix"] = gMasterReverbMix;
   fx["chorusActive"] = spiMaster.isChorusActive();
 
   JsonArray trackFilters = fx.createNestedArray("trackFilters");
@@ -2055,6 +2067,40 @@ void WebInterface::broadcastUdpStateSync() {
   if (udpClients.empty()) return;
   for (auto& entry : udpClients) {
     sendUdpStateSync(entry.second.ip, entry.second.port);
+    yield();
+  }
+}
+
+void WebInterface::sendUdpJsonTo(IPAddress ip, uint16_t port, const JsonDocument& doc) {
+  if (!initialized || ip == IPAddress(0, 0, 0, 0) || port == 0) return;
+  char buf[192];
+  size_t len = serializeJson(doc, buf, sizeof(buf));
+  if (len == 0 || len >= sizeof(buf)) return;
+  udp.beginPacket(ip, port);
+  udp.write((const uint8_t*)buf, len);
+  udp.endPacket();
+}
+
+void WebInterface::broadcastUdpMasterFx(const char* param, bool value) {
+  if (udpClients.empty() || !param || !param[0]) return;
+  StaticJsonDocument<128> doc;
+  doc["type"] = "masterFx";
+  doc["param"] = param;
+  doc["value"] = value;
+  for (auto& entry : udpClients) {
+    sendUdpJsonTo(entry.second.ip, entry.second.port, doc);
+    yield();
+  }
+}
+
+void WebInterface::broadcastUdpMasterFx(const char* param, float value) {
+  if (udpClients.empty() || !param || !param[0]) return;
+  StaticJsonDocument<128> doc;
+  doc["type"] = "masterFx";
+  doc["param"] = param;
+  doc["value"] = value;
+  for (auto& entry : udpClients) {
+    sendUdpJsonTo(entry.second.ip, entry.second.port, doc);
     yield();
   }
 }
@@ -3068,6 +3114,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     resp["type"] = "masterFx"; resp["param"] = "delayActive"; resp["value"] = active;
     String out; serializeJson(resp, out);
     if (ws) ws->textAll(out);
+    broadcastUdpMasterFx("delayActive", active);
+    broadcastUdpStateSync();
   }
   else if (cmd == "setDelayTime") {
     float ms = doc["value"];
@@ -3087,11 +3135,14 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setDelayMix") {
     float mix = doc["value"];
+    gMasterDelayMix = mix;
     spiMaster.setDelayMix(mix / 100.0f);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "delayMix"; resp["value"] = mix;
     String out; serializeJson(resp, out);
     if (ws) ws->textAll(out);
+    broadcastUdpMasterFx("delayMix", mix);
+    broadcastUdpStateSync();
   }
   else if (cmd == "setPhaserActive") {
     bool active = doc["value"];
@@ -3101,6 +3152,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     resp["type"] = "masterFx"; resp["param"] = "phaserActive"; resp["value"] = active;
     String out; serializeJson(resp, out);
     if (ws) ws->textAll(out);
+    broadcastUdpMasterFx("phaserActive", active);
+    broadcastUdpStateSync();
   }
   else if (cmd == "setPhaserRate") {
     float rate = doc["value"];
@@ -3112,11 +3165,14 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "setPhaserDepth") {
     float depth = doc["value"];
+    gMasterPhaserDepth = depth;
     spiMaster.setPhaserDepth(depth / 100.0f);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "phaserDepth"; resp["value"] = depth;
     String out; serializeJson(resp, out);
     if (ws) ws->textAll(out);
+    broadcastUdpMasterFx("phaserDepth", depth);
+    broadcastUdpStateSync();
   }
   else if (cmd == "setPhaserFeedback") {
     float fb = doc["value"];
@@ -3223,6 +3279,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     resp["type"] = "masterFx"; resp["param"] = "reverbActive"; resp["value"] = active;
     String out; serializeJson(resp, out);
     if (ws) ws->textAll(out);
+    broadcastUdpMasterFx("reverbActive", active);
+    broadcastUdpStateSync();
   }
   else if (cmd == "setReverbFeedback") {
     float v = doc["value"];
@@ -3244,11 +3302,14 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "setReverbMix") {
     float v = doc["value"];
     float mix = (v > 1.0f) ? (v / 100.0f) : v;
+    gMasterReverbMix = mix;
     spiMaster.setReverbMix(mix);
     StaticJsonDocument<96> resp;
     resp["type"] = "masterFx"; resp["param"] = "reverbMix"; resp["value"] = mix;
     String out; serializeJson(resp, out);
     if (ws) ws->textAll(out);
+    broadcastUdpMasterFx("reverbMix", mix);
+    broadcastUdpStateSync();
   }
   else if (cmd == "setChorusActive") {
     bool active = doc["value"];
@@ -4986,6 +5047,9 @@ void WebInterface::updateUdpClient(IPAddress ip, uint16_t port) {
 
   auto it = udpClients.find(sKey);
   if (it != udpClients.end()) {
+    if (it->second.port != port) {
+      it->second.port = port;
+    }
     it->second.lastSeen = millis();
     it->second.packetCount++;
   } else {
