@@ -83,6 +83,8 @@ static float gMasterFilterResonance = 1.0f;
 static float gMasterDistortion = 0.0f;
 extern void dsqUploadPattern(int pattern);           // upload one pattern to Daisy sequencer (Core1 only)
 extern void dsqUploadPatternDeferred(int pattern);   // safe from Core0: sets flag for Core1
+extern void dsqSelectPatternDeferred(int pattern);   // select-only path (1 SPI cmd, no reupload)
+extern void dsqUploadAndPlayDeferred(int pattern);   // upload + select + play, en orden garantizado
 
 // Helper: lee todos los param locks de un step del Sequencer y los envía a Daisy
 static void dsqSyncParamLock(int pat, int track, int step) {
@@ -760,7 +762,8 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     if (request->hasParam("index", true)) {
       int pattern = request->getParam("index", true)->value().toInt();
       sequencer.selectPattern(pattern);
-      dsqUploadPatternDeferred(pattern);
+      // Select-only: patrones ya están en Daisy desde boot. Mucho más rápido.
+      dsqSelectPatternDeferred(pattern);
       request->send(200, "text/plain", "OK");
     }
   });
@@ -768,7 +771,7 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   server->on("/api/sequencer", HTTP_POST, [](AsyncWebServerRequest *request){
     if (request->hasParam("action", true)) {
       String action = request->getParam("action", true)->value();
-      if (action == "start") { sequencer.start(); dsqUploadPatternDeferred(sequencer.getCurrentPattern()); spiMaster.dsqControl(1); }
+      if (action == "start") { sequencer.start(); dsqUploadAndPlayDeferred(sequencer.getCurrentPattern()); }
       else if (action == "stop") { sequencer.stop(); spiMaster.dsqControl(0); }
       request->send(200, "text/plain", "OK");
     }
@@ -2744,8 +2747,9 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   }
   else if (cmd == "start") {
     sequencer.start();
-    dsqUploadPatternDeferred(sequencer.getCurrentPattern());
-    spiMaster.dsqControl(1);
+    // Upload + select + play en orden garantizado (Core1 procesa todo seguido).
+    // Necesario tras cargar MIDI, editar pasos en bulk, o cambiar engines.
+    dsqUploadAndPlayDeferred(sequencer.getCurrentPattern());
     StaticJsonDocument<96> resp;
     resp["type"] = "playState";
     resp["playing"] = true;
@@ -2821,7 +2825,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int pattern = doc["index"];
     syslog("CMD", "selPat idx=%d heap=%u", pattern, ESP.getFreeHeap());
     sequencer.selectPattern(pattern);
-    dsqUploadPatternDeferred(pattern);
+    // Select-only: patrones ya est\xC3\xA1n cargados en Daisy. 1 cmd SPI vs ~32 cmds.
+    dsqSelectPatternDeferred(pattern);
     /* v2.6 — Push to UDP slaves so LCD pattern display always matches master */
     broadcastUdpPatternSync(pattern);
     if (s_udpReplyIp != IPAddress(0, 0, 0, 0) && s_udpReplyPort != 0) {

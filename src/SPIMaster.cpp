@@ -157,12 +157,15 @@ uint16_t SPIMaster::crc16(const uint8_t* data, uint16_t len) {
     return crc;
 }
 
-// ── Core0→Core1 queue drain — called at start of every process() tick ──────
+// ── Core0→Core1 queue drain ─ called at start of every process() tick ──────
 void SPIMaster::drainCmdQueue() {
     if (!spiCmdQueue) return;
     SpiQueuedCmd env;
-    while (xQueueReceive(spiCmdQueue, &env, 0) == pdTRUE) {
+    // Cap por tick para evitar starvation del watchdog (sequencer.update, etc.)
+    int processed = 0;
+    while (processed < 32 && xQueueReceive(spiCmdQueue, &env, 0) == pdTRUE) {
         sendCommandDirect(env.cmd, env.payload, env.payloadLen);
+        processed++;
     }
 }
 
@@ -180,17 +183,14 @@ bool SPIMaster::sendCommand(uint8_t cmd, const void* payload, uint16_t payloadLe
         if (queued == pdTRUE) return true;
 
         spiErrorCount++;
-        Serial.printf("[SPI] queue full, dropped cmd=0x%02X len=%u waiting=%u\n",
-                      (unsigned)cmd,
-                      (unsigned)payloadLen,
-                      (unsigned)uxQueueMessagesWaiting(spiCmdQueue));
+        // Nota: NO usar Serial.printf aquí: estamos en Core0 (WS handler) y bloquearía WiFi.
+        // syslog() es no bloqueante (UDP) si está disponible.
 
         if (cmd == CMD_TRIGGER_SEQ || cmd == CMD_TRIGGER_LIVE || cmd == CMD_DSQ_CONTROL ||
             cmd == CMD_DSQ_SET_STEP || cmd == CMD_DSQ_SELECT_PATTERN) {
             vTaskDelay(pdMS_TO_TICKS(1));
             queued = xQueueSend(spiCmdQueue, &env, pdMS_TO_TICKS(10));
             if (queued == pdTRUE) return true;
-            Serial.printf("[SPI] retry failed, dropped critical cmd=0x%02X\n", (unsigned)cmd);
         }
         return false;
     }

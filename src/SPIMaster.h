@@ -41,7 +41,7 @@ struct SpiQueuedCmd {
 #define DAISY_SPI_MOSI             5
 #define DAISY_SPI_MISO             6
 #define DAISY_SPI_CLOCK_HZ    1000000UL   /* 1MHz — margen vs OVR en slave polling */
-#define DAISY_SPI_RESPONSE_GAP_US  15000  /* 15ms — ampliado para dar margen al main loop de Daisy */
+#define DAISY_SPI_RESPONSE_GAP_US  2000   /* 2ms — gap entre TX y RX en sendAndReceive; suficiente para Daisy main loop */
 
 // Audio constants (mirrored from old AudioEngine for compatibility)
 static constexpr int MAX_AUDIO_TRACKS = 16;

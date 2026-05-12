@@ -37,9 +37,8 @@
 #define AP_PASSWORD "red808esp32"
 
 
-// Daisy-first workflow: no precarga de samples locales en boot de ESP32.
-// Los samples se gestionan desde SD en Daisy vía comandos SD_*.
-#define BOOT_PRELOAD_LOCAL_SAMPLES false
+// Daisy-first workflow: samples se gestionan desde SD en Daisy vía comandos SD_*.
+// La precarga local desde LittleFS quedó eliminada (Daisy carga directamente).
 
 #ifndef RED808_MASTER_SPI_TRIGGER_TEST
 #define RED808_MASTER_SPI_TRIGGER_TEST 0
@@ -156,12 +155,6 @@ const uint32_t instrumentColors[16] = {
     0x484DFF   // 15: LC (LOW CONGA) - Azul índigo
 };
 
-// Utility to detect supported audio sample files (.raw or .wav)
-static bool isValidSampleFile(const String& filename) {
-    return filename.endsWith(".raw") || filename.endsWith(".RAW") ||
-           filename.endsWith(".wav") || filename.endsWith(".WAV");
-}
-
 // === FUNCIONES DE SECUENCIA LED ===
 void showBootLED() {
     // Púrpura BRILLANTE: Inicio del sistema
@@ -221,6 +214,8 @@ void setLedMonoMode(bool enabled) {
 static portMUX_TYPE _pendingDsqMux = portMUX_INITIALIZER_UNLOCKED;
 static volatile int8_t _pendingDsqUpload = -1;   // pattern index, -1 = idle
 static volatile bool   _pendingDsqSelect = false;
+static volatile int8_t _pendingDsqSelectOnly = -1; // pattern index for select-only path
+static volatile bool   _pendingDsqPlay = false;    // arrancar Daisy tras upload (ordenado)
 
 void dsqUploadPatternDeferred(int pattern) {
     if (pattern < 0) pattern = 0;
@@ -230,6 +225,32 @@ void dsqUploadPatternDeferred(int pattern) {
     _pendingDsqUpload = (int8_t)pattern;
     portEXIT_CRITICAL(&_pendingDsqMux);
 }
+
+// Solo selecciona patrón en Daisy (1 cmd SPI). NO reuploadea steps.
+// Usar cuando los patrones ya están en Daisy y solo queremos cambiar el activo.
+void dsqSelectPatternDeferred(int pattern) {
+    if (pattern < 0) pattern = 0;
+    pattern %= DSQ_PATTERNS;
+    portENTER_CRITICAL(&_pendingDsqMux);
+    _pendingDsqSelectOnly = (int8_t)pattern;
+    portEXIT_CRITICAL(&_pendingDsqMux);
+}
+
+// Sube patrón y al terminar arranca Daisy. Garantiza orden upload → select → play.
+void dsqUploadAndPlayDeferred(int pattern) {
+    if (pattern < 0) pattern = 0;
+    pattern %= DSQ_PATTERNS;
+    portENTER_CRITICAL(&_pendingDsqMux);
+    _pendingDsqSelect = true;
+    _pendingDsqUpload = (int8_t)pattern;
+    _pendingDsqPlay   = true;
+    portEXIT_CRITICAL(&_pendingDsqMux);
+}
+
+// Número real de patrones inline definidos en setup (HIP HOP, TECHNO, DnB,
+// BREAK, HOUSE, TRAP). Subir sólo estos al boot evita saturar la SPI con
+// 10 patrones vacíos y reduce el riesgo de perder comandos a la Daisy.
+#define DSQ_PATTERNS_INLINE 6
 
 // Helper: convierte un patrón del Sequencer ESP32 → DsqStepPkt y lo sube a Daisy
 void dsqUploadPattern(int pattern) {
@@ -260,6 +281,11 @@ void dsqUploadPattern(int pattern) {
                 );
             }
         }
+        // Yield cada 4 tracks para que la Daisy drene su cola SPI y no
+        // monopolizar el core durante el burst de subida del patrón.
+        if ((trk & 3) == 3) {
+            vTaskDelay(pdMS_TO_TICKS(2));
+        }
     }
 }
 
@@ -268,11 +294,13 @@ void dsqUploadPattern(int pattern) {
 void spiAudioTask(void *pvParameters) {
     esp_task_wdt_add(NULL);  // subscribe to TWDT
 
-    // Subir todos los patrones a Daisy Seed al arrancar
-    // (el SPI ya está listo porque spiMaster.begin() fue llamado en setup)
-    for (int pat = 0; pat < DSQ_PATTERNS; pat++) {
+    // Subir sólo los patrones inline reales (no los 16 slots completos).
+    // 20ms de gap entre patrones para que la Daisy procese cada lote
+    // antes de empezar el siguiente — evita que comandos posteriores caigan
+    // al vacío y dejen slots con datos parciales (sintoma: patrones que no suenan).
+    for (int pat = 0; pat < DSQ_PATTERNS_INLINE; pat++) {
         dsqUploadPattern(pat);
-        vTaskDelay(pdMS_TO_TICKS(2));   // pequeño gap entre patrones
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
     // Seleccionar patrón activo en Daisy
     spiMaster.dsqSelectPattern((uint8_t)sequencer.getCurrentPattern());
@@ -293,14 +321,18 @@ void spiAudioTask(void *pvParameters) {
         // ── Check deferred pattern upload from Core0 ──
         int8_t pat;
         bool selectAfterUpload;
+        bool playAfterUpload;
         portENTER_CRITICAL(&_pendingDsqMux);
         pat = _pendingDsqUpload;
         if (pat >= 0) {
             _pendingDsqUpload = -1;
             selectAfterUpload = _pendingDsqSelect;
             _pendingDsqSelect = false;
+            playAfterUpload = _pendingDsqPlay;
+            _pendingDsqPlay = false;
         } else {
             selectAfterUpload = false;
+            playAfterUpload = false;
         }
         portEXIT_CRITICAL(&_pendingDsqMux);
         if (pat >= 0) {
@@ -308,6 +340,19 @@ void spiAudioTask(void *pvParameters) {
             if (selectAfterUpload) {
                 spiMaster.dsqSelectPattern((uint8_t)pat);
             }
+            if (playAfterUpload) {
+                spiMaster.dsqControl(1);  // PLAY al final, en orden garantizado
+            }
+        }
+
+        // ── Select-only path (1 cmd SPI, no reupload) ──
+        int8_t selOnly;
+        portENTER_CRITICAL(&_pendingDsqMux);
+        selOnly = _pendingDsqSelectOnly;
+        _pendingDsqSelectOnly = -1;
+        portEXIT_CRITICAL(&_pendingDsqMux);
+        if (selOnly >= 0) {
+            spiMaster.dsqSelectPattern((uint8_t)selOnly);
         }
 
         sequencer.update();   // Mantiene internos del secuenciador (beat UI, song mode)
@@ -563,146 +608,57 @@ void setup() {
     // 3. Sample Manager (modo Daisy-first: sin precarga local en boot)
     sampleManager.begin();
     syslog("BOOT", "SampleManager OK, heap=%u", ESP.getFreeHeap());
-    bool shouldPreloadLocalSamples = BOOT_PRELOAD_LOCAL_SAMPLES;
-    if (shouldPreloadLocalSamples) {
+
+    // Daisy-first: cargar kit por defecto desde SD del Daisy.
+    // Reintenta hasta 3 veces para asegurar que la Daisy recibe el comando
+    // (acabamos de despertar, la cola SPI puede estar caliente).
+    {
+        const char* defaultKit = "RED 808 KARZ";
+        bool sdOk = false;
+        int loadedMainPads = -1;
         SdStatusResponse sdStatus = {};
-        if (spiMaster.sdGetStatus(sdStatus) && sdStatus.present) {
-            int loadedMainPads = 0;
-            for (int i = 0; i < 16; i++) {
-                if (sdStatus.samplesLoaded & (1UL << i)) loadedMainPads++;
-            }
-
-            if (loadedMainPads >= 16) {
-                shouldPreloadLocalSamples = false;
-            } else {
-            }
-        } else {
-        }
-    } else {
-        SdStatusResponse sdStatus = {};
-        if (spiMaster.sdGetStatus(sdStatus) && sdStatus.present) {
-            int loadedMainPads = 0;
-            for (int i = 0; i < 16; i++) {
-                if (sdStatus.samplesLoaded & (1UL << i)) loadedMainPads++;
-            }
-
-            if (loadedMainPads == 0) {
-                const char* defaultKit = "RED 808 KARZ";
-                bool sent = spiMaster.sdLoadKit(defaultKit, 0, 16);
-            } else {
-            }
-        } else {
-        }
-    }
-
-    if (shouldPreloadLocalSamples) {
-        const char* families[] = {"BD", "SD", "CH", "OH", "CY", "CP", "RS", "CB", "LT", "MT", "HT", "MA", "CL", "HC", "MC", "LC"};
-
-        // ============= RED 808 KARZ - Default Sample Kit =============
-        // Mapping: filename prefix -> family index
-        // 808 BD -> BD(0), 808 SD -> SD(1), 808 HH -> CH(2), 808 OH -> OH(3),
-        // 808 CY -> CY(4), 808 CP -> CP(5), 808 RS -> RS(6), 808 COW -> CB(7),
-        // 808 LT -> LT(8), 808 MT -> MT(9), 808 HT -> HT(10), 808 MA -> MA(11),
-        // 808 CL -> CL(12), 808 HC -> HC(13), 808 MC -> MC(14), 808 LC -> LC(15)
-        struct KarzMapping {
-            const char* prefix;  // Prefix in filename (after "808 ")
-            int padIndex;        // Target pad/family index
-        };
-        const KarzMapping karzMap[] = {
-            {"BD", 0}, {"SD", 1}, {"HH", 2}, {"OH", 3},
-            {"CY", 4}, {"CP", 5}, {"RS", 6}, {"COW", 7},
-            {"LT", 8}, {"MT", 9}, {"HT", 10}, {"MA", 11},
-            {"CL", 12}, {"HC", 13}, {"MC", 14}, {"LC", 15}
-        };
-        const int karzMapSize = sizeof(karzMap) / sizeof(karzMap[0]);
-
-        bool karzLoaded[16] = {false};
-        int karzCount = 0;
-
-        // Try loading from RED 808 KARZ first
-        File karzDir = LittleFS.open("/RED 808 KARZ", "r");
-        if (karzDir && karzDir.isDirectory()) {
-            File kf = karzDir.openNextFile();
-            while (kf) {
-                if (!kf.isDirectory()) {
-                    String kfName = kf.name();
-                    int lastSlash = kfName.lastIndexOf('/');
-                    if (lastSlash >= 0) kfName = kfName.substring(lastSlash + 1);
-
-                    if (isValidSampleFile(kfName)) {
-                        // Parse: "808 XX ..." -> extract XX
-                        String upper = kfName;
-                        upper.toUpperCase();
-
-                        for (int m = 0; m < karzMapSize; m++) {
-                            if (karzLoaded[karzMap[m].padIndex]) continue;
-
-                            String searchStr = String("808 ") + String(karzMap[m].prefix);
-                            if (upper.startsWith(searchStr) || upper.startsWith(String("808") + String(karzMap[m].prefix))) {
-                                String fullPath = String("/RED 808 KARZ/") + kfName;
-
-                                if (sampleManager.loadSample(fullPath.c_str(), karzMap[m].padIndex)) {
-                                    karzLoaded[karzMap[m].padIndex] = true;
-                                    karzCount++;
-                                } else {
-                                }
-                                break;
-                            }
-                        }
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (spiMaster.sdGetStatus(sdStatus)) {
+                sdOk = true;
+                if (sdStatus.present) {
+                    loadedMainPads = 0;
+                    for (int i = 0; i < 16; i++) {
+                        if (sdStatus.samplesLoaded & (1UL << i)) loadedMainPads++;
                     }
-                }
-                kf.close();
-                kf = karzDir.openNextFile();
-            }
-            karzDir.close();
-        } else {
-        }
-
-        // Fallback: load missing instruments from individual family folders
-        for (int i = 0; i < 16; i++) {
-            if (karzLoaded[i]) continue;  // Already loaded from KARZ
-
-            String path = String("/") + String(families[i]);
-
-            File dir = LittleFS.open(path, "r");
-
-            if (dir && dir.isDirectory()) {
-                File file = dir.openNextFile();
-                bool loaded = false;
-
-                while (file && !loaded) {
-                    if (!file.isDirectory()) {
-                        String filename = file.name();
-                        if (isValidSampleFile(filename)) {
-                            // Extraer solo el nombre del archivo
-                            int lastSlash = filename.lastIndexOf('/');
-                            if (lastSlash >= 0) {
-                                filename = filename.substring(lastSlash + 1);
-                            }
-
-                            String fullPath = String("/") + String(families[i]) + "/" + filename;
-
-                            if (sampleManager.loadSample(fullPath.c_str(), i)) {
-                                loaded = true;
-                            } else {
-                            }
-                        }
-                    }
-                    file.close();
-                    if (!loaded) {
-                        file = dir.openNextFile();
-                    }
-                }
-
-                dir.close();
-
-                if (!loaded) {
+                    syslog("BOOT", "Daisy SD: present=1 loadedPads=%d (attempt %d)",
+                           loadedMainPads, attempt + 1);
+                    break;
+                } else {
+                    syslog("BOOT", "Daisy SD not present (attempt %d)", attempt + 1);
                 }
             } else {
+                syslog("BOOT", "Daisy sdGetStatus FAILED (attempt %d)", attempt + 1);
             }
+            delay(150);
         }
 
-    } else {
+        if (!sdOk) {
+            syslog("BOOT", "WARN: Daisy SD status unreachable, kit NOT loaded");
+        } else if (!sdStatus.present) {
+            syslog("BOOT", "WARN: Daisy SD missing, kit NOT loaded");
+        } else if (loadedMainPads >= 16) {
+            syslog("BOOT", "Daisy already has 16 pads, skip kit load");
+        } else {
+            // Necesitamos cargar / recargar el kit. Reintenta hasta 3 veces.
+            bool sent = false;
+            for (int attempt = 0; attempt < 3 && !sent; attempt++) {
+                sent = spiMaster.sdLoadKit(defaultKit, 0, 16);
+                if (!sent) {
+                    syslog("BOOT", "sdLoadKit enqueue FAILED (attempt %d)", attempt + 1);
+                    delay(100);
+                }
+            }
+            if (sent) {
+                syslog("BOOT", "sdLoadKit '%s' sent OK (had %d/16)", defaultKit, loadedMainPads);
+            } else {
+                syslog("BOOT", "ERROR: sdLoadKit could not be enqueued");
+            }
+        }
     }
 
     // 4. Sequencer Setup
