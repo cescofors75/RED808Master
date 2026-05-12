@@ -1061,6 +1061,24 @@ void setup() {
         delay(500);
     }
 
+        const char* bootPatternBank = nullptr;
+        if (LittleFS.exists("/patterns/10_temas_referencia_808.json")) {
+            bootPatternBank = "10_temas_referencia_808.json";
+        } else if (LittleFS.exists("/patterns/808_classics_bank.json")) {
+            bootPatternBank = "808_classics_bank.json";
+        }
+
+        if (bootPatternBank) {
+            String bankErr;
+            if (webInterface.loadPatternBank(bootPatternBank, &bankErr)) {
+                syslog("BOOT", "Autoload pattern bank OK: %s", bootPatternBank);
+            } else {
+                syslog("BOOT", "Autoload pattern bank FAILED (%s): %s", bootPatternBank, bankErr.c_str());
+            }
+        } else {
+            syslog("BOOT", "Autoload pattern bank skipped: no boot pattern file found in /patterns");
+        }
+
     webInterface.setMIDIController(&midiController);
     midiController.setMessageCallback([](const MIDIMessage& msg) {
         webInterface.broadcastMIDIMessage(msg);

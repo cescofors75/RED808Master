@@ -95,6 +95,119 @@ static void dsqSyncParamLock(int pat, int track, int step) {
     spiMaster.dsqSetParamLock((uint8_t)pat, (uint8_t)track, (uint8_t)step,
         ce, ch, re, rv, ve, vl);
 }
+
+static String normalizePatternBankPath(const String& requestPath) {
+  String path = requestPath;
+  path.trim();
+  if (path.length() == 0) return String();
+  if (path.indexOf("..") >= 0) return String();
+  if (!path.startsWith("/patterns/")) {
+    if (path.startsWith("/")) path = "/patterns" + path;
+    else path = "/patterns/" + path;
+  }
+  if (!path.endsWith(".json")) path += ".json";
+  return path;
+}
+
+static int normalizePatternLength(int requested) {
+  if (requested <= 16) return 16;
+  if (requested <= 32) return 32;
+  return 64;
+}
+
+static bool loadPatternBankFromFs(const String& requestPath, String* errMsg = nullptr) {
+  String path = normalizePatternBankPath(requestPath);
+  if (path.length() == 0) {
+    if (errMsg) *errMsg = "bad_path";
+    return false;
+  }
+  if (!LittleFS.exists(path)) {
+    if (errMsg) *errMsg = "not_found";
+    return false;
+  }
+
+  File f = LittleFS.open(path, "r");
+  if (!f) {
+    if (errMsg) *errMsg = "open_failed";
+    return false;
+  }
+
+  DynamicJsonDocument doc(32768);
+  DeserializationError error = deserializeJson(doc, f);
+  f.close();
+  if (error) {
+    if (errMsg) *errMsg = "json_error";
+    return false;
+  }
+
+  int stepCount = normalizePatternLength(doc["stepCount"] | 16);
+  sequencer.setPatternLength(stepCount);
+
+  float tempo = doc["tempo"] | 0.0f;
+  if (tempo >= 40.0f && tempo <= 240.0f) {
+    sequencer.setTempo(tempo);
+    spiMaster.setTempo(tempo);
+  }
+
+  JsonArrayConst patterns = doc["patterns"].as<JsonArrayConst>();
+  if (patterns.isNull() || patterns.size() == 0) {
+    if (errMsg) *errMsg = "no_patterns";
+    return false;
+  }
+
+  for (JsonObjectConst patObj : patterns) {
+    int slot = patObj["slot"] | -1;
+    if (slot < 0 || slot >= MAX_PATTERNS) continue;
+    bool stepsData[MAX_TRACKS][STEPS_PER_PATTERN] = {};
+    uint8_t velsData[MAX_TRACKS][STEPS_PER_PATTERN];
+    memset(velsData, 127, sizeof(velsData));
+
+    JsonArrayConst tracks = patObj["tracks"].as<JsonArrayConst>();
+    for (JsonObjectConst trObj : tracks) {
+      int track = trObj["track"] | -1;
+      if (track < 0 || track >= MAX_TRACKS) continue;
+      JsonArrayConst steps = trObj["steps"].as<JsonArrayConst>();
+      JsonArrayConst velocities = trObj["velocities"].as<JsonArrayConst>();
+      for (int step = 0; step < stepCount && step < STEPS_PER_PATTERN; step++) {
+        bool active = false;
+        if (!steps.isNull() && step < (int)steps.size()) {
+          active = steps[step].as<int>() != 0;
+        }
+        stepsData[track][step] = active;
+        if (!velocities.isNull() && step < (int)velocities.size()) {
+          int velocity = velocities[step].as<int>();
+          velsData[track][step] = constrain(velocity, 1, 127);
+        }
+      }
+    }
+
+    sequencer.clearPattern(slot);
+    sequencer.setPatternBulk(slot, stepsData, velsData);
+  }
+
+  JsonArrayConst songChain = doc["songChain"].as<JsonArrayConst>();
+  if (!songChain.isNull() && songChain.size() > 0) {
+    uint8_t count = min((int)songChain.size(), (int)Sequencer::SONG_CHAIN_MAX);
+    Sequencer::SongChainEntry entries[Sequencer::SONG_CHAIN_MAX] = {};
+    SongEntry spiEntries[SONG_MAX_ENTRIES] = {};
+    for (uint8_t i = 0; i < count; i++) {
+      entries[i].pattern = constrain((int)(songChain[i]["pattern"] | 0), 0, MAX_PATTERNS - 1);
+      entries[i].repeats = constrain((int)(songChain[i]["repeats"] | 1), 1, 16);
+      spiEntries[i].pattern = entries[i].pattern;
+      spiEntries[i].repeats = entries[i].repeats;
+    }
+    sequencer.songChainUpload(entries, count);
+    spiMaster.songUpload(spiEntries, count);
+    sequencer.songChainReset();
+    spiMaster.songControl(2);
+  }
+
+  int selectPattern = doc["selectPattern"] | 0;
+  selectPattern = constrain(selectPattern, 0, MAX_PATTERNS - 1);
+  sequencer.selectPattern(selectPattern);
+  dsqUploadPatternDeferred(selectPattern);
+  return true;
+}
 extern SampleManager sampleManager;
 extern void triggerPadWithLED(int track, uint8_t velocity);  // Función que enciende LED
 extern void setLedMonoMode(bool enabled);
@@ -684,6 +797,43 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     String output;
     serializeJson(doc, output);
     request->send(200, "application/json", output);
+  });
+
+  server->on("/api/patternBanks", HTTP_GET, [](AsyncWebServerRequest *request){
+    DynamicJsonDocument doc(2048);
+    JsonArray files = doc.createNestedArray("files");
+    File dir = LittleFS.open("/patterns", "r");
+    if (dir) {
+      File entry = dir.openNextFile();
+      while (entry) {
+        if (!entry.isDirectory()) {
+          String name = entry.name();
+          if (name.endsWith(".json")) files.add(name);
+        }
+        entry = dir.openNextFile();
+      }
+      dir.close();
+    }
+    String out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out);
+  });
+
+  server->on("/api/patternBank/load", HTTP_GET, [this](AsyncWebServerRequest *request){
+    if (!request->hasParam("file")) {
+      request->send(400, "application/json", "{\"error\":\"missing_file\"}");
+      return;
+    }
+    String err;
+    String file = request->getParam("file")->value();
+    if (!loadPatternBankFromFs(file, &err)) {
+      String out = String("{\"error\":\"") + err + "\"}";
+      request->send(400, "application/json", out);
+      return;
+    }
+    broadcastSequencerState();
+    broadcastUdpSongPattern(sequencer.getCurrentPattern(), sequencer.getSongChainCount());
+    request->send(200, "application/json", "{\"ok\":true}");
   });
 
   server->on("/api/p4State", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -1936,6 +2086,13 @@ void WebInterface::broadcastSequencerState() {
   }
 }
 
+bool WebInterface::loadPatternBank(const String& file, String* errMsg) {
+  if (!loadPatternBankFromFs(file, errMsg)) return false;
+  broadcastSequencerState();
+  broadcastUdpSongPattern(sequencer.getCurrentPattern(), sequencer.getSongChainCount());
+  return true;
+}
+
 bool WebInterface::shouldSendUdpStateSync(const char* cmd) const {
   if (!cmd) return false;
   return strcmp(cmd, "hello") == 0 ||
@@ -1950,7 +2107,6 @@ bool WebInterface::shouldSendUdpStateSync(const char* cmd) const {
          strcmp(cmd, "setMuteMask") == 0 ||
          strcmp(cmd, "setSoloMask") == 0 ||
          strcmp(cmd, "setTrackSolo") == 0 ||
-         strcmp(cmd, "setTrackVolume") == 0 ||
          strcmp(cmd, "getTrackVolumes") == 0 ||
          strncmp(cmd, "setFilter", 9) == 0 ||
          strncmp(cmd, "setDelay", 8) == 0 ||
@@ -2099,6 +2255,31 @@ void WebInterface::broadcastUdpMasterFx(const char* param, float value) {
   doc["type"] = "masterFx";
   doc["param"] = param;
   doc["value"] = value;
+  for (auto& entry : udpClients) {
+    sendUdpJsonTo(entry.second.ip, entry.second.port, doc);
+    yield();
+  }
+}
+
+void WebInterface::broadcastUdpTrackVolume(int track, int volume) {
+  if (udpClients.empty() || track < 0 || track >= 16) return;
+  StaticJsonDocument<128> doc;
+  doc["type"] = "trackVolumeSet";
+  doc["track"] = track;
+  doc["volume"] = volume;
+  for (auto& entry : udpClients) {
+    if (entry.second.ip == s_udpReplyIp) continue;  // skip sender (they get full state_sync)
+    sendUdpJsonTo(entry.second.ip, entry.second.port, doc);
+    yield();
+  }
+}
+
+void WebInterface::broadcastUdpSongPattern(int pattern, int songLength) {
+  if (udpClients.empty() || pattern < 0 || pattern >= MAX_PATTERNS) return;
+  StaticJsonDocument<128> doc;
+  doc["type"] = "songPattern";
+  doc["pattern"] = pattern;
+  doc["songLength"] = songLength;
   for (auto& entry : udpClients) {
     sendUdpJsonTo(entry.second.ip, entry.second.port, doc);
     yield();
@@ -2290,6 +2471,10 @@ void WebInterface::update() {
       "{\"type\":\"songPattern\",\"pattern\":%d,\"songLength\":%d}",
       songPat, songLen);
     ws->textAll(buf, len);
+    broadcastUdpSongPattern(songPat, songLen);
+  } else if (songPat >= 0) {
+    _pendingSongPattern = -1;
+    broadcastUdpSongPattern(songPat, _pendingSongLength);
   }
 
   // Skip periodic broadcasts during page transitions (2s window)
@@ -2485,7 +2670,6 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   bool isVolumeFast =
     (cmd == "setSequencerVolume") ||
     (cmd == "setLiveVolume") ||
-    (cmd == "setTrackVolume") ||
     (cmd == "setVolume") ||
     (cmd == "setLivePitch");
 
@@ -4408,6 +4592,7 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     String output;
     serializeJson(responseDoc, output);
     if (ws) ws->textAll(output);
+    broadcastUdpTrackVolume(track, volume);
   }
   else if (cmd == "getTrackVolume") {
     int track = doc["track"];

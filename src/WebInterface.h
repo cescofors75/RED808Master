@@ -41,10 +41,12 @@ public:
   bool isSTAMode() const { return _staConnected; }
   
   void broadcastSequencerState();
+  bool loadPatternBank(const String& file, String* errMsg = nullptr);
   void sendSequencerStateToClient(AsyncWebSocketClient* client);
   void broadcastPadTrigger(int pad);
   void broadcastStep(int step);
   void broadcastSongPattern(int pattern, int songLength);
+  void broadcastUdpSongPattern(int pattern, int songLength);
   
   // MIDI functions
   void setMIDIController(MIDIController* controller);
@@ -105,6 +107,7 @@ private:
   void broadcastUdpStateSync();
   void broadcastUdpMasterFx(const char* param, bool value);
   void broadcastUdpMasterFx(const char* param, float value);
+  void broadcastUdpTrackVolume(int track, int volume);
   bool shouldSendUdpStateSync(const char* cmd) const;
   /* v2.6 — Push pattern + selected index to all UDP slaves (P4/S3).
    * Fixes bug where slaves displayed stale pattern after web changed it. */
