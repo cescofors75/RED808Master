@@ -4,28 +4,28 @@
    ============================================================ */
 
 :root {
-  --pb-bg: #0c0c0e;
-  --pb-surface: #141418;
-  --pb-surface2: #1a1a20;
-  --pb-border: #2a2a32;
-  --pb-text: #e8e8ec;
-  --pb-text-dim: #72727e;
-  --pb-red: #ff2d2d;
-  --pb-cyan: #00e5ff;
-  --pb-orange: #ff9100;
+  --pb-bg: var(--r808-bg-base);
+  --pb-surface: var(--r808-bg-surface);
+  --pb-surface2: var(--r808-bg-panel);
+  --pb-border: var(--r808-border);
+  --pb-text: var(--r808-text);
+  --pb-text-dim: var(--r808-text-dim);
+  --pb-red: var(--r808-red-light);
+  --pb-cyan: var(--r808-accent-cyan);
+  --pb-orange: var(--r808-accent-orange);
   --pb-yellow: #ffd600;
-  --pb-purple: #b388ff;
+  --pb-purple: var(--r808-accent-purple);
   --pb-pink: #ff4081;
-  --pb-green: #69f0ae;
+  --pb-green: var(--r808-accent-green);
   --pb-teal: #26c6da;
   --pb-violet: #ea80fc;
   --pb-gold: #ffd700;
-  --pb-blue: #448aff;
+  --pb-blue: var(--r808-track-blue);
   --pb-filter-notch: #aab0c0;
   --pb-filter-allpass: #78909c;
-  --pb-filter-peaking: #ffab40;
+  --pb-filter-peaking: var(--r808-accent-orange);
   --pb-filter-lowshelf: #c6ff00;
-  --pb-filter-highshelf: #ce93d8;
+  --pb-filter-highshelf: var(--r808-accent-purple);
   --pb-filter-resonant: #f06292;
   --pb-grid: rgba(255,255,255,0.025);
   --pb-header-h: 64px;
@@ -66,7 +66,7 @@ body {
   display: flex;
   align-items: center;
   height: var(--pb-header-h);
-  background: linear-gradient(180deg, #181820, var(--pb-surface));
+  background: linear-gradient(180deg, var(--r808-bg-panel) 0%, var(--pb-surface) 100%);
   border-bottom: 1px solid var(--pb-border);
   padding: 0 18px;
   z-index: 1000;
@@ -713,7 +713,7 @@ body {
 #pbSVG path.pb-cable.is-selected {
   stroke: #ff4081 !important;
   filter: url(#cableGlow) drop-shadow(0 0 6px #ff4081);
-  animation: pbSelectedCablePulse 0.8s ease-in-out infinite;
+  animation: pbSelectedCablePulse 0.8s ease-in-out 2;
 }
 @keyframes pbSelectedCablePulse {
   0%, 100% { stroke-opacity: 1; }
@@ -722,11 +722,11 @@ body {
 /* Cable animation ONLY when playing AND not muted */
 #patchbay.pb-playing #pbSVG path.pb-cable:not(.is-selected):not(.is-muted) {
   stroke-dasharray: 14 10;
-  animation: pbCablePulse var(--pb-pulse-duration) ease-in-out infinite, pbSignalFlow var(--pb-flow-duration) linear infinite;
+  animation: pbCablePulse var(--pb-pulse-duration) ease-in-out 2, pbSignalFlow var(--pb-flow-duration) linear 2;
   animation-delay: var(--flow-delay, 0s), var(--flow-delay, 0s);
 }
 #patchbay.pb-playing #pbSVG path.pb-cable.is-selected:not(.is-muted) {
-  animation: pbCablePulse var(--pb-pulse-duration) ease-in-out infinite;
+  animation: pbCablePulse var(--pb-pulse-duration) ease-in-out 2;
 }
 /* Muted cables — pastel, no animation, lower opacity */
 #pbSVG path.pb-cable.is-muted {
@@ -739,7 +739,7 @@ body {
   opacity: 0.55;
   filter: saturate(0.3) brightness(1.4);
   stroke: #ff4081 !important;
-  animation: pbSelectedCablePulse 0.8s ease-in-out infinite !important;
+  animation: pbSelectedCablePulse 0.8s ease-in-out 2 !important;
 }
 #patchbay.pb-step-hit #pbSVG path.pb-cable:not(.is-muted) {
   filter: brightness(1.28);
@@ -969,10 +969,10 @@ body {
   transform: scale(1.45);
 }
 .pb-connector.active {
-  animation: connectorPulse 1.2s ease-in-out infinite;
+  animation: connectorPulse 1.2s ease-in-out 2;
 }
 #patchbay.pb-playing .pb-connector {
-  animation: pbConnectorBlink var(--pb-pulse-duration) ease-in-out infinite;
+  animation: pbConnectorBlink var(--pb-pulse-duration) ease-in-out 3;
 }
 
 /* Output connector (right side of node) */
@@ -982,11 +982,11 @@ body {
   transform: translateY(-50%);
   background: var(--pb-red);
   border-color: var(--pb-red);
-  box-shadow: 0 0 10px rgba(255,45,45,0.5), 0 0 3px rgba(255,45,45,0.3);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--pb-red) 55%, transparent), 0 0 3px color-mix(in srgb, var(--pb-red) 30%, transparent);
 }
 .pb-connector.out:hover {
   transform: translateY(-50%) scale(1.35);
-  box-shadow: 0 0 20px rgba(255,45,45,0.8);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--pb-red) 80%, transparent);
 }
 
 /* Input connector (left side of node) */
@@ -996,42 +996,42 @@ body {
   transform: translateY(-50%);
   background: var(--pb-cyan);
   border-color: var(--pb-cyan);
-  box-shadow: 0 0 10px rgba(0,229,255,0.5), 0 0 3px rgba(0,229,255,0.3);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--pb-cyan) 55%, transparent), 0 0 3px color-mix(in srgb, var(--pb-cyan) 30%, transparent);
 }
 .pb-connector.in:hover {
   transform: translateY(-50%) scale(1.35);
-  box-shadow: 0 0 20px rgba(0,229,255,0.8);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--pb-cyan) 80%, transparent);
 }
 
 /* FX-specific connector colors */
-.pb-node[data-color="orange"] .pb-connector.in { background: var(--pb-orange); border-color: var(--pb-orange); box-shadow: 0 0 8px rgba(255,145,0,0.5); }
+.pb-node[data-color="orange"] .pb-connector.in { background: var(--pb-orange); border-color: var(--pb-orange); box-shadow: 0 0 8px color-mix(in srgb, var(--pb-orange) 55%, transparent); }
 .pb-node[data-color="yellow"] .pb-connector.in { background: var(--pb-yellow); border-color: var(--pb-yellow); box-shadow: 0 0 8px rgba(255,214,0,0.5); }
-.pb-node[data-color="purple"] .pb-connector.in { background: var(--pb-purple); border-color: var(--pb-purple); box-shadow: 0 0 8px rgba(179,136,255,0.5); }
+.pb-node[data-color="purple"] .pb-connector.in { background: var(--pb-purple); border-color: var(--pb-purple); box-shadow: 0 0 8px color-mix(in srgb, var(--pb-purple) 55%, transparent); }
 .pb-node[data-color="pink"]   .pb-connector.in { background: var(--pb-pink); border-color: var(--pb-pink); box-shadow: 0 0 8px rgba(255,64,129,0.5); }
-.pb-node[data-color="green"]  .pb-connector.in { background: var(--pb-green); border-color: var(--pb-green); box-shadow: 0 0 8px rgba(105,240,174,0.5); }
+.pb-node[data-color="green"]  .pb-connector.in { background: var(--pb-green); border-color: var(--pb-green); box-shadow: 0 0 8px color-mix(in srgb, var(--pb-green) 55%, transparent); }
 .pb-node[data-color="teal"]   .pb-connector.in { background: var(--pb-teal); border-color: var(--pb-teal); box-shadow: 0 0 8px rgba(38,198,218,0.5); }
 .pb-node[data-color="violet"] .pb-connector.in { background: var(--pb-violet); border-color: var(--pb-violet); box-shadow: 0 0 8px rgba(234,128,252,0.5); }
 .pb-node[data-color="gold"]   .pb-connector.in { background: var(--pb-gold); border-color: var(--pb-gold); box-shadow: 0 0 8px rgba(255,215,0,0.5); }
-.pb-node[data-color="blue"]   .pb-connector.in { background: var(--pb-blue); border-color: var(--pb-blue); box-shadow: 0 0 8px rgba(68,138,255,0.5); }
+.pb-node[data-color="blue"]   .pb-connector.in { background: var(--pb-blue); border-color: var(--pb-blue); box-shadow: 0 0 8px color-mix(in srgb, var(--pb-blue) 55%, transparent); }
 
 /* FX node colored borders */
-.pb-node[data-color="cyan"]   { border-color: rgba(0,229,255,0.4); }
+.pb-node[data-color="cyan"]   { border-color: color-mix(in srgb, var(--pb-cyan) 40%, transparent); }
 .pb-node[data-color="cyan"]   .pb-node-header { color: var(--pb-cyan); }
-.pb-node[data-color="orange"] { border-color: rgba(255,145,0,0.4); }
+.pb-node[data-color="orange"] { border-color: color-mix(in srgb, var(--pb-orange) 40%, transparent); }
 .pb-node[data-color="orange"] .pb-node-header { color: var(--pb-orange); }
 .pb-node[data-color="yellow"] { border-color: rgba(255,214,0,0.4); }
 .pb-node[data-color="yellow"] .pb-node-header { color: var(--pb-yellow); }
-.pb-node[data-color="purple"] { border-color: rgba(179,136,255,0.4); }
+.pb-node[data-color="purple"] { border-color: color-mix(in srgb, var(--pb-purple) 40%, transparent); }
 .pb-node[data-color="purple"] .pb-node-header { color: var(--pb-purple); }
 .pb-node[data-color="pink"]   { border-color: rgba(255,64,129,0.4); }
 .pb-node[data-color="pink"]   .pb-node-header { color: var(--pb-pink); }
-.pb-node[data-color="green"]  { border-color: rgba(105,240,174,0.4); }
+.pb-node[data-color="green"]  { border-color: color-mix(in srgb, var(--pb-green) 40%, transparent); }
 .pb-node[data-color="green"]  .pb-node-header { color: var(--pb-green); }
 .pb-node[data-color="teal"]   { border-color: rgba(38,198,218,0.4); }
 .pb-node[data-color="teal"]   .pb-node-header { color: var(--pb-teal); }
 .pb-node[data-color="violet"] { border-color: rgba(234,128,252,0.4); }
 .pb-node[data-color="violet"] .pb-node-header { color: var(--pb-violet); }
-.pb-node[data-color="blue"]   { border-color: rgba(68,138,255,0.4); }
+.pb-node[data-color="blue"]   { border-color: color-mix(in srgb, var(--pb-blue) 40%, transparent); }
 .pb-node[data-color="blue"]   .pb-node-header { color: var(--pb-blue); }
 
 @keyframes connectorPulse {

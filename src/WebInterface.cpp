@@ -641,6 +641,10 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
   server->on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
     sendWebAsset(request, "/style.css", "text/css", "no-cache");
   });
+
+  server->on("/theme-vars.css", HTTP_GET, [](AsyncWebServerRequest *request){
+    sendWebAsset(request, "/theme-vars.css", "text/css", "no-cache");
+  });
   
   server->on("/keyboard-controls.js", HTTP_GET, [](AsyncWebServerRequest *request){
     sendWebAsset(request, "/keyboard-controls.js", "application/javascript", "no-cache");
@@ -3269,6 +3273,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     resp["type"] = "masterFx"; resp["param"] = "bitCrush"; resp["value"] = bits;
     String out; serializeJson(resp, out);
     if (ws) ws->textAll(out);
+    broadcastUdpMasterFx("bitCrush", (float)bits);
+    broadcastUdpStateSync();
   }
   else if (cmd == "setDistortion") {
     float amount = doc["value"];
@@ -3278,6 +3284,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     resp["type"] = "masterFx"; resp["param"] = "distortion"; resp["value"] = amount;
     String out; serializeJson(resp, out);
     if (ws) ws->textAll(out);
+    broadcastUdpMasterFx("distortion", amount);
+    broadcastUdpStateSync();
   }
   else if (cmd == "setDistortionMode") {
     int mode = doc["value"];
@@ -3295,6 +3303,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     resp["type"] = "masterFx"; resp["param"] = "sampleRate"; resp["value"] = rate;
     String out; serializeJson(resp, out);
     if (ws) ws->textAll(out);
+    broadcastUdpMasterFx("sampleRate", (float)rate);
+    broadcastUdpStateSync();
   }
   // ============= NEW: Master Effects Commands =============
   else if (cmd == "setDelayActive") {

@@ -10,31 +10,31 @@
 }
 
 :root {
-    --red-primary: #ff0000;
-    --red-dark: #cc0000;
-    --red-glow: #ff3333;
-    --black: #0a0a0a;
-    --black-light: #1a1a1a;
-    --gray: #333;
-    --gray-light: #555;
+    --red-primary: var(--r808-red-primary);
+    --red-dark: var(--r808-red-dark);
+    --red-glow: var(--r808-red-glow);
+    --black: var(--r808-bg-base);
+    --black-light: var(--r808-bg-surface);
+    --gray: var(--r808-bg-elevated);
+    --gray-light: var(--r808-text-dim);
     --font-primary: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
     --font-mono: 'Consolas', 'Monaco', 'Courier New', monospace;
-    --pad-color-0: 255, 0, 0;      /* BD (KICK) - Rojo brillante */
-    --pad-color-1: 255, 165, 0;    /* SD (SNARE) - Naranja */
-    --pad-color-2: 255, 255, 0;    /* CH (CL-HAT) - Amarillo */
-    --pad-color-3: 0, 255, 255;    /* OH (OP-HAT) - Cian */
-    --pad-color-4: 230, 25, 75;    /* CY (CYMBAL) - Rojo carmín */
-    --pad-color-5: 255, 0, 255;    /* CP (CLAP) - Magenta */
-    --pad-color-6: 0, 255, 0;      /* RS (RIMSHOT) - Verde */
-    --pad-color-7: 245, 130, 49;   /* CB (COWBELL) - Naranja oscuro */
-    --pad-color-8: 145, 30, 180;   /* LT (LOW TOM) - Púrpura */
-    --pad-color-9: 70, 240, 240;   /* MT (MID TOM) - Turquesa */
-    --pad-color-10: 240, 50, 230;  /* HT (HIGH TOM) - Rosa */
-    --pad-color-11: 188, 246, 12;  /* MA (MARACAS) - Lima */
-    --pad-color-12: 56, 206, 255;  /* CL (CLAVES) - Azul claro */
-    --pad-color-13: 250, 190, 190; /* HC (HI CONGA) - Rosa pálido */
-    --pad-color-14: 0, 128, 128;   /* MC (MID CONGA) - Teal */
-    --pad-color-15: 72, 77, 255;   /* LC (LOW CONGA) - Azul índigo */
+    --pad-color-0: var(--r808-track-red);
+    --pad-color-1: var(--r808-track-orange);
+    --pad-color-2: var(--r808-track-yellow);
+    --pad-color-3: var(--r808-track-cyan);
+    --pad-color-4: var(--r808-track-pink);
+    --pad-color-5: var(--r808-track-purple);
+    --pad-color-6: var(--r808-track-green);
+    --pad-color-7: var(--r808-track-orange);
+    --pad-color-8: var(--r808-track-purple);
+    --pad-color-9: var(--r808-track-cyan);
+    --pad-color-10: var(--r808-track-purple);
+    --pad-color-11: var(--r808-track-lime);
+    --pad-color-12: var(--r808-track-cyan);
+    --pad-color-13: 250, 190, 190;
+    --pad-color-14: 0, 128, 128;
+    --pad-color-15: 72, 77, 255;
 }
 
 body {

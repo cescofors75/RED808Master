@@ -1,0 +1,31 @@
+/* RED808 shared theme tokens */
+:root {
+  --r808-red-primary: #ff0000;
+  --r808-red-dark: #cc0000;
+  --r808-red-light: #ff3333;
+  --r808-red-glow: #ff4d4d;
+
+  --r808-accent-cyan: #00e5ff;
+  --r808-accent-lime: #00ff88;
+  --r808-accent-purple: #bf5af2;
+  --r808-accent-orange: #ff9500;
+  --r808-accent-green: #30d158;
+
+  --r808-bg-base: #080b10;
+  --r808-bg-surface: #10141d;
+  --r808-bg-elevated: #1a1a20;
+  --r808-bg-panel: #0f1320;
+  --r808-border: rgba(255,255,255,0.08);
+  --r808-text: #dde4f0;
+  --r808-text-dim: #6e7b91;
+
+  --r808-track-red: 255, 0, 0;
+  --r808-track-orange: 255, 165, 0;
+  --r808-track-yellow: 255, 255, 0;
+  --r808-track-cyan: 0, 229, 255;
+  --r808-track-green: 0, 255, 136;
+  --r808-track-purple: 191, 90, 242;
+  --r808-track-pink: 255, 45, 85;
+  --r808-track-blue: 68, 138, 255;
+  --r808-track-lime: 188, 246, 12;
+}

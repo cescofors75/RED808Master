@@ -1,17 +1,17 @@
 /* RED808 Admin Dashboard — Dark v2 */
 :root {
-  --adm-bg:     #080b10;
-  --adm-panel:  #0c1018;
-  --adm-card:   #0f1320;
-  --adm-card2:  #131825;
-  --adm-border: rgba(255,255,255,0.07);
-  --adm-red:    #ff2d55;
-  --adm-cyan:   #00e5ff;
-  --adm-orange: #ff9500;
-  --adm-purple: #bf5af2;
-  --adm-green:  #30d158;
-  --adm-text:   #dde4f0;
-  --adm-dim:    #6e7b91;
+  --adm-bg:     var(--r808-bg-base);
+  --adm-panel:  var(--r808-bg-surface);
+  --adm-card:   var(--r808-bg-panel);
+  --adm-card2:  var(--r808-bg-elevated);
+  --adm-border: var(--r808-border);
+  --adm-red:    var(--r808-red-light);
+  --adm-cyan:   var(--r808-accent-cyan);
+  --adm-orange: var(--r808-accent-orange);
+  --adm-purple: var(--r808-accent-purple);
+  --adm-green:  var(--r808-accent-green);
+  --adm-text:   var(--r808-text);
+  --adm-dim:    var(--r808-text-dim);
   --adm-mono:   'JetBrains Mono','Courier New',monospace;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -24,7 +24,7 @@ html, body { height: 100%; background: var(--adm-bg); color: var(--adm-text); fo
 #admHeader {
   display: flex; align-items: center; gap: 16px;
   padding: 10px 20px;
-  background: linear-gradient(90deg,#0d1117 0%,#161b2e 100%);
+  background: linear-gradient(90deg,var(--r808-bg-base) 0%,var(--r808-bg-panel) 100%);
   border-bottom: 1px solid var(--adm-border);
   position: sticky; top: 0; z-index: 100;
 }

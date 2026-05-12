@@ -2,6 +2,10 @@
 
 let ws = null;
 let isConnected = false;
+let wsRetryTimer = null;
+let wsRetryCount = 0;
+const WS_RETRY_BASE_MS = 1500;
+const WS_RETRY_MAX_MS = 15000;
 let currentStep = 0;
 let tremoloIntervals = {};
 let padLoopState = {};
@@ -14,6 +18,48 @@ let synthSwitchPendingTimers = new Array(16).fill(null);
 let currentPatternIndex = 0; // Track current pattern for keyboard nav
 
 const PATTERN_NAMES = ['HIP HOP', 'TECHNO', 'DnB', 'BREAK', 'HOUSE', 'TRAP'];
+
+function clearTimerMap(timerMap) {
+    Object.keys(timerMap).forEach((key) => {
+        clearTimeout(timerMap[key]);
+        clearInterval(timerMap[key]);
+        delete timerMap[key];
+    });
+}
+
+function cleanupTransientUiState() {
+    clearTimerMap(tremoloIntervals);
+    clearTimerMap(keyboardHoldTimers);
+    clearTimerMap(padHoldTimers);
+
+    if (_syncFlashTimer) {
+        clearTimeout(_syncFlashTimer);
+        _syncFlashTimer = null;
+    }
+
+    if (sampleRetryTimer) {
+        clearTimeout(sampleRetryTimer);
+        sampleRetryTimer = null;
+    }
+}
+
+function clearWebSocketRetryTimer() {
+    if (wsRetryTimer) {
+        clearTimeout(wsRetryTimer);
+        wsRetryTimer = null;
+    }
+}
+
+function scheduleWebSocketReconnect() {
+    clearWebSocketRetryTimer();
+    wsRetryCount = Math.min(wsRetryCount + 1, 5);
+    const delay = Math.min(WS_RETRY_BASE_MS * (2 ** (wsRetryCount - 1)), WS_RETRY_MAX_MS);
+    console.warn(`[WS] Reconnecting in ${delay}ms (attempt ${wsRetryCount})`);
+    wsRetryTimer = setTimeout(() => {
+        wsRetryTimer = null;
+        initWebSocket();
+    }, delay);
+}
 
 // Sync LEDs: when ON, live pads flash in rhythm with sequencer
 let syncLedsEnabled = false;
@@ -286,6 +332,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // WebSocket Connection
 function initWebSocket() {
+    clearWebSocketRetryTimer();
     const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const wsUrl = `${wsScheme}://${window.location.host}/ws`;
     console.log('[WS] Connecting to', wsUrl);
@@ -295,6 +342,7 @@ function initWebSocket() {
     ws.onopen = () => {
         console.log('[WS] Connected', wsUrl);
         isConnected = true;
+        wsRetryCount = 0;
         updateStatus(true);
         syncLedMonoMode();
         
@@ -304,10 +352,10 @@ function initWebSocket() {
     };
     
     ws.onclose = () => {
-        console.warn('[WS] Closed, retrying in 3s', wsUrl);
+        console.warn('[WS] Closed', wsUrl);
         isConnected = false;
         updateStatus(false);
-        setTimeout(initWebSocket, 3000);
+        scheduleWebSocketReconnect();
     };
     
     ws.onerror = (error) => {
@@ -5396,7 +5444,11 @@ function initTabSystem() {
 }
 
 function switchTab(tabId) {
+    const previousTab = currentTab;
     currentTab = tabId;
+    if (previousTab !== tabId) {
+        cleanupTransientUiState();
+    }
     
     // Actualizar botones
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -5422,6 +5474,18 @@ function switchTab(tabId) {
     // Hooks de carga por tab
     if (tabId === 'buttons') loadButtonsConfig();
 }
+
+window.addEventListener('beforeunload', () => {
+    clearWebSocketRetryTimer();
+    cleanupTransientUiState();
+    if (ws) {
+        try {
+            ws.close();
+        } catch (error) {
+            console.warn('[WS] close during unload failed', error);
+        }
+    }
+});
 
 // Sample Selector Functions
 function showSampleSelector(padIndex, family) {
