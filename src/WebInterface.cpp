@@ -762,8 +762,9 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     if (request->hasParam("index", true)) {
       int pattern = request->getParam("index", true)->value().toInt();
       sequencer.selectPattern(pattern);
-      // Select-only: patrones ya están en Daisy desde boot. Mucho más rápido.
-      dsqSelectPatternDeferred(pattern);
+      // Reliability first: re-upload selected pattern so Daisy cannot stay with
+      // a stale/empty slot if a previous upload was partial.
+      dsqUploadPatternDeferred(pattern);
       request->send(200, "text/plain", "OK");
     }
   });
@@ -2822,11 +2823,12 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     }
   }
   else if (cmd == "selectPattern") {
-    int pattern = doc["index"];
+    int pattern = doc["index"] | doc["pattern"] | sequencer.getCurrentPattern();
     syslog("CMD", "selPat idx=%d heap=%u", pattern, ESP.getFreeHeap());
     sequencer.selectPattern(pattern);
-    // Select-only: patrones ya est\xC3\xA1n cargados en Daisy. 1 cmd SPI vs ~32 cmds.
-    dsqSelectPatternDeferred(pattern);
+    // Reliability first: refresh Daisy slot on selection to avoid silent
+    // patterns when a previous upload did not fully commit.
+    dsqUploadPatternDeferred(pattern);
     /* v2.6 — Push to UDP slaves so LCD pattern display always matches master */
     broadcastUdpPatternSync(pattern);
     if (s_udpReplyIp != IPAddress(0, 0, 0, 0) && s_udpReplyPort != 0) {
