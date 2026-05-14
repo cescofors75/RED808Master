@@ -710,6 +710,31 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
     sendWebAsset(request, "/multiview.js", "application/javascript", "no-cache");
   });
 
+  // Live gesture page
+  server->on("/gesture", HTTP_GET, [](AsyncWebServerRequest *request){
+    sendWebAsset(request, "/gesture.html", "text/html", "no-cache, no-store, must-revalidate");
+  });
+
+  server->on("/gesture.html", HTTP_GET, [](AsyncWebServerRequest *request){
+    sendWebAsset(request, "/gesture.html", "text/html", "no-cache, no-store, must-revalidate");
+  });
+
+  server->on("/gesture-pro", HTTP_GET, [](AsyncWebServerRequest *request){
+    sendWebAsset(request, "/gesture-pro.html", "text/html", "no-cache, no-store, must-revalidate");
+  });
+
+  server->on("/gesture-pro.html", HTTP_GET, [](AsyncWebServerRequest *request){
+    sendWebAsset(request, "/gesture-pro.html", "text/html", "no-cache, no-store, must-revalidate");
+  });
+
+  server->on("/gesture.js", HTTP_GET, [](AsyncWebServerRequest *request){
+    sendWebAsset(request, "/gesture.js", "application/javascript", "no-cache");
+  });
+
+  server->on("/gesture-styles.css", HTTP_GET, [](AsyncWebServerRequest *request){
+    sendWebAsset(request, "/gesture-styles.css", "text/css", "no-cache");
+  });
+
   // Admin page
   server->on("/adm", HTTP_GET, [](AsyncWebServerRequest *request){
     sendWebAsset(request, "/admin.html", "text/html", "no-cache");

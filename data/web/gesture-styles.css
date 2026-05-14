@@ -1,0 +1,378 @@
+/* ─────────────────────────────────────────────────────────
+   RED808 · LIVE GESTURE — 2026 Professional UI
+   Clean, dark, minimal. Camera is the stage.
+───────────────────────────────────────────────────────── */
+
+/* Reset */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* Design tokens */
+:root {
+  --bg:       #090a0c;
+  --surface:  #111317;
+  --border:   rgba(255,255,255,0.08);
+  --border2:  rgba(255,255,255,0.14);
+  --text:     #e8e8f0;
+  --muted:    rgba(232,232,240,0.38);
+  --red:      #e74c3c;
+  --red-glow: rgba(231,76,60,0.35);
+  --green:    #2ecc71;
+  --blue:     #3b82f6;
+  --amber:    #f59e0b;
+  --font:     'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --pad-h:    88px;
+  --bar-h:    52px;
+}
+
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  display: grid;
+  grid-template-rows: var(--bar-h) 1fr var(--pad-h);
+  height: 100dvh;
+  height: 100vh;
+  width: 100%;
+}
+
+/* ─── TOP BAR ─────────────────────────────────────────── */
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 100;
+}
+
+.tb-brand {
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.tb-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  animation: blink 1.4s infinite;
+}
+
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+.tb-status {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tb-leds {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.tled {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.12);
+  transition: background 0.08s, box-shadow 0.08s;
+}
+
+.tled.r { background: var(--red); box-shadow: 0 0 10px var(--red-glow); }
+.tled.g { background: var(--green); box-shadow: 0 0 10px rgba(46,204,113,0.5); }
+.tled.b { background: var(--blue); box-shadow: 0 0 10px rgba(59,130,246,0.5); }
+
+#camBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1.5px solid var(--red);
+  background: transparent;
+  color: var(--red);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+#camBtn:hover, #camBtn:active { background: rgba(231,76,60,0.12); }
+
+#camBtn.active {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+/* LED compatibility shim */
+.led { display: none; }
+.led.r, .led.g, .led.b { display: none; }
+
+/* ─── STAGE ───────────────────────────────────────────── */
+#stage {
+  position: relative;
+  overflow: hidden;
+  background: #000;
+}
+
+#videoEl {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
+#videoEl.visible { opacity: 0.92; }
+
+#mainCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  z-index: 2;
+}
+
+/* Stage pulse on trigger */
+#stagePulse {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, var(--red) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+#stagePulse.blast { opacity: 0.18; }
+
+/* Big gesture flash */
+#gFlash {
+  position: absolute;
+  z-index: 10;
+  pointer-events: none;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0;
+  font-weight: 900;
+  letter-spacing: 4px;
+  color: #fff;
+  text-shadow: 0 0 40px var(--red), 0 2px 8px rgba(0,0,0,0.8);
+  opacity: 0;
+  transition: opacity 0.07s, font-size 0.07s;
+  white-space: nowrap;
+}
+
+#gFlash.show { opacity: 1; font-size: 52px; }
+
+/* HUD overlay (top of stage) */
+#hud {
+  position: absolute;
+  top: 12px; left: 12px; right: 12px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.hud-chip {
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.1);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--muted);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  flex-shrink: 0;
+}
+
+.hud-chip.vel {
+  border-color: rgba(231,76,60,0.3);
+  color: var(--red);
+  min-width: 44px;
+  text-align: center;
+}
+
+.hud-big {
+  flex: 1;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: #fff;
+  text-shadow: 0 0 24px var(--red), 0 1px 6px rgba(0,0,0,0.9);
+  padding: 5px 0;
+  opacity: 0.9;
+}
+
+/* No-camera placeholder */
+#noCamera {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  background: var(--bg);
+}
+
+#app.cam-active #noCamera { display: none; }
+
+.nc-icon {
+  color: rgba(255,255,255,0.12);
+  margin-bottom: 4px;
+}
+
+.nc-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--text);
+}
+
+.nc-sub {
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+  max-width: 280px;
+}
+
+.nc-btn {
+  margin-top: 4px;
+  padding: 12px 28px;
+  border-radius: 999px;
+  border: 1.5px solid var(--red);
+  background: transparent;
+  color: var(--red);
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.nc-btn:hover, .nc-btn:active { background: rgba(231,76,60,0.12); }
+
+.nc-gestures {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  width: 100%;
+  max-width: 380px;
+  margin-top: 8px;
+}
+
+.nc-g {
+  padding: 7px 4px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 500;
+  text-align: center;
+  color: var(--muted);
+  transition: all 0.1s;
+}
+
+.nc-g.lit {
+  border-color: var(--red);
+  background: rgba(231,76,60,0.12);
+  color: var(--text);
+  box-shadow: 0 0 12px var(--red-glow);
+}
+
+/* Reference rows (used by JS pulseStage) */
+[id^="ref-"] { transition: all 0.1s; }
+
+/* ─── PAD STRIP ───────────────────────────────────────── */
+#pads {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.pad {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  transition: background 0.07s, box-shadow 0.07s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.pad:last-child { border-right: none; }
+.pad:active, .pad.lit { background: rgba(231,76,60,0.14); }
+.pad.lit { box-shadow: inset 0 -2px 0 var(--red); }
+
+.p-ico { font-size: 20px; line-height: 1; opacity: 0.55; transition: opacity 0.07s; }
+.p-lbl { font-size: 9px; font-weight: 600; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; }
+.pad.lit .p-ico { opacity: 1; }
+.pad.lit .p-lbl { color: var(--red); }
+
+/* ─── MOBILE  (≤ 640px) ───────────────────────────────── */
+@media (max-width: 640px) {
+  :root { --pad-h: 100px; --bar-h: 50px; }
+
+  #topbar { padding: 0 12px; gap: 8px; }
+  .tb-brand { font-size: 14px; letter-spacing: 2px; }
+  .tb-status { font-size: 10px; }
+  #camBtn { padding: 7px 12px; font-size: 12px; }
+
+  #pads { grid-template-columns: repeat(4, 1fr); }
+  /* Second row of 4 */
+  .pad { min-height: 50px; }
+  .p-ico { font-size: 22px; }
+  .p-lbl { font-size: 8px; }
+
+  #gFlash.show { font-size: 40px; }
+  .hud-big { font-size: 15px; }
+}
+
+/* Landscape mobile */
+@media (max-height: 500px) and (orientation: landscape) {
+  :root { --bar-h: 42px; --pad-h: 72px; }
+  #pads { grid-template-columns: repeat(8, 1fr); }
+  .pad { min-height: 72px; }
+}

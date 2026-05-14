@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>RED808 · LIVE GESTURE</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="gesture-styles.css">
+</head>
+<body>
+<div id="app">
+
+<!-- TOP BAR -->
+<header id="topbar">
+  <div class="tb-brand">RED808 <span class="tb-dot" id="ledAudio"></span></div>
+  <div class="tb-status" id="wsStatus">Conectando…</div>
+  <div class="tb-leds">
+    <div class="tled" id="ledR" title="R.HAND"></div>
+    <div class="tled" id="ledL" title="L.HAND"></div>
+    <div class="tled" id="ledTrig" title="TRIG"></div>
+    <!-- hidden ledHead for JS compatibility -->
+    <div id="ledHead" style="display:none"></div>
+  </div>
+  <button id="camBtn" onclick="toggleCamera()">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+    <span id="camBtnText">Cámara</span>
+  </button>
+</header>
+
+<!-- STAGE: full-screen camera + overlay -->
+<div id="stage">
+  <!-- Camera feed -->
+  <video id="videoEl" autoplay muted playsinline></video>
+  <!-- Hand skeleton canvas -->
+  <canvas id="mainCanvas"></canvas>
+  <!-- Stage pulse flash -->
+  <div id="stagePulse"></div>
+  <!-- Gesture name big flash -->
+  <div id="gFlash"></div>
+
+  <!-- Top HUD overlay (when camera is on) -->
+  <div id="hud">
+    <div class="hud-chip" id="hudWs">WS</div>
+    <div class="hud-big" id="hudGesture">READY</div>
+    <div class="hud-chip vel" id="hudVelocity">0</div>
+  </div>
+
+  <!-- No-camera placeholder -->
+  <div id="noCamera">
+    <div class="nc-icon">
+      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+    </div>
+    <div class="nc-title">Instrumento Gestual</div>
+    <div class="nc-sub">Activa la cámara para empezar a tocar</div>
+    <button class="nc-btn" onclick="toggleCamera()">Activar cámara</button>
+    <div class="nc-gestures">
+      <div class="nc-g" id="ref-kick">✊ Kick</div>
+      <div class="nc-g" id="ref-snare">☝️ Snare</div>
+      <div class="nc-g" id="ref-hihat">🖐️ Hi-Hat</div>
+      <div class="nc-g" id="ref-clap">🤌 Clap</div>
+      <div class="nc-g" id="ref-tom">🤙 Tom</div>
+      <div class="nc-g" id="ref-bass">🤘 Bass</div>
+      <div class="nc-g" id="ref-oh">✌️ Open HH</div>
+      <div class="nc-g" id="ref-ride">🤟 Ride</div>
+      <div class="nc-g" id="ref-mute">✊ Mute (L)</div>
+      <div class="nc-g" id="ref-unmute">🖐️ Unmute (L)</div>
+    </div>
+    <!-- hidden metric nodes for JS compat -->
+    <div id="metricRight" style="display:none"></div>
+    <div id="metricLeft" style="display:none"></div>
+    <div id="metricPad" style="display:none"></div>
+    <div id="perfGesture" style="display:none"></div>
+    <div id="perfIntensity" style="display:none"></div>
+    <div id="knobReverb" style="display:none"></div>
+    <div id="knobDelay" style="display:none"></div>
+    <div id="kvReverb" style="display:none"></div>
+    <div id="kvDelay" style="display:none"></div>
+    <div id="fxReverbFill" style="display:none"></div>
+    <div id="fxDelayFill" style="display:none"></div>
+  </div>
+</div>
+
+<!-- PAD STRIP -->
+<div id="pads">
+  <button class="pad" id="gs-kick"  onclick="triggerSound('kick',120)" ><span class="p-ico">✊</span><span class="p-lbl">KICK</span></button>
+  <button class="pad" id="gs-snare" onclick="triggerSound('snare',120)"><span class="p-ico">☝️</span><span class="p-lbl">SNARE</span></button>
+  <button class="pad" id="gs-hihat" onclick="triggerSound('hihat',120)"><span class="p-ico">🖐️</span><span class="p-lbl">HH</span></button>
+  <button class="pad" id="gs-clap"  onclick="triggerSound('clap',120)" ><span class="p-ico">🤌</span><span class="p-lbl">CLAP</span></button>
+  <button class="pad" id="gs-tom"   onclick="triggerSound('tom',120)"  ><span class="p-ico">🤙</span><span class="p-lbl">TOM</span></button>
+  <button class="pad" id="gs-bass"  onclick="triggerSound('bass',120)" ><span class="p-ico">🤘</span><span class="p-lbl">BASS</span></button>
+  <button class="pad" id="gs-oh"    onclick="triggerSound('oh',120)"   ><span class="p-ico">✌️</span><span class="p-lbl">OPEN</span></button>
+  <button class="pad" id="gs-ride"  onclick="triggerSound('ride',120)" ><span class="p-ico">🤟</span><span class="p-lbl">RIDE</span></button>
+</div>
+
+<!-- hidden elements for JS compatibility -->
+<div id="bpmVal" style="display:none">--</div>
+<div id="cam-view" style="display:none"></div>
+
+</div>
+
+<script src="gesture.js"></script>
+</body>
+</html>
