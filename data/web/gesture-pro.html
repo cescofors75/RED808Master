@@ -107,7 +107,8 @@ const L_PADS=['tom','bass','ride','oh'];
 const PAD_RGB={kick:'255,79,67',snare:'255,140,80',hihat:'243,156,18',clap:'255,100,90',tom:'230,126,34',bass:'155,89,182',ride:'46,204,113',oh:'243,156,18'};
 const IS_TOUCH=matchMedia('(pointer:coarse)').matches;
 const CONFIRM_N=IS_TOUCH?2:3;
-const GCD_PAD=IS_TOUCH?200:260;
+const CONFIRM_S=IS_TOUCH?1:2;
+const GCD_PAD=IS_TOUCH?95:130;
 const GCD_PAT=680;
 const FX_T=36; // ms throttle for continuous FX
 
@@ -126,8 +127,9 @@ let curPatIdx=0,curPlaying=false;
 let lastFxRT=0,lastFxLT=0,lastPitchT=0;
 let curCutoff=8000,curReso=0,curReverb=40,curDelay=0,curPitch=1;
 let delayOn=false,reverbOn=false,distOn=false;
-let wtReady=false,lastWtT=0,curWtWave=0,curWtFilter=8000,curWtLfoDepth=0;
-const WT_ENGINE=4,WT_TRACK=0,WT_NOTES=[48,52,55,60,64,67,72,76];
+let bassReady=false,curBassCutoff=1200,curBassReso=.35,curBassEnv=.55;
+let fxReady=false;
+const BASS_ENGINE=3,BASS_TRACK=0,BASS_NOTES=[36,39,43,48,51,55,60,63];
 let modeLabelTmr=null,hintTmr=null,flashTmr=null;
 const particles=[];
 const trailR=[],trailL=[],TRAIL=24;
@@ -140,27 +142,45 @@ function initWs(){
   try{
     if(ws&&ws.readyState<=1)return;
     ws=new WebSocket(wsUrl());ws.binaryType='arraybuffer';
-    ws.onopen=()=>{setWsDot(true);if(activeMode==='P')ensureWt()};
+    ws.onopen=()=>{setWsDot(true);if(activeMode==='P')ensureBass(true);if(activeMode==='FX')ensureFx(true)};
     ws.onclose=()=>{setWsDot(false);schedWs()};
     ws.onerror=()=>setWsDot(false);
     ws.onmessage=onWsMsg;
   }catch{setWsDot(false);schedWs()}
 }
-function sendJ(obj){if(ws&&ws.readyState===WebSocket.OPEN){ws.send(JSON.stringify(obj));return true}return false}
-function ensureWt(){
-  if(wtReady)return;
-  if(!sendJ({cmd:'setTrackSynthEngine',track:WT_TRACK,engine:WT_ENGINE}))return;
-  wtReady=true;
-  sendJ({cmd:'synthParam',engine:WT_ENGINE,instrument:WT_TRACK,paramId:3,value:.82});
-  showFlash('WT READY','#90caf9');
+function isWsOpen(){return !!(ws&&ws.readyState===WebSocket.OPEN)}
+function showNoWs(){showFlash('NO WS','#ffcc80')}
+function sendJ(obj){if(isWsOpen()){ws.send(JSON.stringify(obj));return true}return false}
+function ensureBass(force=false){
+  if(!isWsOpen())return false;
+  if(bassReady&&!force)return true;
+  sendJ({cmd:'setTrackSynthEngine',track:BASS_TRACK,engine:BASS_ENGINE});
+  bassReady=true;
+  sendJ({cmd:'synth303Param',paramId:0,value:curBassCutoff});
+  sendJ({cmd:'synth303Param',paramId:1,value:curBassReso});
+  sendJ({cmd:'synth303Param',paramId:2,value:curBassEnv});
+  sendJ({cmd:'synth303Param',paramId:7,value:.86});
+  sendJ({cmd:'setReverbActive',value:true});
+  showFlash('303 READY','#90caf9');
+  return true;
 }
-function triggerWtNote(i,vel=112){
-  ensureWt();
-  if(!wtReady)return;
-  const note=WT_NOTES[Math.max(0,Math.min(WT_NOTES.length-1,i))];
-  sendJ({cmd:'synthNoteOnEx',engine:WT_ENGINE,note,velocity:vel,accent:false,slide:false});
-  setTimeout(()=>sendJ({cmd:'synthNoteOff',engine:WT_ENGINE,track:WT_TRACK,note}),420);
-  showFlash(['C','E','G','C2','E2','G2','C3','E3'][i]||('N'+note),'#90caf9');
+function ensureFx(force=false){
+  if(!isWsOpen())return false;
+  if(fxReady&&!force)return true;
+  sendJ({cmd:'setFilter',type:1});
+  sendJ({cmd:'setFilterCutoff',value:curCutoff});
+  sendJ({cmd:'setFilterResonance',value:curReso});
+  if(reverbOn){sendJ({cmd:'setReverbActive',value:true});sendJ({cmd:'setReverbMix',value:curReverb})}
+  if(delayOn){sendJ({cmd:'setDelayActive',value:true});sendJ({cmd:'setDelayMix',value:curDelay})}
+  fxReady=true;
+  return true;
+}
+function triggerBassNote(i,vel=112){
+  if(!ensureBass()){showNoWs();return}
+  const note=BASS_NOTES[Math.max(0,Math.min(BASS_NOTES.length-1,i))];
+  sendJ({cmd:'synth303NoteOn',note,accent:vel>108,slide:false});
+  setTimeout(()=>sendJ({cmd:'synth303NoteOff'}),150);
+  showFlash(['C1','D#','G','C2','D#2','G2','C3','D#3'][i]||('N'+note),'#90caf9');
 }
 function onWsMsg(ev){
   if(ev.data instanceof ArrayBuffer){
@@ -187,17 +207,19 @@ async function triggerPad(name,vel=112){
 // ── Mode system ───────────────────────────────────────────────────
 const MODES={
   S:{label:'SAMPLERS',   hint:'1-4 DEDOS DERECHA · 1-4 DEDOS IZQUIERDA', col:'255,79,67'},
-  P:{label:'PIANO WT',   hint:'DERECHA 1-4 DEDOS = NOTAS WT · X=WAVE · Y=FILTRO · IZQUIERDA=REVERB/LFO', col:'52,152,219'},
-  FX:{label:'FX',        hint:'FX SE ACTIVAN UNA VEZ · PUÑO = RESET · DERECHA PARAMETRIZA FILTRO/RESO', col:'46,204,113'},
+  P:{label:'303 BASS',   hint:'DERECHA 1-4 DEDOS = NOTAS 303 · X=RESO · Y=FILTRO · IZQ O UNA MANO=ENV/REVERB', col:'52,152,219'},
+  FX:{label:'FX',        hint:'FX ON UNA VEZ · PUÑO=RESET · DERECHA FILTRO/RESO Y REVERB SI NO HAY IZQ', col:'46,204,113'},
   PAT:{label:'PATRONES', hint:'1-4 DEDOS DERECHA=PAT 1-4  ·  IZQUIERDA=PAT 5-8', col:'155,89,182'},
 };
 function setMode(m){
   if(m===activeMode)return;
   const prev=activeMode;activeMode=m;
   rBuf=[];lBuf=[];lastCommR=null;lastCommL=null;
+  lastFxRT=0;lastFxLT=0;lastPitchT=0;
   // reset pitch when leaving Piano mode
   if(prev==='P'&&curPitch!==1){sendJ({cmd:'setLivePitch',pitch:1});curPitch=1}
-  if(m==='P')ensureWt();
+  if(m==='P')ensureBass(true);
+  if(m==='FX')ensureFx(true);
   updateModeUI();
 }
 function updateModeUI(){
@@ -244,9 +266,8 @@ function wristVel(lm,prev){
 function procS(lmR,lmL){
   if(lmR){
     const p=getPose(lmR),raw=p.nonThumb>=1&&p.nonThumb<=4?'r'+p.nonThumb:null;
-    if(raw!==lastCommR)lastCommR=null;
-    const conf=confGest(rBuf,raw,CONFIRM_N);
-    if(conf&&conf!==lastCommR&&canFire(conf,GCD_PAD)){
+    const conf=confGest(rBuf,raw,CONFIRM_S);
+    if(conf&&canFire('s_'+conf,GCD_PAD)){
       lastCommR=conf;
       const e=wristVel(lmR,prevWristR);prevWristR=e.nxt;
       triggerPad(R_PADS[parseInt(conf[1])-1],e.v);
@@ -255,9 +276,8 @@ function procS(lmR,lmL){
   }else{rBuf=[];lastCommR=null;prevWristR=null}
   if(lmL){
     const p=getPose(lmL),raw=p.nonThumb>=1&&p.nonThumb<=4?'l'+p.nonThumb:null;
-    if(raw!==lastCommL)lastCommL=null;
-    const conf=confGest(lBuf,raw,CONFIRM_N);
-    if(conf&&conf!==lastCommL&&canFire(conf,GCD_PAD)){
+    const conf=confGest(lBuf,raw,CONFIRM_S);
+    if(conf&&canFire('s_'+conf,GCD_PAD)){
       lastCommL=conf;
       const e=wristVel(lmL,prevWristL);prevWristL=e.nxt;
       triggerPad(L_PADS[parseInt(conf[1])-1],e.v);
@@ -288,42 +308,37 @@ function procPAT(lmR,lmL){
   }else{lBuf=[];lastCommL=null}
 }
 
-// ── MODE P — Piano / Theremin ─────────────────────────────────────
+// ── MODE P — 303 Bass ─────────────────────────────────────────────
 function procP(lmR,lmL){
   const now=Date.now();
-  ensureWt();
+  ensureBass();
   if(lmR){
     const idx=lmR[8];
-    const wave=Math.max(0,Math.min(7,idx.x*7));
-    const filter=Math.round(180+(1-idx.y)*17820);
+    const filter=Math.round(180+(1-idx.y)*7800);
+    const reso=Math.max(0,Math.min(1,idx.x));
     if(now-lastPitchT>FX_T){
-      if(Math.abs(wave-curWtWave)>.08){sendJ({cmd:'synthParam',engine:WT_ENGINE,instrument:WT_TRACK,paramId:0,value:Math.round(wave*100)/100});curWtWave=wave}
-      if(Math.abs(filter-curWtFilter)/18000>.015){sendJ({cmd:'synthParam',engine:WT_ENGINE,instrument:WT_TRACK,paramId:4,value:filter});curWtFilter=filter;curCutoff=filter}
+      if(Math.abs(filter-curBassCutoff)/8000>.015){sendJ({cmd:'synth303Param',paramId:0,value:filter});curBassCutoff=filter;curCutoff=filter}
+      if(Math.abs(reso-curBassReso)>.025){sendJ({cmd:'synth303Param',paramId:1,value:Math.round(reso*100)/100});curBassReso=reso}
       lastPitchT=now;
     }
     const p=getPose(lmR);
-    const raw=p.nonThumb>=1&&p.nonThumb<=4?'wn'+p.nonThumb:null;
-    if(raw!==lastCommR)lastCommR=null;
+    const raw=p.nonThumb>=1&&p.nonThumb<=4?'bn'+p.nonThumb:null;
     const conf=confGest(rBuf,raw,CONFIRM_N);
-    if(conf&&conf!==lastCommR&&canFire(conf,260)){
+    if(conf&&canFire('p_'+conf,190)){
       lastCommR=conf;
       const e=wristVel(lmR,prevWristR);prevWristR=e.nxt;
-      triggerWtNote(parseInt(conf[2])-1,e.v);
+      triggerBassNote(parseInt(conf[2])-1,e.v);
       spawnBurst(mirror(lmR)[8],e.v,'r');
     }
-    if(p.fist&&canFire('pitchRst',700)){
-      sendJ({cmd:'synthParam',engine:WT_ENGINE,instrument:WT_TRACK,paramId:0,value:0});
-      sendJ({cmd:'synthParam',engine:WT_ENGINE,instrument:WT_TRACK,paramId:4,value:8000});
-      sendJ({cmd:'synthParam',engine:WT_ENGINE,instrument:WT_TRACK,paramId:6,value:0});
-      curWtWave=0;curWtFilter=8000;curWtLfoDepth=0;showFlash('WT RESET','#90caf9');try{navigator.vibrate&&navigator.vibrate(18)}catch{}
-    }
   }else{rBuf=[];lastCommR=null;prevWristR=null}
-  if(lmL){
-    const reverb=Math.round((1-lmL[8].y)*100);
-    const lfo=Math.max(0,Math.min(1,lmL[8].x));
+  const modHand=lmL||lmR;
+  if(modHand){
+    const reverb=Math.round((1-modHand[8].y)*100);
+    const env=Math.max(0,Math.min(1,modHand[8].x));
     if(now-lastFxLT>FX_T){
+      if(!reverbOn){sendJ({cmd:'setReverbActive',value:true});reverbOn=true}
       if(Math.abs(reverb-curReverb)>2){sendJ({cmd:'setReverbMix',value:reverb});curReverb=reverb}
-      if(Math.abs(lfo-curWtLfoDepth)>.025){sendJ({cmd:'synthParam',engine:WT_ENGINE,instrument:WT_TRACK,paramId:6,value:Math.round(lfo*100)/100});curWtLfoDepth=lfo}
+      if(Math.abs(env-curBassEnv)>.025){sendJ({cmd:'synth303Param',paramId:2,value:Math.round(env*100)/100});curBassEnv=env}
       lastFxLT=now;
     }
   }else{lBuf=[];lastCommL=null}
@@ -332,6 +347,7 @@ function procP(lmR,lmL){
 // ── MODE FX ───────────────────────────────────────────────────────
 function procFX(lmR,lmL){
   const now=Date.now();
+  ensureFx();
   if(lmR){
     // Continuous: Y=cutoff, X=resonance
     const idx=lmR[8];
@@ -345,9 +361,9 @@ function procFX(lmR,lmL){
     // Discrete FX are latched: gesture turns ON once; fist is the only reset.
     const p=getPose(lmR);
     if(!delayOn&&p.iU&&!p.mU&&!p.rU&&!p.pU&&canFire('fx_dly',600)){
-      delayOn=true;sendJ({cmd:'setDelayActive',value:true});showFlash('DLY ON','#a5d6a7');try{navigator.vibrate&&navigator.vibrate(25)}catch{}
+      delayOn=true;curDelay=Math.max(curDelay,35);sendJ({cmd:'setDelayActive',value:true});sendJ({cmd:'setDelayMix',value:curDelay});showFlash('DLY ON','#a5d6a7');try{navigator.vibrate&&navigator.vibrate(25)}catch{}
     }else if(!reverbOn&&p.iU&&p.mU&&!p.rU&&!p.pU&&canFire('fx_rvb',600)){
-      reverbOn=true;sendJ({cmd:'setReverbActive',value:true});showFlash('RVB ON','#80cbc4');try{navigator.vibrate&&navigator.vibrate(25)}catch{}
+      reverbOn=true;curReverb=Math.max(curReverb,45);sendJ({cmd:'setReverbActive',value:true});sendJ({cmd:'setReverbMix',value:curReverb});showFlash('RVB ON','#80cbc4');try{navigator.vibrate&&navigator.vibrate(25)}catch{}
     }else if(!distOn&&p.iU&&p.mU&&p.rU&&!p.pU&&canFire('fx_dst',600)){
       distOn=true;sendJ({cmd:'setDistortion',value:.7});showFlash('DIST ON','#ffab40');try{navigator.vibrate&&navigator.vibrate(25)}catch{}
     }else if(p.fist&&canFire('fx_rst',900)){
@@ -358,14 +374,15 @@ function procFX(lmR,lmL){
       showFlash('RESET','#ef9a9a');try{navigator.vibrate&&navigator.vibrate(40)}catch{}
     }
   }
-  // Left hand: Y=reverb, X=delay mix
-  if(lmL){
-    const idx=lmL[8];
+  // Left hand normally controls ambience; right hand is fallback for one-hand FX.
+  const ambHand=lmL||((reverbOn||delayOn)?lmR:null);
+  if(ambHand){
+    const idx=ambHand[8];
     const reverb=Math.round((1-idx.y)*100);
     const delay=Math.round(idx.x*100);
     if(now-lastFxLT>FX_T){
-      if(Math.abs(reverb-curReverb)>2){sendJ({cmd:'setReverbMix',value:reverb});curReverb=reverb}
-      if(Math.abs(delay-curDelay)>2){sendJ({cmd:'setDelayMix',value:delay});curDelay=delay}
+      if(reverbOn&&Math.abs(reverb-curReverb)>2){sendJ({cmd:'setReverbMix',value:reverb});curReverb=reverb}
+      if(delayOn&&Math.abs(delay-curDelay)>2){sendJ({cmd:'setDelayMix',value:delay});curDelay=delay}
       lastFxLT=now;
     }
   }
@@ -476,7 +493,7 @@ function handLabel(side){
   const n=pose.nonThumb;
   if(activeMode==='S'){const pads=side==='R'?R_PADS:L_PADS;return n>=1&&n<=4?pads[n-1].toUpperCase():''}
   if(activeMode==='PAT'){const base=side==='R'?0:4;return n>=1&&n<=4?'PAT '+(n+base):''}
-  if(activeMode==='P')return side==='R'?'WT NOTE':'REV/LFO';
+  if(activeMode==='P')return side==='R'?'303 NOTE':'ENV/REV';
   if(activeMode==='FX')return side==='R'?'FILTER':'REVERB';
   return'';
 }
