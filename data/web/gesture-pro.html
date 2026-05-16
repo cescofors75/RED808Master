@@ -59,6 +59,20 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;touch-action:no
   pointer-events:none;transition:opacity .5s;text-align:center;white-space:normal
 }
 #gestureHint.hide{opacity:0}
+/* Live status */
+#gestureStatus{
+  position:fixed;top:calc(58px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);
+  z-index:10;max-width:calc(100vw - 110px);min-width:210px;
+  padding:7px 10px;border-radius:8px;text-align:center;
+  font-size:8px;line-height:1.45;letter-spacing:1.8px;color:rgba(255,255,255,.76);
+  background:rgba(0,0,0,.56);border:1px solid rgba(255,255,255,.12);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  pointer-events:none;opacity:.86;transition:opacity .25s,border-color .25s,color .25s
+}
+#gestureStatus.good{border-color:rgba(46,204,113,.42);color:#c8ffd9}
+#gestureStatus.warn{border-color:rgba(255,193,7,.5);color:#ffe2a8}
+#gestureStatus.hot{border-color:rgba(255,79,67,.55);color:#ffc3bd}
+#gestureStatus.hide{opacity:0}
 /* WS dot */
 #wsDot{
   position:fixed;top:31px;left:50%;transform:translateX(82px);
@@ -95,6 +109,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;touch-action:no
 <div id="modeLabel">SAMPLERS</div>
 <div id="gFlash"></div>
 <div id="gestureHint"></div>
+<div id="gestureStatus" class="hide"></div>
 <div id="wsDot"></div>
 
 <script>
@@ -129,6 +144,9 @@ let curCutoff=8000,curReso=0,curReverb=40,curDelay=0,curPitch=1;
 let delayOn=false,reverbOn=false,distOn=false;
 let bassReady=false,curBassCutoff=1200,curBassReso=.35,curBassEnv=.55;
 let fxReady=false;
+let activeBassNote=null,activeBassIdx=-1,lastBassVel=0,bassReadyFlashT=0;
+let fxResetHoldStart=0,fxResetArmed=false,fxResetProgress=0;
+let lastStatusText='',lastStatusTone='',statusTmr=null;
 const BASS_ENGINE=3,BASS_TRACK=0,BASS_NOTES=[36,39,43,48,51,55,60,63];
 let modeLabelTmr=null,hintTmr=null,flashTmr=null;
 const particles=[];
@@ -150,6 +168,15 @@ function initWs(){
 }
 function isWsOpen(){return !!(ws&&ws.readyState===WebSocket.OPEN)}
 function showNoWs(){showFlash('NO WS','#ffcc80')}
+function setStatus(text,tone=''){
+  if(text===lastStatusText&&tone===lastStatusTone)return;
+  lastStatusText=text;lastStatusTone=tone;
+  const e=document.getElementById('gestureStatus');
+  if(!text){e.className='hide';e.textContent='';return}
+  e.textContent=text;e.className=tone||'';
+  clearTimeout(statusTmr);
+  if(activeMode==='S'||activeMode==='PAT')statusTmr=setTimeout(()=>e.classList.add('hide'),900);
+}
 function sendJ(obj){if(isWsOpen()){ws.send(JSON.stringify(obj));return true}return false}
 function ensureBass(force=false){
   if(!isWsOpen())return false;
@@ -161,7 +188,9 @@ function ensureBass(force=false){
   sendJ({cmd:'synth303Param',paramId:2,value:curBassEnv});
   sendJ({cmd:'synth303Param',paramId:7,value:.86});
   sendJ({cmd:'setReverbActive',value:true});
-  showFlash('303 READY','#90caf9');
+  const n=Date.now();
+  if(force||n-bassReadyFlashT>2200){showFlash('303 READY','#90caf9');bassReadyFlashT=n}
+  setStatus('303 READY · R: NOTA/FILTRO/RESO · L: ENV/REVERB','good');
   return true;
 }
 function ensureFx(force=false){
@@ -173,14 +202,24 @@ function ensureFx(force=false){
   if(reverbOn){sendJ({cmd:'setReverbActive',value:true});sendJ({cmd:'setReverbMix',value:curReverb})}
   if(delayOn){sendJ({cmd:'setDelayActive',value:true});sendJ({cmd:'setDelayMix',value:curDelay})}
   fxReady=true;
+  setStatus('FX READY · R: FILTER/RESO · L: RVB/DLY · HOLD FIST RESET','good');
   return true;
+}
+function stopBassNote(reason=''){
+  if(activeBassNote===null)return;
+  sendJ({cmd:'synth303NoteOff'});
+  activeBassNote=null;activeBassIdx=-1;
+  if(reason)setStatus(reason,'warn');
 }
 function triggerBassNote(i,vel=112){
   if(!ensureBass()){showNoWs();return}
   const note=BASS_NOTES[Math.max(0,Math.min(BASS_NOTES.length-1,i))];
+  if(activeBassNote===note)return;
+  stopBassNote();
   sendJ({cmd:'synth303NoteOn',note,accent:vel>108,slide:false});
-  setTimeout(()=>sendJ({cmd:'synth303NoteOff'}),150);
+  activeBassNote=note;activeBassIdx=i;lastBassVel=vel;
   showFlash(['C1','D#','G','C2','D#2','G2','C3','D#3'][i]||('N'+note),'#90caf9');
+  setStatus(`303 NOTE ${note} · CUT ${curBassCutoff} · RES ${curBassReso.toFixed(2)} · HOLD`,'good');
 }
 function onWsMsg(ev){
   if(ev.data instanceof ArrayBuffer){
@@ -216,6 +255,8 @@ function setMode(m){
   const prev=activeMode;activeMode=m;
   rBuf=[];lBuf=[];lastCommR=null;lastCommL=null;
   lastFxRT=0;lastFxLT=0;lastPitchT=0;
+  fxResetHoldStart=0;fxResetArmed=false;fxResetProgress=0;
+  if(prev==='P')stopBassNote('303 OFF');
   // reset pitch when leaving Piano mode
   if(prev==='P'&&curPitch!==1){sendJ({cmd:'setLivePitch',pitch:1});curPitch=1}
   if(m==='P')ensureBass(true);
@@ -231,6 +272,7 @@ function updateModeUI(){
   const hint=document.getElementById('gestureHint');
   hint.textContent=meta.hint;hint.classList.remove('hide');
   clearTimeout(hintTmr);hintTmr=setTimeout(()=>hint.classList.add('hide'),3500);
+  setStatus(activeMode==='P'?'303 ARMING':activeMode==='FX'?'FX ARMING':'','warn');
 }
 
 // ── Flash text ────────────────────────────────────────────────────
@@ -320,17 +362,24 @@ function procP(lmR,lmL){
       if(Math.abs(filter-curBassCutoff)/8000>.015){sendJ({cmd:'synth303Param',paramId:0,value:filter});curBassCutoff=filter;curCutoff=filter}
       if(Math.abs(reso-curBassReso)>.025){sendJ({cmd:'synth303Param',paramId:1,value:Math.round(reso*100)/100});curBassReso=reso}
       lastPitchT=now;
+      if(activeBassNote!==null)setStatus(`303 NOTE ${activeBassNote} · CUT ${curBassCutoff} · RES ${curBassReso.toFixed(2)} · VEL ${lastBassVel}`,'good');
     }
     const p=getPose(lmR);
+    if(p.fist){stopBassNote('303 RELEASE');rBuf=[];lastCommR=null;return}
     const raw=p.nonThumb>=1&&p.nonThumb<=4?'bn'+p.nonThumb:null;
     const conf=confGest(rBuf,raw,CONFIRM_N);
-    if(conf&&canFire('p_'+conf,190)){
+    if(conf){
+      const noteIdx=parseInt(conf[2])-1;
       lastCommR=conf;
       const e=wristVel(lmR,prevWristR);prevWristR=e.nxt;
-      triggerBassNote(parseInt(conf[2])-1,e.v);
-      spawnBurst(mirror(lmR)[8],e.v,'r');
+      if(noteIdx!==activeBassIdx&&canFire('p_note',70)){
+        triggerBassNote(noteIdx,e.v);
+        spawnBurst(mirror(lmR)[8],e.v,'r');
+      }
+    }else if(!raw){
+      stopBassNote('303 RELEASE');
     }
-  }else{rBuf=[];lastCommR=null;prevWristR=null}
+  }else{rBuf=[];lastCommR=null;prevWristR=null;stopBassNote('303 HAND LOST')}
   const modHand=lmL||lmR;
   if(modHand){
     const reverb=Math.round((1-modHand[8].y)*100);
@@ -340,6 +389,7 @@ function procP(lmR,lmL){
       if(Math.abs(reverb-curReverb)>2){sendJ({cmd:'setReverbMix',value:reverb});curReverb=reverb}
       if(Math.abs(env-curBassEnv)>.025){sendJ({cmd:'synth303Param',paramId:2,value:Math.round(env*100)/100});curBassEnv=env}
       lastFxLT=now;
+      if(activeBassNote!==null)setStatus(`303 NOTE ${activeBassNote} · ENV ${curBassEnv.toFixed(2)} · RVB ${curReverb}`,'good');
     }
   }else{lBuf=[];lastCommL=null}
 }
@@ -357,6 +407,7 @@ function procFX(lmR,lmL){
       if(Math.abs(cutoff-curCutoff)/18000>.01){sendJ({cmd:'setFilterCutoff',value:cutoff});curCutoff=cutoff}
       if(Math.abs(reso-curReso)>1){sendJ({cmd:'setFilterResonance',value:reso});curReso=reso}
       lastFxRT=now;
+      setStatus(`FX FILTER · CUT ${curCutoff} · RES ${curReso} · RVB ${reverbOn?'ON':'OFF'} · DLY ${delayOn?'ON':'OFF'}`,'good');
     }
     // Discrete FX are latched: gesture turns ON once; fist is the only reset.
     const p=getPose(lmR);
@@ -366,14 +417,22 @@ function procFX(lmR,lmL){
       reverbOn=true;curReverb=Math.max(curReverb,45);sendJ({cmd:'setReverbActive',value:true});sendJ({cmd:'setReverbMix',value:curReverb});showFlash('RVB ON','#80cbc4');try{navigator.vibrate&&navigator.vibrate(25)}catch{}
     }else if(!distOn&&p.iU&&p.mU&&p.rU&&!p.pU&&canFire('fx_dst',600)){
       distOn=true;sendJ({cmd:'setDistortion',value:.7});showFlash('DIST ON','#ffab40');try{navigator.vibrate&&navigator.vibrate(25)}catch{}
-    }else if(p.fist&&canFire('fx_rst',900)){
-      sendJ({cmd:'setFilterCutoff',value:8000});sendJ({cmd:'setFilterResonance',value:0});
-      sendJ({cmd:'setReverbActive',value:false});sendJ({cmd:'setDelayActive',value:false});
-      sendJ({cmd:'setReverbMix',value:30});sendJ({cmd:'setDelayMix',value:0});sendJ({cmd:'setDistortion',value:0});
-      curCutoff=8000;curReso=0;curReverb=30;curDelay=0;delayOn=false;reverbOn=false;distOn=false;
-      showFlash('RESET','#ef9a9a');try{navigator.vibrate&&navigator.vibrate(40)}catch{}
+    }else if(p.fist){
+      if(!fxResetHoldStart){fxResetHoldStart=now;fxResetArmed=false;showFlash('HOLD','#ffcc80')}
+      fxResetProgress=Math.min(1,(now-fxResetHoldStart)/1.15);
+      setStatus(`HOLD RESET ${(fxResetProgress*100)|0}% · RELEASE TO CANCEL`,'warn');
+      if(!fxResetArmed&&fxResetProgress>=1&&canFire('fx_rst',1200)){
+        fxResetArmed=true;
+        sendJ({cmd:'setFilterCutoff',value:8000});sendJ({cmd:'setFilterResonance',value:0});
+        sendJ({cmd:'setReverbActive',value:false});sendJ({cmd:'setDelayActive',value:false});
+        sendJ({cmd:'setReverbMix',value:30});sendJ({cmd:'setDelayMix',value:0});sendJ({cmd:'setDistortion',value:0});
+        curCutoff=8000;curReso=0;curReverb=30;curDelay=0;delayOn=false;reverbOn=false;distOn=false;
+        showFlash('FX RESET','#ef9a9a');setStatus('FX RESET DONE','hot');try{navigator.vibrate&&navigator.vibrate(55)}catch{}
+      }
+    }else{
+      fxResetHoldStart=0;fxResetArmed=false;fxResetProgress=0;
     }
-  }
+  }else{fxResetHoldStart=0;fxResetArmed=false;fxResetProgress=0}
   // Left hand normally controls ambience; right hand is fallback for one-hand FX.
   const ambHand=lmL||((reverbOn||delayOn)?lmR:null);
   if(ambHand){
@@ -384,6 +443,7 @@ function procFX(lmR,lmL){
       if(reverbOn&&Math.abs(reverb-curReverb)>2){sendJ({cmd:'setReverbMix',value:reverb});curReverb=reverb}
       if(delayOn&&Math.abs(delay-curDelay)>2){sendJ({cmd:'setDelayMix',value:delay});curDelay=delay}
       lastFxLT=now;
+      setStatus(`FX AMBIENCE · RVB ${reverbOn?curReverb:'OFF'} · DLY ${delayOn?curDelay:'OFF'} · DIST ${distOn?'ON':'OFF'}`,'good');
     }
   }
 }
@@ -393,6 +453,8 @@ function onHandResults(res){
   liveLmR=liveLmL=null;
   if(!res.multiHandLandmarks?.length){
     livePoseR=livePoseL=null;rBuf=[];lBuf=[];lastCommR=null;lastCommL=null;
+    if(activeMode==='P')stopBassNote('303 HAND LOST');
+    fxResetHoldStart=0;fxResetArmed=false;fxResetProgress=0;
     if(activeMode==='P'&&curPitch!==1){sendJ({cmd:'setLivePitch',pitch:1});curPitch=1}
     return;
   }
@@ -494,7 +556,7 @@ function handLabel(side){
   if(activeMode==='S'){const pads=side==='R'?R_PADS:L_PADS;return n>=1&&n<=4?pads[n-1].toUpperCase():''}
   if(activeMode==='PAT'){const base=side==='R'?0:4;return n>=1&&n<=4?'PAT '+(n+base):''}
   if(activeMode==='P')return side==='R'?'303 NOTE':'ENV/REV';
-  if(activeMode==='FX')return side==='R'?'FILTER':'REVERB';
+  if(activeMode==='FX')return side==='R'?(fxResetHoldStart?'HOLD RESET':'FILTER/RESO'):'RVB/DLY';
   return'';
 }
 
