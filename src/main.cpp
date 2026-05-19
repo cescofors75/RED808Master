@@ -257,6 +257,8 @@ void dsqUploadPattern(int pattern) {
     const int stepCount = sequencer.getPatternLength();  // longitud global
     const int clampedLen = (stepCount >= 64) ? 64 : (stepCount >= 32) ? 32 : 16;
     DsqStepPkt pkt[DSQ_MAX_STEPS];
+    spiMaster.dsqSetLength((uint8_t)clampedLen);
+    vTaskDelay(pdMS_TO_TICKS(5));
     for (int trk = 0; trk < DSQ_TRACKS; trk++) {
         for (int s = 0; s < clampedLen; s++) {
             pkt[s].active      = sequencer.getStep(pattern, trk, s) ? 1 : 0;
@@ -264,8 +266,13 @@ void dsqUploadPattern(int pattern) {
             pkt[s].noteLenDiv  = sequencer.getStepNoteLen(pattern, trk, s);
             pkt[s].probability = sequencer.getStepProbability(pattern, trk, s);
         }
-        spiMaster.dsqSetLength((uint8_t)clampedLen);
-        spiMaster.dsqUploadTrack((uint8_t)pattern, (uint8_t)trk, pkt, (uint8_t)clampedLen);
+        if (!spiMaster.dsqUploadTrack((uint8_t)pattern, (uint8_t)trk, pkt, (uint8_t)clampedLen)) {
+            Serial.printf("[DSQ] upload track %d pattern %d failed\n", trk, pattern);
+        }
+        // 8 ms entre tracks: deja a la Daisy procesar el packet anterior
+        // y vaciar su SPI RX ring antes del siguiente. Evita spiRingDrops y
+        // tracks parciales (síntoma: patrones con pistas vacías).
+        vTaskDelay(pdMS_TO_TICKS(8));
         // Param locks
         for (int s = 0; s < clampedLen; s++) {
             uint16_t ch = sequencer.getStepCutoffLock(pattern, trk, s);
@@ -281,11 +288,6 @@ void dsqUploadPattern(int pattern) {
                 );
             }
         }
-        // Yield cada 4 tracks para que la Daisy drene su cola SPI y no
-        // monopolizar el core durante el burst de subida del patrón.
-        if ((trk & 3) == 3) {
-            vTaskDelay(pdMS_TO_TICKS(2));
-        }
     }
 }
 
@@ -300,7 +302,7 @@ void spiAudioTask(void *pvParameters) {
     // al vacío y dejen slots con datos parciales (sintoma: patrones que no suenan).
     for (int pat = 0; pat < DSQ_PATTERNS_INLINE; pat++) {
         dsqUploadPattern(pat);
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(40));
     }
     // Seleccionar patrón activo en Daisy
     spiMaster.dsqSelectPattern((uint8_t)sequencer.getCurrentPattern());
@@ -310,10 +312,11 @@ void spiAudioTask(void *pvParameters) {
     // ── Sync synth engines al arrancar ──────────
     for (int t = 0; t < 16; t++) {
         spiMaster.dsqSetTrackEngine((uint8_t)t, gTrackSynthEngine[t]);
-        // Synth tracks: mutear en Daisy-seq (ESP32 stepCallback dispara synths)
-        if (gTrackSynthEngine[t] >= 0) {
-            spiMaster.dsqSetMute((uint8_t)t, true);
-        }
+        // Asegurar que NINGUN track quede muteado al arrancar: la Daisy
+        // ya rutea por dsqTrackEngine[] (samplers/synths) y el mute es estado
+        // de usuario. Mutear aqui por engine dejaba al secuenciador silencioso
+        // cuando un track cambiaba a sampler (-1) tras boot.
+        spiMaster.dsqSetMute((uint8_t)t, false);
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 
@@ -655,8 +658,63 @@ void setup() {
             }
             if (sent) {
                 syslog("BOOT", "sdLoadKit '%s' sent OK (had %d/16)", defaultKit, loadedMainPads);
+                const uint32_t loadStart = millis();
+                int lastLoaded = loadedMainPads < 0 ? 0 : loadedMainPads;
+                while (millis() - loadStart < 8000) {
+                    delay(250);
+                    SdStatusResponse pollStatus = {};
+                    if (!spiMaster.sdGetStatus(pollStatus) || !pollStatus.present) {
+                        continue;
+                    }
+                    int pollLoaded = 0;
+                    for (int i = 0; i < 16; i++) {
+                        if (pollStatus.samplesLoaded & (1UL << i)) pollLoaded++;
+                    }
+                    if (pollLoaded != lastLoaded) {
+                        syslog("BOOT", "Default kit loading: %d/16 pads", pollLoaded);
+                        lastLoaded = pollLoaded;
+                    }
+                    if (pollLoaded >= 16) {
+                        syslog("BOOT", "Default kit ready: 16/16 pads loaded");
+                        break;
+                    }
+                }
+                if (lastLoaded < 16) {
+                    syslog("BOOT", "WARN: default kit not fully loaded after timeout (%d/16)", lastLoaded);
+                }
             } else {
                 syslog("BOOT", "ERROR: sdLoadKit could not be enqueued");
+            }
+        }
+
+        // Sin fallback a engine 808 para pads sin sample. Los pads vacios
+        // quedan en sampler (-1) y simplemente no suenan en el secuenciador
+        // (DsqFireStep los salta). La UI muestra que pads tienen sample
+        // cargado y cuales no, asi el comportamiento es predecible: pulsar
+        // play sobre un pad vacio = silencio (no synth fantasma).
+        {
+            SdStatusResponse finalStatus = {};
+            uint16_t loadedMask = 0;
+            if (spiMaster.sdGetStatus(finalStatus) && finalStatus.present) {
+                loadedMask = (uint16_t)(finalStatus.samplesLoaded & 0xFFFF);
+            }
+            int missingCount = 0;
+            char missingList[96] = {};
+            size_t mlPos = 0;
+            for (int t = 0; t < 16; t++) {
+                if (!(loadedMask & (1u << t))) {
+                    missingCount++;
+                    if (mlPos < sizeof(missingList) - 4) {
+                        int w = snprintf(missingList + mlPos, sizeof(missingList) - mlPos,
+                                         "%s%d", mlPos == 0 ? "" : ",", t);
+                        if (w > 0) mlPos += (size_t)w;
+                    }
+                }
+            }
+            if (missingCount > 0) {
+                syslog("BOOT",
+                       "WARN: %d pad(s) sin sample tras sdLoadKit (pads: %s) - silencioso en DSQ",
+                       missingCount, missingList);
             }
         }
     }

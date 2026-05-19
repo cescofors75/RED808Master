@@ -14,7 +14,9 @@
 
 // SPI fire-and-forget queue — Core0 (WS/WiFi) → Core1 (SPI task) dispatch.
 // Prevents the async WebSocket handler from blocking on SPI mutex.
-static constexpr uint16_t SPI_QUEUE_PAYLOAD_MAX = 96;
+// 544 = enough to hold a CleanTrack/Sample data chunk: 256 samples * int16_t = 512 +
+// SampleDataHeader (~16) + slack. With queue depth 64 ⇒ ~35 KB RAM.
+static constexpr uint16_t SPI_QUEUE_PAYLOAD_MAX = 544;
 struct SpiQueuedCmd {
     uint8_t  cmd;
     uint16_t payloadLen;
@@ -34,13 +36,13 @@ struct SpiQueuedCmd {
 //   GPIO4 = SCK → Daisy D8  (PG11, SPI1_SCK)  — lado derecho pin 9
 //   GPIO6 = MISO← Daisy D9  (PB4,  SPI1_MISO) — lado derecho pin 10
 //   GPIO5 = MOSI→ Daisy D10 (PB5,  SPI1_MOSI) — lado derecho pin 11
-// SPI mode 0, MSB first, 2 MHz (subir a 10-20 MHz una vez estable)
+// SPI mode 0, MSB first. Primer salto conservador para acelerar uploads.
 
 #define DAISY_SPI_CS               7
 #define DAISY_SPI_SCK              4
 #define DAISY_SPI_MOSI             5
 #define DAISY_SPI_MISO             6
-#define DAISY_SPI_CLOCK_HZ    1000000UL   /* 1MHz — margen vs OVR en slave polling */
+#define DAISY_SPI_CLOCK_HZ    4000000UL   /* 4MHz — primer salto conservador para acelerar upload */
 #define DAISY_SPI_RESPONSE_GAP_US  2000   /* 2ms — gap entre TX y RX en sendAndReceive; suficiente para Daisy main loop */
 
 // Audio constants (mirrored from old AudioEngine for compatibility)
@@ -321,6 +323,11 @@ public:
     bool beginSampleStream(int padIndex, uint32_t numSamples);
     bool writeSampleStreamData(int padIndex, const int16_t* samples, uint16_t numSamples, uint32_t startSample);
     bool endSampleStream(int padIndex, bool ok, uint32_t totalSamples);
+    bool beginCleanTrackStream(int trackIndex, uint32_t numSamples);
+    bool writeCleanTrackStreamData(int trackIndex, const int16_t* samples, uint16_t numSamples, uint32_t startSample);
+    bool endCleanTrackStream(int trackIndex, bool ok, uint32_t totalSamples);
+    bool setCleanTrackActive(int trackIndex, bool active);
+    bool setCleanTrackMute(int trackIndex, bool muted);
     void unloadSample(int padIndex);
     void unloadAllSamples();
 
@@ -413,6 +420,8 @@ public:
     bool dsqSetMute(uint8_t track, bool muted);
     // Swing amount 0-100
     bool dsqSetSwing(uint8_t amount);
+    // Humanize amount: timing ms + velocity percent
+    bool dsqSetHumanize(uint8_t timingMs, uint8_t velocityAmount);
     // Per-step parameter lock
     bool dsqSetParamLock(uint8_t pattern, uint8_t track, uint8_t step,
                          bool cutoffEn, uint16_t cutoffHz,

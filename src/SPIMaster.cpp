@@ -8,6 +8,16 @@
 #include <SPI.h>
 #include <esp_task_wdt.h>
 
+static constexpr uint8_t CLEAN_TRACK_COUNT = 4;
+static constexpr uint8_t CLEAN_TRACK_SLOT_BASE = MAX_PADS;
+static constexpr uint16_t DAISY_SPI_PACKET_GAP_US = 10;
+
+static bool cleanTrackToSampleSlot(int trackIndex, uint8_t& outSlot) {
+    if (trackIndex < 0 || trackIndex >= CLEAN_TRACK_COUNT) return false;
+    outSlot = (uint8_t)(CLEAN_TRACK_SLOT_BASE + trackIndex);
+    return true;
+}
+
 // Bus HSPI (SPI3) — separado del display ST7789 que usa FSPI/SPI2
 static SPIClass daisySpi(HSPI);
 
@@ -124,7 +134,9 @@ bool SPIMaster::begin() {
     daisySpi.begin(DAISY_SPI_SCK, DAISY_SPI_MISO, DAISY_SPI_MOSI, DAISY_SPI_CS);
 
     if (!spiCmdQueue) {
-        spiCmdQueue = xQueueCreate(128, sizeof(SpiQueuedCmd));
+        // Queue depth 64 × ~547B = ~35 KB. Sufficient for clean-track stream
+        // chunks (4 per pump tick) plus normal control traffic.
+        spiCmdQueue = xQueueCreate(64, sizeof(SpiQueuedCmd));
     }
 
     
@@ -230,7 +242,7 @@ bool SPIMaster::sendCommandDirect(uint8_t cmd, const void* payload, uint16_t pay
 
     /* Inter-packet gap: dar tiempo a la Daisy para drenar RXFIFO
      * y procesar el paquete anterior en su main loop.            */
-    delayMicroseconds(30);
+    delayMicroseconds(DAISY_SPI_PACKET_GAP_US);
     
     xSemaphoreGive(spiMutex);
 
@@ -1660,6 +1672,56 @@ bool SPIMaster::requestStatus() {
     return false;
 }
 
+bool SPIMaster::beginCleanTrackStream(int trackIndex, uint32_t numSamples) {
+    uint8_t slot = 0;
+    if (!cleanTrackToSampleSlot(trackIndex, slot) || !stm32Connected) return false;
+    SampleBeginPayload payload = {};
+    payload.padIndex = slot;
+    payload.bitsPerSample = 16;
+    payload.sampleRate = 48000;
+    payload.totalBytes = numSamples * sizeof(int16_t);
+    payload.totalSamples = numSamples;
+    return sendCommand(CMD_SAMPLE_BEGIN, &payload, sizeof(payload));
+}
+
+bool SPIMaster::writeCleanTrackStreamData(int trackIndex, const int16_t* samples, uint16_t numSamples, uint32_t startSample) {
+    uint8_t slot = 0;
+    if (!cleanTrackToSampleSlot(trackIndex, slot) || !stm32Connected || !samples || numSamples == 0) return false;
+    if (numSamples > 256) numSamples = 256;
+    const uint16_t chunkSize = (uint16_t)(numSamples * sizeof(int16_t));
+    const uint16_t totalSize = (uint16_t)(sizeof(SampleDataHeader) + chunkSize);
+    if (totalSize > sizeof(txBuffer)) return false;
+    SampleDataHeader header = {};
+    header.padIndex = slot;
+    header.chunkSize = chunkSize;
+    header.offset = startSample * sizeof(int16_t);
+    memcpy(txBuffer, &header, sizeof(header));
+    memcpy(txBuffer + sizeof(header), samples, chunkSize);
+    return sendCommand(CMD_SAMPLE_DATA, txBuffer, totalSize);
+}
+
+bool SPIMaster::endCleanTrackStream(int trackIndex, bool ok, uint32_t totalSamples) {
+    uint8_t slot = 0;
+    if (!cleanTrackToSampleSlot(trackIndex, slot) || !stm32Connected) return false;
+    SampleEndPayload payload = {};
+    payload.padIndex = slot;
+    payload.status = ok ? 0 : 1;
+    payload.checksum = totalSamples;
+    return sendCommand(CMD_SAMPLE_END, &payload, sizeof(payload));
+}
+
+bool SPIMaster::setCleanTrackActive(int trackIndex, bool active) {
+    if (trackIndex < 0 || trackIndex >= CLEAN_TRACK_COUNT || !stm32Connected) return false;
+    CleanTrackControlPayload payload = { (uint8_t)trackIndex, (uint8_t)(active ? 1 : 0) };
+    return sendCommand(CMD_CLEAN_TRACK_ACTIVE, &payload, sizeof(payload));
+}
+
+bool SPIMaster::setCleanTrackMute(int trackIndex, bool muted) {
+    if (trackIndex < 0 || trackIndex >= CLEAN_TRACK_COUNT || !stm32Connected) return false;
+    CleanTrackControlPayload payload = { (uint8_t)trackIndex, (uint8_t)(muted ? 1 : 0) };
+    return sendCommand(CMD_CLEAN_TRACK_MUTE, &payload, sizeof(payload));
+}
+
 bool SPIMaster::getStatusSnapshot(StatusResponse& out) {
     out = cachedStatus;
     return stm32Connected;
@@ -1854,6 +1916,14 @@ bool SPIMaster::dsqSetMute(uint8_t track, bool muted) {
 bool SPIMaster::dsqSetSwing(uint8_t amount) {
     uint8_t buf[1] = { static_cast<uint8_t>(amount > 100 ? 100u : amount) };
     return sendCommand(CMD_DSQ_SET_SWING, buf, 1);
+}
+
+bool SPIMaster::dsqSetHumanize(uint8_t timingMs, uint8_t velocityAmount) {
+    uint8_t buf[2] = {
+        static_cast<uint8_t>(timingMs > 40 ? 40u : timingMs),
+        static_cast<uint8_t>(velocityAmount > 60 ? 60u : velocityAmount)
+    };
+    return sendCommand(CMD_DSQ_SET_HUMANIZE, buf, 2);
 }
 
 bool SPIMaster::dsqSetParamLock(uint8_t pattern, uint8_t track, uint8_t step,

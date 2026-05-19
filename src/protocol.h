@@ -375,6 +375,8 @@ typedef struct __attribute__((packed)) {
 #define CMD_DSQ_SET_TRACK_ENGINE 0xD9  // [track(1), engine(1)]  -1=sampler 0=808 1=909 2=505 3=303
 #define CMD_DSQ_SET_TRACK_SWING  0xDA  // E4: [track(1), swing 0-100(1)] per-track swing override
 #define CMD_DSQ_SET_HUMANIZE     0xDB  // E2: [timingMs(1), velocityAmt(1)] humanization
+#define CMD_CLEAN_TRACK_ACTIVE   0xDC  // [track(1), active(1)] include/exclude clean track from global transport
+#define CMD_CLEAN_TRACK_MUTE     0xDD  // [track(1), muted(1)] mute clean track audio
 
 // ─── DSQ Step packet (4 bytes) – used in upload track ───
 #define DSQ_PATTERNS   16
@@ -431,6 +433,11 @@ typedef struct __attribute__((packed)) {
     uint8_t  playing;        // 1 = running
     uint8_t  reserved;
 } DsqPosResponse;
+
+typedef struct __attribute__((packed)) {
+    uint8_t  track;
+    uint8_t  value;
+} CleanTrackControlPayload;
 
 // ═══════════════════════════════════════════════════════
 // COMMANDS: STATUS / QUERY (0xE0 - 0xEF)
@@ -862,7 +869,7 @@ typedef struct __attribute__((packed)) {
 // --- Legacy StatusResponse (kept for reference) ---
 // Was 20 bytes. Slave now sends 54 bytes (StatusResponseV2).
 
-// --- StatusResponse V3 (58 bytes — first 54 bytes remain V2-compatible) ---
+// --- StatusResponse V4 (60 bytes — first 58 bytes remain V3-compatible) ---
 typedef struct __attribute__((packed)) {
     uint8_t  activeVoices;       // byte 0: active polyphonic voices
     uint8_t  cpuLoadPercent;     // byte 1: CPU % (0-100)
@@ -882,7 +889,9 @@ typedef struct __attribute__((packed)) {
     uint8_t  cpuAvgPercent;      // byte 54: smoothed CPU %
     uint8_t  masterClipFlag;     // byte 55: master peak >= 1.0
     uint16_t spiRingDrops;       // bytes 56-57: full Daisy SPI ring drop count
-} StatusResponse;  // 58 bytes total
+    uint8_t  cleanTrackLoadedMask;   // byte 58: clean tracks 0-3 loaded in Daisy
+    uint8_t  cleanTrackPlayingMask;  // byte 59: clean tracks 0-3 currently running
+} StatusResponse;  // 60 bytes total
 
 // --- Notification Event (32 bytes — returned by CMD_GET_EVENTS) ---
 #define EVT_SD_BOOT_DONE       0x01  // Boot: LIVE PADS loaded from SD

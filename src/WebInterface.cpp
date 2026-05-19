@@ -27,6 +27,87 @@ static constexpr unsigned long kFastTrackCmdMinMs = 8;
 static constexpr unsigned long kFastPadCmdMinMs = 8;
 static constexpr unsigned long kFastVolumeCmdMinMs = 8;
 static constexpr size_t kUdpMaxPacketBytes = 4096;
+static constexpr int kCleanTrackCount = 4;
+static constexpr const char* kCleanTracksStatePath = "/clean_tracks.json";
+static constexpr const char* kCleanTracksDir = "/cleantracks";
+
+static uint16_t le16(const uint8_t* p);
+static uint32_t le32(const uint8_t* p);
+static int16_t wav_s24_to_s16(const uint8_t* p);
+
+struct CleanTrackSlotState {
+  bool occupied;
+  bool loaded;
+  bool armed;
+  bool muted;
+  bool playing;
+  bool movable;
+  bool loadFailed;   // verify a Daisy fallo: NO reintentar automaticamente
+  uint32_t sizeBytes;
+  char name[24];
+  char clipName[64];
+  char filePath[96];
+  char status[16];
+};
+
+struct CleanTrackUploadState {
+  bool active;
+  bool error;
+  int slot;
+  size_t bytesWritten;
+  char filename[64];
+  char filePath[96];
+  char errorMsg[96];
+  File file;
+};
+
+static CleanTrackSlotState s_cleanTracks[kCleanTrackCount];
+static CleanTrackUploadState s_cleanTrackUpload;
+static char s_cleanTrackLastInitError[96] = {};
+
+static void sendCleanTrackInitError(AsyncWebServerRequest* request, int status,
+                                    const char* reason, const char* message) {
+  strlcpy(s_cleanTrackLastInitError, reason ? reason : "unknown", sizeof(s_cleanTrackLastInitError));
+  StaticJsonDocument<256> response;
+  response["success"] = false;
+  response["reason"]  = s_cleanTrackLastInitError;
+  response["message"] = message ? message : "Clean track upload failed";
+  String output;
+  serializeJson(response, output);
+  request->send(status, "application/json", output);
+}
+
+// ── Async clean-track streaming state (pumped from update(), Core 0) ──────────
+// Mirrors the pumpDaisyUpload() pattern: HTTP handler saves the file, sets
+// active=true, then returns immediately.  update() calls pumpCleanTrackStream()
+// every 2 ms so the SPI transfer happens without blocking the async-TCP task.
+struct CleanTrackStreamState {
+  bool active       = false;  // set last after all other fields are ready
+  bool begun        = false;  // header parsed + beginCleanTrackStream sent
+  bool error        = false;
+  int  slot         = -1;
+  char filePath[96] = {};
+  uint16_t channels = 0;
+  uint16_t bits     = 0;
+  uint32_t bytesRemaining = 0;
+  uint32_t totalSamples   = 0;
+  uint8_t  carry[8]       = {};
+  size_t   carryLen       = 0;
+  uint32_t samplesSent    = 0;
+  uint32_t startedMs      = 0;
+  uint32_t lastProgressMs = 0;
+  char errorMsg[96]       = {};
+  // Phase 3 state machine — zero-blocking finalisation
+  uint8_t  finalizePhase  = 0;     // 0=streaming, 1=endSent, 2=verifyWait, 3=publish, 4=done
+  uint32_t finalizeStartMs = 0;
+  uint32_t lastVerifyReqMs = 0;
+  uint8_t  verifyAttempts  = 0;
+  bool     verified        = false;
+};
+static CleanTrackStreamState s_cleanTrackStream;
+static File                  s_cleanTrackStreamFile;   // file handle kept open between pumps
+static constexpr uint32_t kCleanTrackStreamTotalTimeoutMs = 240000;
+static constexpr uint32_t kCleanTrackStreamNoProgressTimeoutMs = 30000;
 
 // ── Pre-allocated broadcast buffer in PSRAM to avoid heap fragmentation ──
 // broadcastSequencerState() was the #1 cause of heap fragmentation:
@@ -65,10 +146,333 @@ static PsramJsonDocument* _stateDoc = nullptr;
 
 extern SPIMaster spiMaster;
 extern Sequencer sequencer;
+extern WebInterface webInterface;
+
+static void pumpDaisyUpload();
+static void pumpCleanTrackStream();
+static bool queueCleanTrackStreamSlot(int slot);
+static void queueNextStoredCleanTrackStream();
+
+static void clearCleanTrackSlot(CleanTrackSlotState& slot, int index) {
+  memset(&slot, 0, sizeof(slot));
+  slot.armed = true;
+  slot.movable = true;
+  snprintf(slot.name, sizeof(slot.name), "Stem %d", index + 1);
+  strncpy(slot.status, "empty", sizeof(slot.status) - 1);
+}
+
+static void initCleanTrackState() {
+  for (int i = 0; i < kCleanTrackCount; ++i) {
+    clearCleanTrackSlot(s_cleanTracks[i], i);
+  }
+  memset(&s_cleanTrackUpload, 0, sizeof(s_cleanTrackUpload));
+}
+
+static String cleanTrackSafeName(const String& input) {
+  String out;
+  out.reserve(input.length());
+  for (size_t i = 0; i < input.length(); ++i) {
+    char c = input[i];
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.') {
+      out += c;
+    } else {
+      out += '_';
+    }
+  }
+  if (out.length() == 0) out = "clip.wav";
+  return out;
+}
+
+static bool ensureCleanTracksDir() {
+  if (LittleFS.exists(kCleanTracksDir)) return true;
+  return LittleFS.mkdir(kCleanTracksDir);
+}
+
+static bool saveCleanTracksStateToFs() {
+  DynamicJsonDocument doc(2048);
+  doc["version"] = 1;
+  JsonArray tracks = doc.createNestedArray("tracks");
+  for (int i = 0; i < kCleanTrackCount; ++i) {
+    JsonObject track = tracks.createNestedObject();
+    track["id"] = i;
+    track["occupied"] = s_cleanTracks[i].occupied;
+    track["loaded"] = s_cleanTracks[i].loaded;
+    track["armed"] = s_cleanTracks[i].armed;
+    track["muted"] = s_cleanTracks[i].muted;
+    track["movable"] = s_cleanTracks[i].movable;
+    track["sizeBytes"] = s_cleanTracks[i].sizeBytes;
+    track["name"] = s_cleanTracks[i].name;
+    track["clipName"] = s_cleanTracks[i].clipName;
+    track["filePath"] = s_cleanTracks[i].filePath;
+    track["status"] = s_cleanTracks[i].status;
+  }
+  File file = LittleFS.open(kCleanTracksStatePath, "w");
+  if (!file) return false;
+  serializeJson(doc, file);
+  file.close();
+  return true;
+}
+
+static void loadCleanTracksStateFromFs() {
+  initCleanTrackState();
+  if (!LittleFS.exists(kCleanTracksStatePath)) return;
+  File file = LittleFS.open(kCleanTracksStatePath, "r");
+  if (!file) return;
+  DynamicJsonDocument doc(2048);
+  DeserializationError error = deserializeJson(doc, file);
+  file.close();
+  if (error) return;
+  JsonArray tracks = doc["tracks"].as<JsonArray>();
+  if (tracks.isNull()) return;
+  for (JsonObject track : tracks) {
+    int id = track["id"] | -1;
+    if (id < 0 || id >= kCleanTrackCount) continue;
+    clearCleanTrackSlot(s_cleanTracks[id], id);
+    s_cleanTracks[id].occupied = track["occupied"] | false;
+    s_cleanTracks[id].loaded = track["loaded"] | false;
+    s_cleanTracks[id].armed = track["armed"] | true;
+    s_cleanTracks[id].muted = track["muted"] | false;
+    s_cleanTracks[id].movable = track["movable"] | true;
+    s_cleanTracks[id].sizeBytes = track["sizeBytes"] | 0;
+    strlcpy(s_cleanTracks[id].name, track["name"] | "", sizeof(s_cleanTracks[id].name));
+    strlcpy(s_cleanTracks[id].clipName, track["clipName"] | "", sizeof(s_cleanTracks[id].clipName));
+    strlcpy(s_cleanTracks[id].filePath, track["filePath"] | "", sizeof(s_cleanTracks[id].filePath));
+    strlcpy(s_cleanTracks[id].status, track["status"] | "", sizeof(s_cleanTracks[id].status));
+    if (s_cleanTracks[id].occupied && s_cleanTracks[id].filePath[0] && !LittleFS.exists(s_cleanTracks[id].filePath)) {
+      clearCleanTrackSlot(s_cleanTracks[id], id);
+    }
+    if (s_cleanTracks[id].status[0] == 0) {
+      strlcpy(s_cleanTracks[id].status, s_cleanTracks[id].occupied ? "stored" : "empty", sizeof(s_cleanTracks[id].status));
+    }
+  }
+}
+
+static int findFirstFreeCleanTrackSlot() {
+  for (int i = 0; i < kCleanTrackCount; ++i) {
+    if (!s_cleanTracks[i].occupied) return i;
+  }
+  return -1;
+}
+
+static bool parseWavFileHeader(File& file, uint16_t& channels, uint16_t& bits, uint32_t& dataOffset, uint32_t& dataSize, char* err, size_t errLen) {
+  uint8_t header[4096] = {};
+  size_t headerLen = file.read(header, sizeof(header));
+  if (headerLen < 44) {
+    strlcpy(err, "WAV header too small", errLen);
+    return false;
+  }
+  if (memcmp(header, "RIFF", 4) != 0 || memcmp(header + 8, "WAVE", 4) != 0) {
+    strlcpy(err, "Not a WAV file", errLen);
+    return false;
+  }
+
+  uint32_t pos = 12;
+  bool fmtFound = false;
+  bool dataFound = false;
+  while (pos + 8 <= headerLen) {
+    uint32_t chunkSize = le32(header + pos + 4);
+    if (memcmp(header + pos, "fmt ", 4) == 0) {
+      if (chunkSize < 16 || pos + 24 > headerLen) {
+        strlcpy(err, "Invalid fmt chunk", errLen);
+        return false;
+      }
+      const uint8_t* fmt = header + pos + 8;
+      uint16_t audioFormat = le16(fmt);
+      channels = le16(fmt + 2);
+      bits = le16(fmt + 14);
+      if (audioFormat != 1 && audioFormat != 0xFFFE) {
+        strlcpy(err, "Unsupported WAV format", errLen);
+        return false;
+      }
+      fmtFound = true;
+    } else if (memcmp(header + pos, "data", 4) == 0) {
+      dataOffset = pos + 8;
+      dataSize = chunkSize;
+      dataFound = true;
+      break;
+    }
+    pos += 8 + chunkSize + (chunkSize & 1);
+  }
+
+  if (!fmtFound || !dataFound) {
+    strlcpy(err, "Missing WAV chunks", errLen);
+    return false;
+  }
+  if ((bits != 16 && bits != 24) || channels < 1 || channels > 2) {
+    strlcpy(err, "Need mono/stereo 16/24-bit WAV", errLen);
+    return false;
+  }
+  if (!file.seek(dataOffset, SeekSet)) {
+    strlcpy(err, "Seek to WAV data failed", errLen);
+    return false;
+  }
+  return true;
+}
+
+static bool streamWavFileToCleanTrack(int slot, const char* path, char* err, size_t errLen) {
+  File file = LittleFS.open(path, "r");
+  if (!file) {
+    strlcpy(err, "Failed opening clean track file", errLen);
+    return false;
+  }
+
+  uint16_t channels = 0;
+  uint16_t bits = 0;
+  uint32_t dataOffset = 0;
+  uint32_t dataSize = 0;
+  if (!parseWavFileHeader(file, channels, bits, dataOffset, dataSize, err, errLen)) {
+    file.close();
+    return false;
+  }
+
+  const uint32_t frameBytes = (bits / 8) * channels;
+  const uint32_t totalSamples = dataSize / frameBytes;
+  if (totalSamples == 0) {
+    strlcpy(err, "Empty WAV data", errLen);
+    file.close();
+    return false;
+  }
+  if (!spiMaster.beginCleanTrackStream(slot, totalSamples)) {
+    strlcpy(err, "Daisy clean track begin failed", errLen);
+    file.close();
+    return false;
+  }
+
+  uint8_t inBuf[1024] = {};
+  uint8_t carry[8] = {};
+  size_t carryLen = 0;
+  int16_t pcm[256] = {};
+  uint32_t bytesRemaining = dataSize;
+  uint32_t samplesSent = 0;
+
+  while (bytesRemaining > 0) {
+    esp_task_wdt_reset();
+    size_t toRead = bytesRemaining > sizeof(inBuf) ? sizeof(inBuf) : bytesRemaining;
+    size_t readNow = file.read(inBuf, toRead);
+    if (readNow == 0) {
+      strlcpy(err, "Unexpected WAV EOF", errLen);
+      spiMaster.endCleanTrackStream(slot, false, samplesSent);
+      file.close();
+      return false;
+    }
+    bytesRemaining -= (uint32_t)readNow;
+
+    uint8_t parseBuf[sizeof(carry) + sizeof(inBuf)] = {};
+    memcpy(parseBuf, carry, carryLen);
+    memcpy(parseBuf + carryLen, inBuf, readNow);
+    size_t parseLen = carryLen + readNow;
+    size_t fullBytes = parseLen - (parseLen % frameBytes);
+    size_t offset = 0;
+    while (offset + frameBytes <= fullBytes) {
+      uint16_t pcmCount = 0;
+      while (offset + frameBytes <= fullBytes && pcmCount < 256) {
+        const uint8_t* frame = parseBuf + offset;
+        if (bits == 16) {
+          if (channels == 1) {
+            pcm[pcmCount++] = (int16_t)le16(frame);
+          } else {
+            int16_t l = (int16_t)le16(frame);
+            int16_t r = (int16_t)le16(frame + 2);
+            pcm[pcmCount++] = (int16_t)(((int32_t)l + (int32_t)r) / 2);
+          }
+        } else {
+          if (channels == 1) {
+            pcm[pcmCount++] = wav_s24_to_s16(frame);
+          } else {
+            int16_t l = wav_s24_to_s16(frame);
+            int16_t r = wav_s24_to_s16(frame + 3);
+            pcm[pcmCount++] = (int16_t)(((int32_t)l + (int32_t)r) / 2);
+          }
+        }
+        offset += frameBytes;
+      }
+      if (pcmCount > 0 && !spiMaster.writeCleanTrackStreamData(slot, pcm, pcmCount, samplesSent)) {
+        strlcpy(err, "Daisy clean track write failed", errLen);
+        spiMaster.endCleanTrackStream(slot, false, samplesSent);
+        file.close();
+        return false;
+      }
+      samplesSent += pcmCount;
+      esp_task_wdt_reset();
+      yield();
+    }
+
+    carryLen = parseLen - fullBytes;
+    if (carryLen > 0) memcpy(carry, parseBuf + fullBytes, carryLen);
+  }
+
+  file.close();
+  if (!spiMaster.endCleanTrackStream(slot, true, samplesSent)) {
+    strlcpy(err, "Daisy clean track end failed", errLen);
+    return false;
+  }
+  return true;
+}
+
+static void syncCleanTrackStateFromDaisy() {
+  StatusResponse status = {};
+  if (!spiMaster.getStatusSnapshot(status)) return;
+  for (int track = 0; track < kCleanTrackCount; ++track) {
+    const bool daisyLoaded = (status.cleanTrackLoadedMask & (1u << track)) != 0;
+    const bool daisyPlaying = (status.cleanTrackPlayingMask & (1u << track)) != 0;
+    s_cleanTracks[track].loaded = daisyLoaded;
+    s_cleanTracks[track].playing = daisyPlaying;
+    if (!s_cleanTracks[track].occupied) {
+      strlcpy(s_cleanTracks[track].status, "empty", sizeof(s_cleanTracks[track].status));
+    } else if (daisyPlaying) {
+      strlcpy(s_cleanTracks[track].status, s_cleanTracks[track].muted ? "playing-muted" : "playing", sizeof(s_cleanTracks[track].status));
+    } else if (daisyLoaded) {
+      strlcpy(s_cleanTracks[track].status, s_cleanTracks[track].muted ? "loaded-muted" : "loaded", sizeof(s_cleanTracks[track].status));
+    } else {
+      strlcpy(s_cleanTracks[track].status, "stored", sizeof(s_cleanTracks[track].status));
+    }
+  }
+}
+
+static bool queueCleanTrackStreamSlot(int slot) {
+  if (slot < 0 || slot >= kCleanTrackCount) return false;
+  if (s_cleanTrackStream.active) return false;
+  if (!s_cleanTracks[slot].occupied || s_cleanTracks[slot].filePath[0] == 0) return false;
+
+  s_cleanTracks[slot].loaded = false;
+  strlcpy(s_cleanTracks[slot].status, "streaming", sizeof(s_cleanTracks[slot].status));
+  s_cleanTrackStream = CleanTrackStreamState{};
+  s_cleanTrackStream.slot = slot;
+  strlcpy(s_cleanTrackStream.filePath, s_cleanTracks[slot].filePath, sizeof(s_cleanTrackStream.filePath));
+  s_cleanTrackStream.startedMs = millis();
+  s_cleanTrackStream.lastProgressMs = s_cleanTrackStream.startedMs;
+  s_cleanTrackStream.active = true;
+  return true;
+}
+
+static void queueNextStoredCleanTrackStream() {
+  if (s_cleanTrackStream.active) return;
+  for (int slot = 0; slot < kCleanTrackCount; ++slot) {
+    auto& s = s_cleanTracks[slot];
+    // Saltar slots marcados loadFailed: si los re-encolaramos aqui entrariamos
+    // en bucle infinito tras un verify fallido (la UI se quedaba en STREAMING
+    // para siempre). El usuario debe re-subir o pulsar retry para limpiar el flag.
+    if (s.occupied && !s.loaded && !s.loadFailed && s.filePath[0]) {
+      if (queueCleanTrackStreamSlot(slot)) return;
+    }
+  }
+}
+
+static void loadPersistedCleanTracksToDaisy() {
+  for (int slot = 0; slot < kCleanTrackCount; ++slot) {
+    if (!s_cleanTracks[slot].occupied || s_cleanTracks[slot].filePath[0] == 0) continue;
+    s_cleanTracks[slot].loaded = false;
+    strlcpy(s_cleanTracks[slot].status, "stored", sizeof(s_cleanTracks[slot].status));
+  }
+  queueNextStoredCleanTrackStream();
+  spiMaster.requestStatus();
+  syncCleanTrackStateFromDaisy();
+}
 
 // Page‐transition broadcast pause: set when '/' is served, cleared after 2s
 static volatile unsigned long pageTransitionMs = 0;
 static bool gMasterDelayActive = false;
+static uint8_t gGrooveSwingAmount = 0;
 static bool gMasterPhaserActive = false;
 static float gMasterDelayMix = 0.0f;
 static float gMasterPhaserDepth = 0.0f;
@@ -340,11 +744,13 @@ static void populateStateDocument(JsonDocument& doc) {
   doc["sequencerVolume"] = spiMaster.getSequencerVolume();
   doc["liveVolume"] = spiMaster.getLiveVolume();
   doc["samplesLoaded"] = max(localLoadedCount, sdLoadedCount);
+  doc["daisySamplesLoaded"] = sdLoadedCount;
   doc["memoryUsed"] = sampleManager.getTotalMemoryUsed();
   doc["psramFree"] = sampleManager.getFreePSRAM();
   doc["songMode"] = sequencer.isSongMode();
   doc["songLength"] = sequencer.getSongLength();
   doc["stepCount"] = sequencer.getPatternLength();
+  doc["swing"] = gGrooveSwingAmount;
   doc["humanizeTimingMs"] = sequencer.getHumanizeTimingMs();
   doc["humanizeVelocity"] = sequencer.getHumanizeVelocityAmount();
   doc["heap"] = ESP.getFreeHeap();
@@ -433,6 +839,23 @@ static void populateStateDocument(JsonDocument& doc) {
   for (int i = 0; i < 16; i++) {
     chokeArr.add(spiMaster.getChokeGroup(i));
   }
+
+  syncCleanTrackStateFromDaisy();
+  JsonArray cleanTracks = doc.createNestedArray("cleanTracks");
+  for (int track = 0; track < kCleanTrackCount; track++) {
+    JsonObject cleanTrack = cleanTracks.createNestedObject();
+    cleanTrack["id"] = track;
+    cleanTrack["name"] = s_cleanTracks[track].name;
+    cleanTrack["occupied"] = s_cleanTracks[track].occupied;
+    cleanTrack["loaded"] = s_cleanTracks[track].loaded;
+    cleanTrack["armed"] = s_cleanTracks[track].armed;
+    cleanTrack["muted"] = s_cleanTracks[track].muted;
+    cleanTrack["playing"] = s_cleanTracks[track].playing;
+    cleanTrack["clipName"] = s_cleanTracks[track].clipName;
+    cleanTrack["status"] = s_cleanTracks[track].status;
+    cleanTrack["movable"] = s_cleanTracks[track].movable;
+    cleanTrack["sizeBytes"] = s_cleanTracks[track].sizeBytes;
+  }
 }
 
 static bool isClientReady(AsyncWebSocketClient* client) {
@@ -509,6 +932,7 @@ WebInterface::WebInterface() {
   lastStepChangeTime = 0;
   lastBroadcastTime = 0;
   _staConnected = false;
+  initCleanTrackState();
 }
 
 WebInterface::~WebInterface() {
@@ -533,6 +957,8 @@ bool WebInterface::begin(const char* apSsid, const char* apPassword,
                          const char* staSSID, const char* staPassword,
                          unsigned long staTimeoutMs) {
   _staConnected = false;
+  loadCleanTracksStateFromFs();
+  loadPersistedCleanTracksToDaisy();
 
   WiFi.setSleep(false);
   WiFi.persistent(false);          // no guarda credenciales en NVS (evita flash corrupto)
@@ -1146,11 +1572,21 @@ refresh();if(auto_)startAuto();
   // Endpoint para subir samples WAV
   server->on("/api/upload", HTTP_POST, 
     [](AsyncWebServerRequest *request){
-      // No enviar respuesta aquí - se maneja en handleUpload cuando final=true
+      // No enviar respuesta aquí - se maneja en handleDaisyUpload cuando final=true
     },
     [this](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
-      // Handler del upload (chunked)
-      handleUpload(request, filename, index, data, len, final);
+      String target = "pad";
+      if (request->hasParam("target")) {
+        target = request->getParam("target")->value();
+      } else if (request->hasParam("target", false)) {
+        target = request->getParam("target", false)->value();
+      }
+      if (target == "cleanTrack") {
+        handleCleanTrackUpload(request, filename, index, data, len, final);
+      } else {
+        // Mantener la URL legacy de la UI, pero streamear directo a Daisy.
+        handleDaisyUpload(request, filename, index, data, len, final);
+      }
     }
   );
 
@@ -2458,6 +2894,9 @@ void WebInterface::update() {
 
   unsigned long now = millis();
 
+  pumpDaisyUpload();
+  pumpCleanTrackStream();
+
   // ── Deferred sample load — done here (systemTask, Core0) to avoid blocking AsyncWebServer task ──
   // Note: loadSample calls transferSample() which feeds esp_task_wdt internally
   int pendPad = _pendingLoadPad;
@@ -2474,6 +2913,11 @@ void WebInterface::update() {
 
     esp_task_wdt_reset();  // feed after (transfer may take several seconds)
     if (loaded) {
+      if (pendPad >= 0 && pendPad < 16) {
+        setTrackSynthEngine(pendPad, -1);
+        spiMaster.dsqSetTrackEngine((uint8_t)pendPad, -1);
+        spiMaster.dsqSetMute((uint8_t)pendPad, false);
+      }
       broadcastUploadComplete(pendPad, true, "Sample uploaded and loaded successfully");
       broadcastSequencerState();
     } else {
@@ -2597,15 +3041,15 @@ void WebInterface::update() {
       ws->textAll(warnBuf, wlen);
     }
     
-    // Safety net: if largest contiguous block stays critically low for
-    // 3 consecutive checks (30s), gracefully restart to avoid total lockup
+    // No reiniciar automáticamente aquí: en carga web pesada el heap puede
+    // fragmentarse temporalmente y provocar bucles de reboot aunque el equipo
+    // siga operativo. Dejamos aviso persistente para diagnóstico.
     if (maxBlock < 12000) {
       lowHeapStrikes++;
       syslog("HEAP", "WARNING low block=%u strike=%d/3", (uint32_t)maxBlock, lowHeapStrikes);
       if (lowHeapStrikes >= 3) {
-        syslog("HEAP", "CRITICAL restarting due to sustained low heap");
-        delay(100);
-        ESP.restart();
+        syslog("HEAP", "CRITICAL sustained low heap block=%u; auto-restart disabled", (uint32_t)maxBlock);
+        lowHeapStrikes = 0;
       }
     } else {
       lowHeapStrikes = 0;
@@ -2780,6 +3224,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     // Upload + select + play en orden garantizado (Core1 procesa todo seguido).
     // Necesario tras cargar MIDI, editar pasos en bulk, o cambiar engines.
     dsqUploadAndPlayDeferred(sequencer.getCurrentPattern());
+    spiMaster.requestStatus();
+    syncCleanTrackStateFromDaisy();
     StaticJsonDocument<96> resp;
     resp["type"] = "playState";
     resp["playing"] = true;
@@ -2789,12 +3235,38 @@ void WebInterface::processCommand(const JsonDocument& doc) {
   else if (cmd == "stop") {
     sequencer.stop();
     spiMaster.dsqControl(0);
+    spiMaster.requestStatus();
+    syncCleanTrackStateFromDaisy();
     releaseSequencerMelodicHolds();
     StaticJsonDocument<96> resp;
     resp["type"] = "playState";
     resp["playing"] = false;
     String out; serializeJson(resp, out);
     if (ws) ws->textAll(out);
+  }
+  else if (cmd == "setCleanTrackActive") {
+    int track = doc["track"] | -1;
+    bool active = doc["active"] | false;
+    if (track >= 0 && track < kCleanTrackCount && s_cleanTracks[track].occupied) {
+      s_cleanTracks[track].armed = active;
+      spiMaster.setCleanTrackActive(track, active);
+      saveCleanTracksStateToFs();
+      spiMaster.requestStatus();
+      syncCleanTrackStateFromDaisy();
+      broadcastSequencerState();
+    }
+  }
+  else if (cmd == "setCleanTrackMute") {
+    int track = doc["track"] | -1;
+    bool muted = doc["muted"] | false;
+    if (track >= 0 && track < kCleanTrackCount && s_cleanTracks[track].occupied) {
+      s_cleanTracks[track].muted = muted;
+      spiMaster.setCleanTrackMute(track, muted);
+      saveCleanTracksStateToFs();
+      spiMaster.requestStatus();
+      syncCleanTrackStateFromDaisy();
+      broadcastSequencerState();
+    }
   }
   else if (cmd == "clearPattern") {
     int pattern = doc.containsKey("pattern") ? doc["pattern"].as<int>() : sequencer.getCurrentPattern();
@@ -3200,13 +3672,10 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       sequencer.toggleLoop(track);
       bool loopNow = sequencer.isLooping(track);
 
-      // ALSO set audio-level loop on Daisy so sample loops continuously
-      // even when sequencer is stopped
-      spiMaster.setPadLoop(track, loopNow);
-      if (loopNow) {
-        // Trigger the sample so it starts playing immediately
-        spiMaster.triggerSampleLive(track, 127);
-      }
+      // For sequencer tracks, loop means retriggering on sequencer steps.
+      // Do not arm Daisy's continuous pad loop here or long stems will
+      // restart independently of the visible step triggers.
+      spiMaster.setPadLoop(track, false);
       
       StaticJsonDocument<192> responseDoc;
       responseDoc["type"] = "loopState";
@@ -4541,11 +5010,51 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     int timing = doc.containsKey("timing") ? doc["timing"].as<int>() : 0;
     int velocity = doc.containsKey("velocity") ? doc["velocity"].as<int>() : 0;
     sequencer.setHumanize(timing, velocity);
+    spiMaster.dsqSetHumanize(sequencer.getHumanizeTimingMs(), sequencer.getHumanizeVelocityAmount());
 
     StaticJsonDocument<160> responseDoc;
     responseDoc["type"] = "humanizeSet";
     responseDoc["timing"] = sequencer.getHumanizeTimingMs();
     responseDoc["velocity"] = sequencer.getHumanizeVelocityAmount();
+    String output;
+    serializeJson(responseDoc, output);
+    if (ws) ws->textAll(output);
+  }
+  else if (cmd == "setSwing") {
+    int amount = doc.containsKey("amount") ? doc["amount"].as<int>() :
+                 (doc.containsKey("swing") ? doc["swing"].as<int>() :
+                 (doc.containsKey("value") ? doc["value"].as<int>() : 0));
+    gGrooveSwingAmount = constrain(amount, 0, 100);
+    spiMaster.dsqSetSwing(gGrooveSwingAmount);
+
+    StaticJsonDocument<160> responseDoc;
+    responseDoc["type"] = "swingSet";
+    responseDoc["swing"] = gGrooveSwingAmount;
+    String output;
+    serializeJson(responseDoc, output);
+    if (ws) ws->textAll(output);
+  }
+  else if (cmd == "resetGroove") {
+    gGrooveSwingAmount = 0;
+    sequencer.setHumanize(0, 0);
+    spiMaster.dsqSetSwing(0);
+    spiMaster.dsqSetHumanize(0, 0);
+
+    StaticJsonDocument<192> responseDoc;
+    responseDoc["type"] = "grooveState";
+    responseDoc["swing"] = gGrooveSwingAmount;
+    responseDoc["humanizeTimingMs"] = sequencer.getHumanizeTimingMs();
+    responseDoc["humanizeVelocity"] = sequencer.getHumanizeVelocityAmount();
+    String output;
+    serializeJson(responseDoc, output);
+    if (ws) ws->textAll(output);
+  }
+  else if (cmd == "getGrooveState") {
+    StaticJsonDocument<192> responseDoc;
+    responseDoc["type"] = "grooveState";
+    responseDoc["swing"] = gGrooveSwingAmount;
+    responseDoc["humanizeTimingMs"] = sequencer.getHumanizeTimingMs();
+    responseDoc["humanizeVelocity"] = sequencer.getHumanizeVelocityAmount();
     String output;
     serializeJson(responseDoc, output);
     if (ws) ws->textAll(output);
@@ -4684,10 +5193,10 @@ void WebInterface::processCommand(const JsonDocument& doc) {
 
     setTrackSynthEngine(track, (int8_t)engine);
     spiMaster.dsqSetTrackEngine((uint8_t)track, (int8_t)engine);
-    // NOTE: do NOT auto-mute the track when assigning an engine. The Daisy
-    // routes triggers per-engine via dsqTrackEngine[], so the sampler stays
-    // silent automatically. Auto-muting here forced the user to manually
-    // toggle mute/unmute in the P4 sequencer to hear new selections.
+    // Asegurar que el track NO esta muteado en Daisy. El boot fallback
+    // antiguo muteaba synth tracks, y eso dejaba el secuenciador silencioso
+    // tras cambiar a sampler. La Daisy ya rutea por dsqTrackEngine[].
+    spiMaster.dsqSetMute((uint8_t)track, false);
 
     // Stack buffer — avoids String heap allocation
     char buf[96];
@@ -4723,7 +5232,8 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     setAllTrackSynthEngines((int8_t)engine);
     for (int i = 0; i < 16; i++) {
       spiMaster.dsqSetTrackEngine((uint8_t)i, (int8_t)engine);
-      // No auto-mute: the Daisy already routes per-engine via dsqTrackEngine[].
+      // Forzar unmute: limpia restos del boot que muteaba tracks por engine.
+      spiMaster.dsqSetMute((uint8_t)i, false);
     }
 
     StaticJsonDocument<256> responseDoc;
@@ -4782,6 +5292,16 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       bool ok = spiMaster.sdLoadKit(kit, startPad, maxPads);
       if (ok) {
         clearDaisyPadFiles();
+        // Asegurar que los tracks afectados quedan en modo sampler para que
+        // el kit recien cargado realmente suene (el boot fallback puede
+        // haber dejado tracks en engine 808 si no habia SD al arrancar).
+        uint8_t lastPad = startPad + maxPads;
+        if (lastPad > 16) lastPad = 16;
+        for (uint8_t t = startPad; t < lastPad; t++) {
+          setTrackSynthEngine(t, -1);
+          spiMaster.dsqSetTrackEngine(t, -1);
+          spiMaster.dsqSetMute(t, false);
+        }
       }
       StaticJsonDocument<192> resp;
       resp["type"] = "sdLoadKitAck";
@@ -5003,17 +5523,22 @@ void WebInterface::processCommand(const JsonDocument& doc) {
     if (pad >= 0 && pad < 16) {
       melodyPad = (uint8_t)pad;
       JsonArrayConst steps = doc["steps"].as<JsonArrayConst>();
+      uint8_t assignedNotes[16][MELODY_STEP_VOICES] = {};
       if (!steps.isNull()) {
         melodyClearGrid();
         int col = 0;
         for (JsonVariantConst stepArr : steps) {
           if (col >= 16) break;
           if (stepArr.is<JsonArrayConst>()) {
+            int voice = 0;
             for (JsonVariantConst v : stepArr.as<JsonArrayConst>()) {
               int note = v.as<int>();
               if (note < 0 || note > 127) continue;
               int row = 11 - (note % 12);
               if (row >= 0 && row < 12) melodyGrid[col][row] = true;
+              if (note > 0 && voice < MELODY_STEP_VOICES) {
+                assignedNotes[col][voice++] = (uint8_t)note;
+              }
             }
           }
           col++;
@@ -5029,19 +5554,32 @@ void WebInterface::processCommand(const JsonDocument& doc) {
       for (int step = 0; step < 16; step++) {
         bool active = false;
         int voice = 0;
+        uint8_t primaryNote = 0;
         sequencer.clearStepNoteVoices(pad, step);
-        for (int row = 0; row < 12; row++) {
-          if (!melodyGrid[step][row]) continue;
-          active = true;
-          if (voice < MELODY_STEP_VOICES) {
-            int pc = 11 - row;
-            int midi = ((int)melodyOctave + 1) * 12 + pc;
-            if (midi < 0) midi = 0;
-            if (midi > 127) midi = 127;
-            sequencer.setStepNoteVoice(pad, step, voice, (uint8_t)midi);
-            voice++;
+        if (!steps.isNull()) {
+          for (int v = 0; v < MELODY_STEP_VOICES; v++) {
+            uint8_t midi = assignedNotes[step][v];
+            if (midi == 0) continue;
+            if (primaryNote == 0) primaryNote = midi;
+            active = true;
+            sequencer.setStepNoteVoice(pad, step, voice++, midi);
+          }
+        } else {
+          for (int row = 0; row < 12; row++) {
+            if (!melodyGrid[step][row]) continue;
+            active = true;
+            if (voice < MELODY_STEP_VOICES) {
+              int pc = 11 - row;
+              int midi = ((int)melodyOctave + 1) * 12 + pc;
+              if (midi < 0) midi = 0;
+              if (midi > 127) midi = 127;
+              if (primaryNote == 0) primaryNote = (uint8_t)midi;
+              sequencer.setStepNoteVoice(pad, step, voice, (uint8_t)midi);
+              voice++;
+            }
           }
         }
+        sequencer.setStepNote(pad, step, primaryNote);
         sequencer.setStep(pad, step, active);
         sequencer.setStepNoteLen(pad, step, 1);
         spiMaster.dsqSetStep((uint8_t)curPat, (uint8_t)pad, (uint8_t)step,
@@ -5486,8 +6024,8 @@ void WebInterface::handleUpload(AsyncWebServerRequest *request, String filename,
       uploadError = true; uploadErrorMsg = "Unknown file size (Content-Length missing)";
       broadcastUploadComplete(uploadPad, false, uploadErrorMsg); return;
     }
-    if (uploadSize > 4 * 1024 * 1024) {
-      uploadError = true; uploadErrorMsg = "File too large (max 4MB)";
+    if (uploadSize > 8 * 1024 * 1024) {
+      uploadError = true; uploadErrorMsg = "File too large (max 8MB)";
       broadcastUploadComplete(uploadPad, false, uploadErrorMsg); return;
     }
 
@@ -5563,6 +6101,65 @@ struct DaisyUploadStreamState {
 };
 
 static DaisyUploadStreamState s_daisyUpload;
+
+static portMUX_TYPE s_daisyUploadMux = portMUX_INITIALIZER_UNLOCKED;
+static constexpr size_t kDaisyUploadQueueBlocks = 64;
+static constexpr size_t kDaisyUploadBlockSamples = 256;
+
+struct DaisyUploadPcmBlock {
+  uint16_t count = 0;
+  int16_t samples[kDaisyUploadBlockSamples] = {};
+};
+
+static DaisyUploadPcmBlock s_daisyUploadQueue[kDaisyUploadQueueBlocks];
+static volatile uint16_t s_daisyUploadQueueRead = 0;
+static volatile uint16_t s_daisyUploadQueueWrite = 0;
+static volatile uint16_t s_daisyUploadQueueCount = 0;
+
+static void resetDaisyUploadQueue() {
+  portENTER_CRITICAL(&s_daisyUploadMux);
+  s_daisyUploadQueueRead = 0;
+  s_daisyUploadQueueWrite = 0;
+  s_daisyUploadQueueCount = 0;
+  portEXIT_CRITICAL(&s_daisyUploadMux);
+}
+
+static bool pushDaisyUploadBlock(const int16_t* samples, uint16_t count) {
+  if (!samples || count == 0 || count > kDaisyUploadBlockSamples) return false;
+
+  while (true) {
+    bool pushed = false;
+    portENTER_CRITICAL(&s_daisyUploadMux);
+    if (s_daisyUploadQueueCount < kDaisyUploadQueueBlocks) {
+      DaisyUploadPcmBlock& block = s_daisyUploadQueue[s_daisyUploadQueueWrite];
+      block.count = count;
+      memcpy(block.samples, samples, count * sizeof(int16_t));
+      s_daisyUploadQueueWrite = (uint16_t)((s_daisyUploadQueueWrite + 1) % kDaisyUploadQueueBlocks);
+      s_daisyUploadQueueCount++;
+      pushed = true;
+    }
+    portEXIT_CRITICAL(&s_daisyUploadMux);
+
+    if (pushed) return true;
+    delay(1);
+    yield();
+    esp_task_wdt_reset();
+    if (s_daisyUpload.error) return false;
+  }
+}
+
+static bool popDaisyUploadBlock(DaisyUploadPcmBlock& out) {
+  bool ok = false;
+  portENTER_CRITICAL(&s_daisyUploadMux);
+  if (s_daisyUploadQueueCount > 0) {
+    out = s_daisyUploadQueue[s_daisyUploadQueueRead];
+    s_daisyUploadQueueRead = (uint16_t)((s_daisyUploadQueueRead + 1) % kDaisyUploadQueueBlocks);
+    s_daisyUploadQueueCount--;
+    ok = true;
+  }
+  portEXIT_CRITICAL(&s_daisyUploadMux);
+  return ok;
+}
 
 static uint16_t le16(const uint8_t* p) {
   return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
@@ -5644,11 +6241,10 @@ static void processDaisyUploadPcm(const uint8_t* data, size_t len) {
 
   auto flushPcm = [&]() {
     if (pcmCount == 0) return;
-    if (!spiMaster.writeSampleStreamData(st.pad, pcm, (uint16_t)pcmCount, st.samplesSent)) {
-      daisyUploadError("Daisy data chunk failed");
+    if (!pushDaisyUploadBlock(pcm, (uint16_t)pcmCount)) {
+      if (!st.error) daisyUploadError("Daisy upload queue failed");
       return;
     }
-    st.samplesSent += pcmCount;
     pcmCount = 0;
   };
 
@@ -5682,7 +6278,10 @@ static void processDaisyUploadPcm(const uint8_t* data, size_t len) {
       }
     }
     if (pcmCount == 256) flushPcm();
-    if ((st.samplesSent & 0x0FFF) == 0) yield();
+    if ((pos & 0x0FFF) == 0) {
+      yield();
+      esp_task_wdt_reset();
+    }
   }
   flushPcm();
 }
@@ -5690,6 +6289,7 @@ static void processDaisyUploadPcm(const uint8_t* data, size_t len) {
 void WebInterface::handleDaisyUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
   if (index == 0) {
     s_daisyUpload = DaisyUploadStreamState();
+    resetDaisyUploadQueue();
     s_daisyUpload.active = true;
     if (request->hasParam("pad")) {
       s_daisyUpload.pad = request->getParam("pad")->value().toInt();
@@ -5700,6 +6300,8 @@ void WebInterface::handleDaisyUpload(AsyncWebServerRequest *request, String file
     }
     if (s_daisyUpload.pad < 0 || s_daisyUpload.pad >= MAX_SAMPLES) daisyUploadError("Invalid pad number");
     if (!filename.endsWith(".wav") && !filename.endsWith(".WAV")) daisyUploadError("Only WAV files are supported");
+    if (request->contentLength() == 0) daisyUploadError("Unknown file size (Content-Length missing)");
+    if (request->contentLength() > (8 * 1024 * 1024)) daisyUploadError("File too large (max 8MB)");
     strncpy(s_daisyUpload.filename, filename.c_str(), sizeof(s_daisyUpload.filename) - 1);
   }
 
@@ -5732,17 +6334,453 @@ void WebInterface::handleDaisyUpload(AsyncWebServerRequest *request, String file
   }
 
   if (final) {
-    bool ok = st.begun && !st.error && st.samplesSent > 0;
-    if (st.begun) spiMaster.endSampleStream(st.pad, ok, st.samplesSent);
-    if (ok) {
-      broadcastUploadComplete(st.pad, true, "Sample streamed to Daisy");
-      request->send(200, "application/json", "{\"success\":true,\"message\":\"Sample streamed to Daisy\"}");
-    } else {
-      const char* msg = st.errorMsg[0] ? st.errorMsg : "Daisy upload failed";
-      broadcastUploadComplete(st.pad, false, msg);
-      request->send(400, "application/json", String("{\"success\":false,\"message\":\"") + msg + "\"}");
+    request->send(200, "application/json", "{\"success\":true,\"message\":\"Upload received, streaming to Daisy...\"}");
+  }
+}
+
+// ── pumpCleanTrackStream ─────────────────────────────────────────────────────
+// Called from update() (SystemTask, Core 0) every 2 ms.
+// Streams a WAV file already saved in LittleFS to the Daisy Seed in chunks,
+// without ever blocking the AsyncWebServer callback task.
+static void pumpCleanTrackStream() {
+  if (!s_cleanTrackStream.active) return;
+
+  uint32_t nowMs = millis();
+  if (s_cleanTrackStream.startedMs == 0) {
+    s_cleanTrackStream.startedMs = nowMs;
+    s_cleanTrackStream.lastProgressMs = nowMs;
+  }
+  if (!s_cleanTrackStream.error) {
+    if ((uint32_t)(nowMs - s_cleanTrackStream.startedMs) > kCleanTrackStreamTotalTimeoutMs) {
+      strlcpy(s_cleanTrackStream.errorMsg, "stream-timeout", sizeof(s_cleanTrackStream.errorMsg));
+      s_cleanTrackStream.error = true;
+    } else if (s_cleanTrackStream.begun
+               && (uint32_t)(nowMs - s_cleanTrackStream.lastProgressMs) > kCleanTrackStreamNoProgressTimeoutMs) {
+      strlcpy(s_cleanTrackStream.errorMsg, "stream-stalled", sizeof(s_cleanTrackStream.errorMsg));
+      s_cleanTrackStream.error = true;
     }
-    s_daisyUpload = DaisyUploadStreamState();
+  }
+
+  // ── Phase 1: open file, parse WAV header, begin SPI stream ──────────────
+  if (!s_cleanTrackStream.begun) {
+    File f = LittleFS.open(s_cleanTrackStream.filePath, "r");
+    if (!f) {
+      strlcpy(s_cleanTrackStream.errorMsg, "open-failed", sizeof(s_cleanTrackStream.errorMsg));
+      s_cleanTrackStream.error = true;
+    } else {
+      char herr[96] = {};
+      uint16_t ch = 0, bits = 0;
+      uint32_t dataOff = 0, dataSz = 0;
+      if (!parseWavFileHeader(f, ch, bits, dataOff, dataSz, herr, sizeof(herr)) || dataSz == 0) {
+        strlcpy(s_cleanTrackStream.errorMsg, herr[0] ? herr : "bad-header", sizeof(s_cleanTrackStream.errorMsg));
+        s_cleanTrackStream.error = true;
+        f.close();
+      } else {
+        const uint32_t frameBytes  = (bits / 8) * ch;
+        const uint32_t totSamples  = dataSz / frameBytes;
+        if (!spiMaster.beginCleanTrackStream(s_cleanTrackStream.slot, totSamples)) {
+          strlcpy(s_cleanTrackStream.errorMsg, "daisy-begin-failed", sizeof(s_cleanTrackStream.errorMsg));
+          s_cleanTrackStream.error = true;
+          f.close();
+        } else if (!f.seek(dataOff, SeekSet)) {
+          strlcpy(s_cleanTrackStream.errorMsg, "seek-failed", sizeof(s_cleanTrackStream.errorMsg));
+          spiMaster.endCleanTrackStream(s_cleanTrackStream.slot, false, 0);
+          s_cleanTrackStream.error = true;
+          f.close();
+        } else {
+          s_cleanTrackStream.channels       = ch;
+          s_cleanTrackStream.bits           = bits;
+          s_cleanTrackStream.bytesRemaining = dataSz;
+          s_cleanTrackStream.totalSamples   = totSamples;
+          s_cleanTrackStream.samplesSent    = 0;
+          s_cleanTrackStream.carryLen       = 0;
+          s_cleanTrackStream.begun          = true;
+          s_cleanTrackStreamFile = f;  // keep file open across pumps
+        }
+      }
+    }
+    // On init error fall through to finalise below; on success return and wait for next pump
+    if (!s_cleanTrackStream.error) return;
+  }
+
+  // ── Phase 2: read-decode-send up to 4 chunks per pump tick ───────────────
+  if (!s_cleanTrackStream.error && s_cleanTrackStream.bytesRemaining > 0) {
+    uint8_t inBuf[1024];
+    uint8_t parseBuf[8 + sizeof(inBuf)];   // 8 = max carry size
+    int16_t pcm[256];
+    const uint32_t frameBytes = (uint32_t)(s_cleanTrackStream.bits / 8) * s_cleanTrackStream.channels;
+
+    for (int pumps = 0; pumps < 4 && s_cleanTrackStream.bytesRemaining > 0 && !s_cleanTrackStream.error; ++pumps) {
+      size_t toRead  = min((size_t)sizeof(inBuf), (size_t)s_cleanTrackStream.bytesRemaining);
+      size_t readNow = s_cleanTrackStreamFile.read(inBuf, toRead);
+      if (readNow == 0) {
+        strlcpy(s_cleanTrackStream.errorMsg, "unexpected-eof", sizeof(s_cleanTrackStream.errorMsg));
+        s_cleanTrackStream.error = true;
+        break;
+      }
+      s_cleanTrackStream.bytesRemaining -= (uint32_t)readNow;
+
+      memcpy(parseBuf, s_cleanTrackStream.carry, s_cleanTrackStream.carryLen);
+      memcpy(parseBuf + s_cleanTrackStream.carryLen, inBuf, readNow);
+      size_t parseLen  = s_cleanTrackStream.carryLen + readNow;
+      size_t fullBytes = parseLen - (parseLen % frameBytes);
+      size_t offset    = 0;
+
+      while (offset + frameBytes <= fullBytes && !s_cleanTrackStream.error) {
+        uint16_t pcmCount = 0;
+        while (offset + frameBytes <= fullBytes && pcmCount < 256) {
+          const uint8_t* frame = parseBuf + offset;
+          if (s_cleanTrackStream.bits == 16) {
+            if (s_cleanTrackStream.channels == 1) {
+              pcm[pcmCount++] = (int16_t)le16(frame);
+            } else {
+              int16_t l = (int16_t)le16(frame);
+              int16_t r = (int16_t)le16(frame + 2);
+              pcm[pcmCount++] = (int16_t)(((int32_t)l + r) / 2);
+            }
+          } else {
+            if (s_cleanTrackStream.channels == 1) {
+              pcm[pcmCount++] = wav_s24_to_s16(frame);
+            } else {
+              int16_t l = wav_s24_to_s16(frame);
+              int16_t r = wav_s24_to_s16(frame + 3);
+              pcm[pcmCount++] = (int16_t)(((int32_t)l + r) / 2);
+            }
+          }
+          offset += frameBytes;
+        }
+        if (pcmCount > 0) {
+          if (!spiMaster.writeCleanTrackStreamData(s_cleanTrackStream.slot, pcm, pcmCount, s_cleanTrackStream.samplesSent)) {
+            strlcpy(s_cleanTrackStream.errorMsg, "spi-write-failed", sizeof(s_cleanTrackStream.errorMsg));
+            s_cleanTrackStream.error = true;
+          } else {
+            s_cleanTrackStream.samplesSent += pcmCount;
+            s_cleanTrackStream.lastProgressMs = millis();
+          }
+        }
+      }
+
+      s_cleanTrackStream.carryLen = parseLen - fullBytes;
+      if (s_cleanTrackStream.carryLen > 0) {
+        memcpy(s_cleanTrackStream.carry, parseBuf + fullBytes, s_cleanTrackStream.carryLen);
+      }
+      esp_task_wdt_reset();
+    }
+  }
+
+  // ── Phase 3: finalise as a non-blocking state machine ────────────────────
+  // Each tick spends < 5 ms. No delay() / no synchronous SPI loops.
+  bool streamDone = s_cleanTrackStream.error
+                 || (s_cleanTrackStream.bytesRemaining == 0 && s_cleanTrackStream.carryLen == 0);
+  if (!streamDone) return;
+
+  // Phase transition table:
+  //   0 = streaming done, ready to send CMD_SAMPLE_END
+  //   1 = end sent, kick off first status request
+  //   2 = waiting for status snapshot, retry every 30 ms, max 5 attempts (~150 ms)
+  //   3 = publish (persist FS + broadcast WS, deferred from HTTP handler)
+  //   4 = idle / queue next
+  if (s_cleanTrackStream.finalizePhase == 0) {
+    if (!s_cleanTrackStream.error && s_cleanTrackStream.samplesSent != s_cleanTrackStream.totalSamples) {
+      strlcpy(s_cleanTrackStream.errorMsg, "sample-count-mismatch", sizeof(s_cleanTrackStream.errorMsg));
+      s_cleanTrackStream.error = true;
+    }
+    bool ok = !s_cleanTrackStream.error;
+    if (s_cleanTrackStreamFile) s_cleanTrackStreamFile.close();
+    // Solo enviar endCleanTrackStream si llegamos a enviar begin a la Daisy.
+    // Sin esta guarda, errores tempranos (open-failed, bad-header,
+    // daisy-begin-failed) terminaban mandando un END sin BEGIN previo,
+    // dejando a la Daisy en estado inconsistente y rompiendo la siguiente
+    // subida (sintoma: "el primero no se inicializa").
+    if (s_cleanTrackStream.begun) {
+      spiMaster.endCleanTrackStream(s_cleanTrackStream.slot, ok, s_cleanTrackStream.samplesSent);
+    }
+    s_cleanTrackStream.finalizeStartMs = millis();
+    s_cleanTrackStream.lastVerifyReqMs = 0;
+    s_cleanTrackStream.verifyAttempts  = 0;
+    s_cleanTrackStream.verified        = false;
+    s_cleanTrackStream.finalizePhase   = ok ? 1 : 3;  // skip verify on error
+    return;  // next tick continues
+  }
+
+  if (s_cleanTrackStream.finalizePhase == 1) {
+    // Esperar ~250 ms tras el END para que Daisy procese CMD_SAMPLE_END
+    // (drenar cola SPI con los chunks pendientes + ejecutar handler que
+    // marca cleanTrackLoaded[track]=true). Sin este delay el primer
+    // requestStatus se enviaba antes de que Daisy actualizase el bit.
+    if ((uint32_t)(millis() - s_cleanTrackStream.finalizeStartMs) < 250) {
+      return;  // wait
+    }
+    // Kick off first status request (async via queue; Core1 will dispatch)
+    spiMaster.requestStatus();
+    s_cleanTrackStream.lastVerifyReqMs = millis();
+    s_cleanTrackStream.verifyAttempts  = 1;
+    s_cleanTrackStream.finalizePhase   = 2;
+    return;
+  }
+
+  if (s_cleanTrackStream.finalizePhase == 2) {
+    int slot = s_cleanTrackStream.slot;
+    StatusResponse st = {};
+    if (spiMaster.getStatusSnapshot(st)) {
+      if ((st.cleanTrackLoadedMask & (1u << slot)) != 0) {
+        s_cleanTrackStream.verified      = true;
+        s_cleanTrackStream.finalizePhase = 3;
+        return;
+      }
+    }
+    // Retry cada ~100 ms hasta 30 intentos (~3 s total). El ciclo SPI
+    // requestStatus -> Daisy responde -> snapshot updated puede tardar
+    // varios ticks cuando la cola SPI venia con cientos de chunks de
+    // datos pendientes. 200 ms era demasiado corto y daba 'daisy-not-loaded'
+    // sistematicamente.
+    if ((uint32_t)(millis() - s_cleanTrackStream.lastVerifyReqMs) >= 100) {
+      if (s_cleanTrackStream.verifyAttempts >= 30) {
+        StatusResponse finalSt = {};
+        uint32_t mask = 0;
+        if (spiMaster.getStatusSnapshot(finalSt)) {
+          mask = finalSt.cleanTrackLoadedMask;
+        }
+        syslog("STEM", "verify failed slot=%d mask=0x%02X sent=%lu total=%lu attempts=%u",
+               slot, (unsigned)mask,
+               (unsigned long)s_cleanTrackStream.samplesSent,
+               (unsigned long)s_cleanTrackStream.totalSamples,
+               s_cleanTrackStream.verifyAttempts);
+        s_cleanTrackStream.finalizePhase = 3;  // give up, mark not-loaded
+        return;
+      }
+      spiMaster.requestStatus();
+      s_cleanTrackStream.lastVerifyReqMs = millis();
+      s_cleanTrackStream.verifyAttempts++;
+    }
+    return;
+  }
+
+  if (s_cleanTrackStream.finalizePhase == 3) {
+    int  slot = s_cleanTrackStream.slot;
+    bool ok   = !s_cleanTrackStream.error;
+    if (ok && s_cleanTrackStream.verified) {
+      s_cleanTracks[slot].loaded     = true;
+      s_cleanTracks[slot].loadFailed = false;
+      // Auto-arm clean track tras upload exitoso para que suene al pulsar Play.
+      // Antes, armed=false por defecto -> setCleanTrackActive(false) -> stem silencioso
+      // a pesar del toast de éxito. El usuario espera que un stem recién subido suene.
+      s_cleanTracks[slot].armed = true;
+      s_cleanTracks[slot].muted = false;
+      spiMaster.setCleanTrackActive(slot, true);
+      spiMaster.setCleanTrackMute(slot, false);
+      strlcpy(s_cleanTracks[slot].status, "loaded", sizeof(s_cleanTracks[slot].status));
+    } else if (ok) {
+      s_cleanTracks[slot].loaded     = false;
+      s_cleanTracks[slot].loadFailed = true;  // evita re-encolado infinito
+      strlcpy(s_cleanTracks[slot].status, "daisy-not-loaded", sizeof(s_cleanTracks[slot].status));
+    } else {
+      s_cleanTracks[slot].loaded     = false;
+      s_cleanTracks[slot].loadFailed = true;
+      strlcpy(s_cleanTracks[slot].status,
+              s_cleanTrackStream.errorMsg[0] ? s_cleanTrackStream.errorMsg : "load-error",
+              sizeof(s_cleanTracks[slot].status));
+    }
+    s_cleanTrackStream.finalizePhase = 4;
+    // Persist + broadcast deferred to NEXT tick to keep this one short
+    return;
+  }
+
+  // Phase 4: publish + reset + queue next (split work across calls)
+  syncCleanTrackStateFromDaisy();
+  saveCleanTracksStateToFs();
+  webInterface.broadcastSequencerState();
+  s_cleanTrackStream = CleanTrackStreamState{};  // reset all fields
+  queueNextStoredCleanTrackStream();
+  if (s_cleanTrackStream.active) {
+    saveCleanTracksStateToFs();
+    webInterface.broadcastSequencerState();
+  }
+}
+
+static void pumpDaisyUpload() {
+  if (s_daisyUpload.active && s_daisyUpload.begun && !s_daisyUpload.error) {
+    DaisyUploadPcmBlock block;
+    uint8_t drained = 0;
+    while (drained < 6 && popDaisyUploadBlock(block)) {
+      if (!spiMaster.writeSampleStreamData(s_daisyUpload.pad, block.samples, block.count, s_daisyUpload.samplesSent)) {
+        daisyUploadError("Daisy data chunk failed");
+        break;
+      }
+      s_daisyUpload.samplesSent += block.count;
+      drained++;
+      esp_task_wdt_reset();
+      yield();
+    }
+  }
+
+  if (s_daisyUpload.active) {
+    bool uploadFinished = (s_daisyUpload.dataSize > 0)
+      && (s_daisyUpload.fileOffset >= (size_t)s_daisyUpload.dataPos + (size_t)s_daisyUpload.dataSize);
+    bool queueEmpty = (s_daisyUploadQueueCount == 0);
+    if (s_daisyUpload.error || (uploadFinished && queueEmpty && s_daisyUpload.carryLen == 0)) {
+      bool ok = s_daisyUpload.begun && !s_daisyUpload.error && s_daisyUpload.samplesSent > 0;
+      if (s_daisyUpload.begun) spiMaster.endSampleStream(s_daisyUpload.pad, ok, s_daisyUpload.samplesSent);
+      if (ok) {
+        // Tras subir una stem/sample a un pad del secuenciador, forzar
+        // engine=-1 (sampler) en la Daisy: si el track estaba en 808 por el
+        // fallback de boot (SD sin kit), el sample subido NO sonaba porque
+        // el secuenciador y el trigger live seguian disparando synth808.
+        if (s_daisyUpload.pad >= 0 && s_daisyUpload.pad < 16) {
+          setTrackSynthEngine(s_daisyUpload.pad, -1);
+          spiMaster.dsqSetTrackEngine((uint8_t)s_daisyUpload.pad, -1);
+          spiMaster.dsqSetMute((uint8_t)s_daisyUpload.pad, false);
+        }
+        webInterface.broadcastUploadComplete(s_daisyUpload.pad, true, "Sample streamed to Daisy");
+        webInterface.broadcastSequencerState();
+      } else {
+        const char* msg = s_daisyUpload.errorMsg[0] ? s_daisyUpload.errorMsg : "Daisy upload failed";
+        webInterface.broadcastUploadComplete(s_daisyUpload.pad, false, msg);
+      }
+      resetDaisyUploadQueue();
+      s_daisyUpload = DaisyUploadStreamState();
+    }
+  }
+}
+
+void WebInterface::handleCleanTrackUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+  if (index == 0) {
+    if (s_cleanTrackUpload.file) {
+      s_cleanTrackUpload.file.close();
+    }
+    memset(&s_cleanTrackUpload, 0, sizeof(s_cleanTrackUpload));
+    s_cleanTrackLastInitError[0] = 0;
+    s_cleanTrackUpload.active = true;
+
+    if (!filename.endsWith(".wav") && !filename.endsWith(".WAV")) {
+      sendCleanTrackInitError(request, 400, "invalid_wav", "Only WAV files are supported");
+      s_cleanTrackUpload.active = false;
+      return;
+    }
+    if (request->contentLength() == 0 || request->contentLength() > (8 * 1024 * 1024)) {
+      sendCleanTrackInitError(request, 400, "invalid_size", "Invalid file size (max 8MB)");
+      s_cleanTrackUpload.active = false;
+      return;
+    }
+
+    // NOTA: no rechazamos aqui aunque el pump este streaming otro stem.
+    // Si lo rechazaramos con 503, el PRIMER upload del usuario tras un boot
+    // (donde el pump esta cargando stems persistidos en LittleFS) fallaba con
+    // "el primero no se inicializa". En su lugar guardamos el WAV en
+    // LittleFS y queueNextStoredCleanTrackStream() lo recogera cuando el
+    // pump termine la stream en curso.
+
+    // Validate free FS space (uploaded file size + small margin for FS metadata).
+    {
+      size_t totalB = LittleFS.totalBytes();
+      size_t usedB  = LittleFS.usedBytes();
+      size_t freeB  = (totalB > usedB) ? (totalB - usedB) : 0;
+      size_t needB  = (size_t)request->contentLength() + 8192;
+      if (freeB < needB) {
+        sendCleanTrackInitError(request, 507, "fs_full", "Insufficient storage");
+        s_cleanTrackUpload.active = false;
+        return;
+      }
+    }
+
+    int slot = findFirstFreeCleanTrackSlot();
+    if (slot < 0) {
+      sendCleanTrackInitError(request, 409, "no_free_slots", "No free clean track available");
+      s_cleanTrackUpload.active = false;
+      return;
+    }
+
+    if (!ensureCleanTracksDir()) {
+      sendCleanTrackInitError(request, 500, "mkdir_failed", "Failed to prepare clean track storage");
+      s_cleanTrackUpload.active = false;
+      return;
+    }
+
+    String safeName = cleanTrackSafeName(filename);
+    String path = String(kCleanTracksDir) + "/slot_" + String(slot) + "_" + safeName;
+    LittleFS.remove(path);
+
+    s_cleanTrackUpload.slot = slot;
+    strlcpy(s_cleanTrackUpload.filename, filename.c_str(), sizeof(s_cleanTrackUpload.filename));
+    strlcpy(s_cleanTrackUpload.filePath, path.c_str(), sizeof(s_cleanTrackUpload.filePath));
+    s_cleanTrackUpload.file = LittleFS.open(path, "w");
+    if (!s_cleanTrackUpload.file) {
+      sendCleanTrackInitError(request, 500, "open_failed", "Failed to create clean track file");
+      s_cleanTrackUpload.active = false;
+      return;
+    }
+  }
+
+  if (!s_cleanTrackUpload.active || !s_cleanTrackUpload.file) {
+    if (final) {
+      StaticJsonDocument<256> response;
+      response["success"] = false;
+      response["reason"] = "not_initialized";
+      response["lastInitError"] = s_cleanTrackLastInitError[0] ? s_cleanTrackLastInitError : "none";
+      response["message"] = "Clean track upload not initialized";
+      String output;
+      serializeJson(response, output);
+      request->send(500, "application/json", output);
+    }
+    return;
+  }
+
+  if (len > 0) {
+    size_t written = s_cleanTrackUpload.file.write(data, len);
+    if (written != len) {
+      s_cleanTrackUpload.error = true;
+      strlcpy(s_cleanTrackUpload.errorMsg, "Failed writing clean track file", sizeof(s_cleanTrackUpload.errorMsg));
+    } else {
+      s_cleanTrackUpload.bytesWritten += written;
+    }
+  }
+
+  if (final) {
+    s_cleanTrackUpload.file.close();
+    if (s_cleanTrackUpload.error) {
+      LittleFS.remove(s_cleanTrackUpload.filePath);
+      request->send(500, "application/json", "{\"success\":false,\"message\":\"Failed writing clean track file\"}");
+      memset(&s_cleanTrackUpload, 0, sizeof(s_cleanTrackUpload));
+      return;
+    }
+
+    int slot = s_cleanTrackUpload.slot;
+    clearCleanTrackSlot(s_cleanTracks[slot], slot);
+    s_cleanTracks[slot].occupied  = true;
+    s_cleanTracks[slot].loaded    = false;
+    s_cleanTracks[slot].armed     = true;
+    s_cleanTracks[slot].muted     = false;
+    s_cleanTracks[slot].movable   = true;
+    s_cleanTracks[slot].sizeBytes = (uint32_t)s_cleanTrackUpload.bytesWritten;
+    strlcpy(s_cleanTracks[slot].clipName, s_cleanTrackUpload.filename, sizeof(s_cleanTracks[slot].clipName));
+    strlcpy(s_cleanTracks[slot].filePath, s_cleanTrackUpload.filePath, sizeof(s_cleanTracks[slot].filePath));
+
+    // Defer SPI streaming to pumpCleanTrackStream() in update() (SystemTask, Core 0).
+    // This avoids blocking the AsyncWebServer callback task for the entire stream duration,
+    // which was causing "cannot connect" / connection-drop issues during large WAV uploads.
+    if (s_cleanTrackStream.active) {
+      // A previous stream is still in progress \u2014 mark as stored, user can reload later
+      strlcpy(s_cleanTracks[slot].status, "stored", sizeof(s_cleanTracks[slot].status));
+    } else {
+      queueCleanTrackStreamSlot(slot);
+    }
+
+    // NOTE: do NOT call spiMaster.requestStatus(), saveCleanTracksStateToFs() or
+    // broadcastSequencerState() here \u2014 those block the AsyncTCP task. The pump's
+    // Phase 3/4 will persist + broadcast once Daisy confirms the load.
+
+    StaticJsonDocument<256> response;
+    response["success"]      = true;
+    response["message"]      = s_cleanTrackStream.active ? "Clean track received, streaming to Daisy" : "Clean track stored";
+    response["cleanTrackId"] = slot;
+    response["clipName"]     = s_cleanTracks[slot].clipName;
+    response["sizeBytes"]    = s_cleanTracks[slot].sizeBytes;
+    response["loaded"]       = false;
+    response["streaming"]    = s_cleanTrackStream.active;
+    String output;
+    serializeJson(response, output);
+    request->send(200, "application/json", output);
+    memset(&s_cleanTrackUpload, 0, sizeof(s_cleanTrackUpload));
   }
 }
 

@@ -132,7 +132,7 @@ let ws=null,wsTimer=null;
 let useCamera=false,camStream=null,mpHands=null,handsPromise=null,frameBusy=false,frameHandle=0;
 let handSendErrShown=false;
 let liveLmR=null,liveLmL=null,livePoseR=null,livePoseL=null;
-let rBuf=[],lBuf=[],prevWristR=null,prevWristL=null;
+let rBuf=[],lBuf=[],presetBuf=[],prevWristR=null,prevWristL=null;
 let lastCommR=null,lastCommL=null;
 const gLastT={};
 let activeMode='S';
@@ -142,12 +142,22 @@ let curPatIdx=0,curPlaying=false;
 let lastFxRT=0,lastFxLT=0,lastPitchT=0;
 let curCutoff=8000,curReso=0,curReverb=40,curDelay=0,curPitch=1;
 let delayOn=false,reverbOn=false,distOn=false;
-let bassReady=false,curBassCutoff=1200,curBassReso=.35,curBassEnv=.55;
+let bassReady=false,curBassCutoff=1200,curBassReso=.72,curBassEnv=.65,curBassDrive=.12;
 let fxReady=false;
 let activeBassNote=null,activeBassIdx=-1,lastBassVel=0,bassReadyFlashT=0;
+let curPianoPreset=0,lastPianoTapY=null,lastPresetConf=null;
 let fxResetHoldStart=0,fxResetArmed=false,fxResetProgress=0;
 let lastStatusText='',lastStatusTone='',statusTmr=null;
-const BASS_ENGINE=3,BASS_TRACK=0,BASS_NOTES=[36,39,43,48,51,55,60,63];
+const BASS_ENGINE=3,BASS_TRACK=0,BASS_NOTES=[36,39,43,48];
+const PIANO_PRESETS=[
+  {name:'CLASSIC',cut:1200,cutLo:360,cutHi:5200,reso:.72,env:.65,dec:.35,acc:.60,slide:.09,wave:0,vol:.80,atk:.001,sus:0,rel:.15,drv:.12,sub:.08,drift:.04},
+  {name:'SQUELCH',cut:900,cutLo:280,cutHi:7600,reso:.92,env:.95,dec:.45,acc:.85,slide:.12,wave:0,vol:.85,atk:.001,sus:0,rel:.18,drv:.28,sub:.06,drift:.08},
+  {name:'SUB',cut:240,cutLo:90,cutHi:2600,reso:.45,env:.25,dec:.60,acc:.25,slide:.06,wave:1,vol:.90,atk:.004,sus:.45,rel:.35,drv:.18,sub:.45,drift:.02},
+  {name:'SOFT',cut:2200,cutLo:520,cutHi:9800,reso:.58,env:.40,dec:.80,acc:.35,slide:.15,wave:1,vol:.75,atk:.010,sus:.35,rel:.40,drv:.08,sub:.18,drift:.12},
+];
+const NOTE_NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+function noteName(note){return NOTE_NAMES[note%12]+(Math.floor(note/12)-1)}
+function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v))}
 let modeLabelTmr=null,hintTmr=null,flashTmr=null;
 const particles=[];
 const trailR=[],trailL=[],TRAIL=24;
@@ -178,19 +188,34 @@ function setStatus(text,tone=''){
   if(activeMode==='S'||activeMode==='PAT')statusTmr=setTimeout(()=>e.classList.add('hide'),900);
 }
 function sendJ(obj){if(isWsOpen()){ws.send(JSON.stringify(obj));return true}return false}
+function send303Param(paramId,value){sendJ({cmd:'synth303Param',paramId,value})}
+function apply303Preset(i,force=false){
+  const p=PIANO_PRESETS[clamp(i,0,PIANO_PRESETS.length-1)];
+  curPianoPreset=i;curBassCutoff=p.cut;curBassReso=p.reso;curBassEnv=p.env;curBassDrive=p.drv;
+  sendJ({cmd:'synthPreset',engine:BASS_ENGINE,preset:i});
+  send303Param(0,p.cut);send303Param(1,p.reso);send303Param(2,p.env);send303Param(3,p.dec);
+  send303Param(4,p.acc);send303Param(5,p.slide);send303Param(6,p.wave);send303Param(7,p.vol);
+  send303Param(8,p.atk);send303Param(9,p.sus);send303Param(10,p.rel);send303Param(11,p.drv);
+  send303Param(12,p.sub);send303Param(13,p.drift);send303Param(14,0);
+  if(force)showFlash(p.name,'#90caf9');
+  setStatus(`303 ${p.name} · 1-4 NOTAS · X/Y/Z PARAMS`,'good');
+}
 function ensureBass(force=false){
   if(!isWsOpen())return false;
   if(bassReady&&!force)return true;
   sendJ({cmd:'setTrackSynthEngine',track:BASS_TRACK,engine:BASS_ENGINE});
   bassReady=true;
-  sendJ({cmd:'synth303Param',paramId:0,value:curBassCutoff});
-  sendJ({cmd:'synth303Param',paramId:1,value:curBassReso});
-  sendJ({cmd:'synth303Param',paramId:2,value:curBassEnv});
-  sendJ({cmd:'synth303Param',paramId:7,value:.86});
+  apply303Preset(curPianoPreset,force);
+  curReverb=28;
   sendJ({cmd:'setReverbActive',value:true});
+  sendJ({cmd:'setReverbMix',value:curReverb});
+  reverbOn=true;
+  sendJ({cmd:'setDelayActive',value:false});
+  curDelay=0;
+  delayOn=false;
   const n=Date.now();
   if(force||n-bassReadyFlashT>2200){showFlash('303 READY','#90caf9');bassReadyFlashT=n}
-  setStatus('303 READY · R: NOTA/FILTRO/RESO · L: ENV/REVERB','good');
+  setStatus('303 ACID SOLO · 1-4 NOTAS · PALMA PRESET · X/Y/Z SONIDO','good');
   return true;
 }
 function ensureFx(force=false){
@@ -209,17 +234,19 @@ function stopBassNote(reason=''){
   if(activeBassNote===null)return;
   sendJ({cmd:'synth303NoteOff'});
   activeBassNote=null;activeBassIdx=-1;
+  lastPianoTapY=null;
   if(reason)setStatus(reason,'warn');
 }
-function triggerBassNote(i,vel=112){
+function triggerBassNote(i,vel=112,force=false){
   if(!ensureBass()){showNoWs();return}
   const note=BASS_NOTES[Math.max(0,Math.min(BASS_NOTES.length-1,i))];
-  if(activeBassNote===note)return;
-  stopBassNote();
-  sendJ({cmd:'synth303NoteOn',note,accent:vel>108,slide:false});
+  if(activeBassNote===note&&!force)return;
+  if(activeBassNote!==null)sendJ({cmd:'synth303NoteOff'});
+  const p=PIANO_PRESETS[curPianoPreset]||PIANO_PRESETS[0];
+  sendJ({cmd:'synth303NoteOn',note,accent:vel>108||p.acc>.75,slide:p.slide>.11});
   activeBassNote=note;activeBassIdx=i;lastBassVel=vel;
-  showFlash(['C1','D#','G','C2','D#2','G2','C3','D#3'][i]||('N'+note),'#90caf9');
-  setStatus(`303 NOTE ${note} · CUT ${curBassCutoff} · RES ${curBassReso.toFixed(2)} · HOLD`,'good');
+  showFlash(noteName(note),'#90caf9');
+  setStatus(`303 ${noteName(note)} · ${p.name} · ${force?'TAP':'HOLD'}`,'good');
 }
 function onWsMsg(ev){
   if(ev.data instanceof ArrayBuffer){
@@ -246,18 +273,18 @@ async function triggerPad(name,vel=112){
 // ── Mode system ───────────────────────────────────────────────────
 const MODES={
   S:{label:'SAMPLERS',   hint:'1-4 DEDOS DERECHA · 1-4 DEDOS IZQUIERDA', col:'255,79,67'},
-  P:{label:'303 BASS',   hint:'DERECHA 1-4 DEDOS = NOTAS 303 · X=RESO · Y=FILTRO · IZQ O UNA MANO=ENV/REVERB', col:'52,152,219'},
+  P:{label:'303 ACID SOLO',hint:'CUALQUIER MANO: 1-4 DEDOS = NOTAS · X/Y/Z = SONIDO · PALMA = PRESET · PUÑO = SOLTAR', col:'52,152,219'},
   FX:{label:'FX',        hint:'FX ON UNA VEZ · PUÑO=RESET · DERECHA FILTRO/RESO Y REVERB SI NO HAY IZQ', col:'46,204,113'},
   PAT:{label:'PATRONES', hint:'1-4 DEDOS DERECHA=PAT 1-4  ·  IZQUIERDA=PAT 5-8', col:'155,89,182'},
 };
 function setMode(m){
   if(m===activeMode)return;
   const prev=activeMode;activeMode=m;
-  rBuf=[];lBuf=[];lastCommR=null;lastCommL=null;
+  rBuf=[];lBuf=[];presetBuf=[];lastCommR=null;lastCommL=null;lastPresetConf=null;
   lastFxRT=0;lastFxLT=0;lastPitchT=0;
   fxResetHoldStart=0;fxResetArmed=false;fxResetProgress=0;
   if(prev==='P')stopBassNote('303 OFF');
-  // reset pitch when leaving Piano mode
+  // reset pitch when leaving 303 performance mode
   if(prev==='P'&&curPitch!==1){sendJ({cmd:'setLivePitch',pitch:1});curPitch=1}
   if(m==='P')ensureBass(true);
   if(m==='FX')ensureFx(true);
@@ -350,48 +377,71 @@ function procPAT(lmR,lmL){
   }else{lBuf=[];lastCommL=null}
 }
 
-// ── MODE P — 303 Bass ─────────────────────────────────────────────
+// ── MODE P — 303 Acid Solo ─────────────────────────────────────────
 function procP(lmR,lmL){
   const now=Date.now();
   ensureBass();
-  if(lmR){
-    const idx=lmR[8];
-    const filter=Math.round(180+(1-idx.y)*7800);
-    const reso=Math.max(0,Math.min(1,idx.x));
-    if(now-lastPitchT>FX_T){
-      if(Math.abs(filter-curBassCutoff)/8000>.015){sendJ({cmd:'synth303Param',paramId:0,value:filter});curBassCutoff=filter;curCutoff=filter}
-      if(Math.abs(reso-curBassReso)>.025){sendJ({cmd:'synth303Param',paramId:1,value:Math.round(reso*100)/100});curBassReso=reso}
-      lastPitchT=now;
-      if(activeBassNote!==null)setStatus(`303 NOTE ${activeBassNote} · CUT ${curBassCutoff} · RES ${curBassReso.toFixed(2)} · VEL ${lastBassVel}`,'good');
+
+  const rPose=lmR?getPose(lmR):null,lPose=lmL?getPose(lmL):null;
+  const rPlayable=rPose&&rPose.nonThumb>=1&&rPose.nonThumb<=4;
+  const lPlayable=lPose&&lPose.nonThumb>=1&&lPose.nonThumb<=4;
+  const soloHand=lPlayable?lmL:(rPlayable?lmR:(lmL||lmR));
+  const soloPose=soloHand==lmL?lPose:rPose;
+  const soloSide=soloHand==lmL?'l':'r';
+  if(soloHand&&soloPose){
+    const buf=soloSide==='l'?lBuf:rBuf;
+    if(soloPose.fist){stopBassNote('303 RELEASE');if(soloSide==='l'){lBuf=[];lastCommL=null}else{rBuf=[];lastCommR=null};return}
+    if(soloPose.openPalm&&canFire('p_preset_palm',620)){
+      apply303Preset((curPianoPreset+1)%PIANO_PRESETS.length,true);
+      try{navigator.vibrate&&navigator.vibrate(24)}catch{}
     }
-    const p=getPose(lmR);
-    if(p.fist){stopBassNote('303 RELEASE');rBuf=[];lastCommR=null;return}
-    const raw=p.nonThumb>=1&&p.nonThumb<=4?'bn'+p.nonThumb:null;
-    const conf=confGest(rBuf,raw,CONFIRM_N);
+    const preset=PIANO_PRESETS[curPianoPreset]||PIANO_PRESETS[0];
+    const idx=soloHand[8];
+    const z=clamp((-idx.z+.12)/.28,0,1);
+    const cutoff=Math.round(preset.cutLo+(1-idx.y)*(preset.cutHi-preset.cutLo));
+    const reso=clamp(preset.reso+(idx.x-.5)*.42,.15,.98);
+    const env=clamp(preset.env+(z-.5)*.72,.05,1);
+    const drive=clamp(preset.drv+z*.28,0,.72);
+    if(now-lastFxLT>FX_T){
+      if(Math.abs(cutoff-curBassCutoff)/Math.max(1,preset.cutHi)>.015){send303Param(0,cutoff);curBassCutoff=cutoff;curCutoff=cutoff}
+      if(Math.abs(reso-curBassReso)>.025){send303Param(1,Math.round(reso*100)/100);curBassReso=reso}
+      if(Math.abs(env-curBassEnv)>.035){send303Param(2,Math.round(env*100)/100);curBassEnv=env}
+      if(Math.abs(drive-curBassDrive)>.04){send303Param(11,Math.round(drive*100)/100);curBassDrive=drive}
+      lastFxLT=now;
+      setStatus(`303 ${preset.name} · CUT ${curBassCutoff} · RES ${curBassReso.toFixed(2)} · Z ${curBassEnv.toFixed(2)}`,'good');
+    }
+    const raw=soloPose.nonThumb>=1&&soloPose.nonThumb<=4?soloSide+'pn'+soloPose.nonThumb:null;
+    if(raw!==(soloSide==='l'?lastCommL:lastCommR)){
+      if(soloSide==='l')lastCommL=null;else lastCommR=null;
+    }
+    const conf=confGest(buf,raw,CONFIRM_N);
     if(conf){
-      const noteIdx=parseInt(conf[2])-1;
-      lastCommR=conf;
-      const e=wristVel(lmR,prevWristR);prevWristR=e.nxt;
-      if(noteIdx!==activeBassIdx&&canFire('p_note',70)){
+      const fingers=parseInt(conf[3])-1;
+      const noteIdx=fingers;
+      if(soloSide==='l')lastCommL=conf;else lastCommR=conf;
+      const e=wristVel(soloHand,soloSide==='l'?prevWristL:prevWristR);
+      if(soloSide==='l')prevWristL=e.nxt;else prevWristR=e.nxt;
+      if(noteIdx!==activeBassIdx&&canFire('p_note',65)){
         triggerBassNote(noteIdx,e.v);
-        spawnBurst(mirror(lmR)[8],e.v,'r');
+        lastPianoTapY=soloHand[8].y;
+        spawnBurst(mirror(soloHand)[8],e.v,soloSide);
+        try{navigator.vibrate&&navigator.vibrate(18)}catch{}
+      }else if(noteIdx===activeBassIdx){
+        const tipY=soloHand[8].y;
+        const tapDown=lastPianoTapY!==null&&tipY-lastPianoTapY>soloPose.sz*.18;
+        if(tapDown&&canFire('p_trem_'+noteIdx,125)){
+          triggerBassNote(noteIdx,e.v,true);
+          spawnBurst(mirror(soloHand)[8],e.v,soloSide);
+          try{navigator.vibrate&&navigator.vibrate(10)}catch{}
+        }
+        lastPianoTapY=tipY;
       }
     }else if(!raw){
       stopBassNote('303 RELEASE');
     }
-  }else{rBuf=[];lastCommR=null;prevWristR=null;stopBassNote('303 HAND LOST')}
-  const modHand=lmL||lmR;
-  if(modHand){
-    const reverb=Math.round((1-modHand[8].y)*100);
-    const env=Math.max(0,Math.min(1,modHand[8].x));
-    if(now-lastFxLT>FX_T){
-      if(!reverbOn){sendJ({cmd:'setReverbActive',value:true});reverbOn=true}
-      if(Math.abs(reverb-curReverb)>2){sendJ({cmd:'setReverbMix',value:reverb});curReverb=reverb}
-      if(Math.abs(env-curBassEnv)>.025){sendJ({cmd:'synth303Param',paramId:2,value:Math.round(env*100)/100});curBassEnv=env}
-      lastFxLT=now;
-      if(activeBassNote!==null)setStatus(`303 NOTE ${activeBassNote} · ENV ${curBassEnv.toFixed(2)} · RVB ${curReverb}`,'good');
-    }
-  }else{lBuf=[];lastCommL=null}
+  }else{
+    rBuf=[];lBuf=[];presetBuf=[];lastCommR=null;lastCommL=null;lastPresetConf=null;prevWristR=null;prevWristL=null;stopBassNote('303 HAND LOST');
+  }
 }
 
 // ── MODE FX ───────────────────────────────────────────────────────
@@ -452,7 +502,7 @@ function procFX(lmR,lmL){
 function onHandResults(res){
   liveLmR=liveLmL=null;
   if(!res.multiHandLandmarks?.length){
-    livePoseR=livePoseL=null;rBuf=[];lBuf=[];lastCommR=null;lastCommL=null;
+    livePoseR=livePoseL=null;rBuf=[];lBuf=[];presetBuf=[];lastCommR=null;lastCommL=null;lastPresetConf=null;
     if(activeMode==='P')stopBassNote('303 HAND LOST');
     fxResetHoldStart=0;fxResetArmed=false;fxResetProgress=0;
     if(activeMode==='P'&&curPitch!==1){sendJ({cmd:'setLivePitch',pitch:1});curPitch=1}
@@ -535,11 +585,11 @@ function drawFXRings(ctx,W,H){
   ctx.restore();
 }
 function drawPianoWave(ctx,W,H){
-  const hue=Math.round(200+(curPitch-1)*80),amp=H*(.06+.1*Math.abs(curPitch-1));
-  const freq=.016*curPitch,cy=H*.5;
+  const hue=Math.round(190+curBassReso*70),amp=H*(.04+.000006*curBassCutoff);
+  const freq=.012+curBassReso*.012,cy=H*.5;
   ctx.save();ctx.strokeStyle=`hsla(${hue},78%,62%,.4)`;ctx.lineWidth=1.8;
   ctx.shadowColor=`hsla(${hue},78%,62%,.3)`;ctx.shadowBlur=12;ctx.beginPath();
-  for(let x=0;x<W;x+=4){const n=Math.sin(x*freq+synthPhase*curPitch)+Math.sin(x*freq*1.6+synthPhase*.6)*.35;x===0?ctx.moveTo(x,cy+n*amp):ctx.lineTo(x,cy+n*amp)}
+  for(let x=0;x<W;x+=4){const n=Math.sin(x*freq+synthPhase)+Math.sin(x*freq*(1.6+curBassEnv)+synthPhase*.6)*.35;x===0?ctx.moveTo(x,cy+n*amp):ctx.lineTo(x,cy+n*amp)}
   ctx.stroke();ctx.restore();
 }
 function drawScope(ctx,W,H,dt){
@@ -555,7 +605,11 @@ function handLabel(side){
   const n=pose.nonThumb;
   if(activeMode==='S'){const pads=side==='R'?R_PADS:L_PADS;return n>=1&&n<=4?pads[n-1].toUpperCase():''}
   if(activeMode==='PAT'){const base=side==='R'?0:4;return n>=1&&n<=4?'PAT '+(n+base):''}
-  if(activeMode==='P')return side==='R'?'303 NOTE':'ENV/REV';
+  if(activeMode==='P'){
+    if(n>=1&&n<=4)return noteName(BASS_NOTES[n-1]);
+    if(pose.openPalm){const p=PIANO_PRESETS[curPianoPreset]||PIANO_PRESETS[0];return p.name+' NEXT'}
+    return '303';
+  }
   if(activeMode==='FX')return side==='R'?(fxResetHoldStart?'HOLD RESET':'FILTER/RESO'):'RVB/DLY';
   return'';
 }

@@ -31,7 +31,7 @@ const SampleEditor = (() => {
   };
 
   // Constantes
-  const DAISY_MAX_BYTES = 2 * 1024 * 1024;   // 2MB
+  const DAISY_MAX_BYTES = 8 * 1024 * 1024;   // 8MB
   const DAISY_PADS = 24;
   const DAISY_TOTAL_BYTES = DAISY_MAX_BYTES * DAISY_PADS;
 
